@@ -111,6 +111,40 @@ export const MOTORS: Record<string, MotorSpec> = {
     source: 'openelab.io/products/myactuator-rmd-x15-p20-actuator: 145/450 N·m, 108 rpm, 3.5 kg, 72 V (the 450 N·m class EngineAI quotes for the T800)',
   },
 
+  // ---------------------------------------------------------------- fast high-torque leg drives
+  // The 20:1 planetaries above cap a kick near half human speed: a head kick swings the knee at
+  // ~22 rad/s (CMU 135_07), the X15 turns 11.3 and the X12 13.1. The CubeMars AKE90-8 KV35 is a
+  // real 8:1 QDD with nearly the X15's torque per kg (121 vs 129 N·m/kg) at twice its speed.
+  // One module is too small for an 80-105 kg leg, so the big joints stack 2-3 of them in parallel
+  // on one output (one each side of the joint, a shared splined output ring). Derived numbers:
+  //  · torque   n × 170 N·m × 0.95: parallel drives share load imperfectly (each has 9 arcmin of
+  //             backlash and its own current loop), so 5% is left on the table (our assumption);
+  //  · speed    unchanged, 210 rpm = 22.0 rad/s (parallel modules turn together);
+  //  · mass     n × 1.40 kg + 0.10 kg per added module for the coupling ring (our estimate);
+  //  · thermal  as the modules above: heat capacity ~340 J/K per kg, one module 0.9 K/W (the RS04's
+  //             class at the same mass), copper loss at stall set so holding the 55 N·m rated torque
+  //             sits 100 K over ambient: 100 / (0.9 × (55/170)²) = 1060 W (cross-check: 72 A peak
+  //             through the published 0.164 Ω line-line winding is 850-1280 W). n modules in
+  //             parallel: n × heat capacity, 1/n × thermal resistance, n × copper loss.
+  'qdd.ake90': {
+    id: 'qdd.ake90', name: 'CubeMars AKE90-8 KV35 QDD (8:1)', kind: 'electric',
+    stallTorqueNm: 170, noLoadSpeedRadS: (210 * 2 * Math.PI) / 60, massKg: 1.4,
+    heatCapacityJPerK: 476, thermalResistanceKPerW: 0.9, maxTempC: 120, copperLossAtStallW: 1060,
+    source: 'cubemars.com/product/ake90-8-kv35-quasi-direct-drive-actuator.html: 55/170 N·m, 210 rpm no-load, 1400 g, 8:1, 48 V, 72 A peak',
+  },
+  'qdd.ake90x2': {
+    id: 'qdd.ake90x2', name: '2 × CubeMars AKE90-8 in parallel', kind: 'electric',
+    stallTorqueNm: 2 * 170 * 0.95, noLoadSpeedRadS: (210 * 2 * Math.PI) / 60, massKg: 2 * 1.4 + 0.1,
+    heatCapacityJPerK: 2 * 476, thermalResistanceKPerW: 0.9 / 2, maxTempC: 120, copperLossAtStallW: 2 * 1060,
+    source: 'Stack: two CubeMars AKE90-8 KV35 (cubemars.com/product/ake90-8-kv35-quasi-direct-drive-actuator.html, 170 N·m, 210 rpm, 1.4 kg) on one output; 2 × 170 × 0.95 load share = 323 N·m, 22.0 rad/s, 2.9 kg with coupling',
+  },
+  'qdd.ake90x3': {
+    id: 'qdd.ake90x3', name: '3 × CubeMars AKE90-8 in parallel', kind: 'electric',
+    stallTorqueNm: 3 * 170 * 0.95, noLoadSpeedRadS: (210 * 2 * Math.PI) / 60, massKg: 3 * 1.4 + 0.2,
+    heatCapacityJPerK: 3 * 476, thermalResistanceKPerW: 0.9 / 3, maxTempC: 120, copperLossAtStallW: 3 * 1060,
+    source: 'Stack: three CubeMars AKE90-8 KV35 (cubemars.com/product/ake90-8-kv35-quasi-direct-drive-actuator.html, 170 N·m, 210 rpm, 1.4 kg) on one output; 3 × 170 × 0.95 load share = 485 N·m, 22.0 rad/s, 4.4 kg with coupling',
+  },
+
   'hyd.cyl50': {
     id: 'hyd.cyl50', name: '50 mm bore hydraulic cylinder @ 210 bar', kind: 'hydraulic',
     // 41 kN at the rod through an ~0.12 m lever arm ≈ 4.9 kN·m; derated to a controllable 1.4 kN·m

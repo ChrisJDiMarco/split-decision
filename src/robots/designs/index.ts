@@ -55,13 +55,13 @@ const SAVATE_PROPORTIONS = { legs: 1.04, arms: 1.06, torso: 0.96 };
 export const SAVATE = buildHumanoid({
   id: 'savate',
   name: 'SAVATE',
-  tagline: 'A 450 N·m kickboxer. The shins are the weapon.',
+  tagline: 'Twin-drive legs, 22 rad/s at the knee. The shins are the weapon.',
   scale: scaleForHeight(1.73, SAVATE_PROPORTIONS),
   bulk: 0.92,
   proportions: SAVATE_PROPORTIONS,
   armor: 'polycarb',
   frame: 'al7075',
-  motors: { leg: 'plan.x12', knee: 'plan.x15', arm: 'qdd.rs04', elbow: 'qdd.rs03', waist: 'qdd.rs04', neck: 'servo.neck' },
+  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs04', elbow: 'qdd.rs03', waist: 'qdd.rs04', neck: 'servo.neck' },
   fist: 'block',
   head: 'slit',
   gyro: { maxTorqueNm: 140, momentumNms: 49, massKg: 6.5 }, // mgh ≈ 695 N·m: 0.2·mgh
@@ -74,7 +74,7 @@ export const SAVATE = buildHumanoid({
   palette: { primary: '#3d1f4f', secondary: '#b9bcc0', accent: '#e9e2d0', finish: 'satin' },
   weightClass: 'middle',
   era: 'modern',
-  shell: { armorMm: 3, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 205, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
+  shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 140, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
 });
 
 const HAYMAKER_PROPORTIONS = { shoulders: 1.03, legs: 0.97, arms: 1.04, head: 0.95 };
@@ -87,7 +87,7 @@ export const HAYMAKER = buildHumanoid({
   proportions: HAYMAKER_PROPORTIONS,
   armor: 'uhmw',
   frame: 'al7075',
-  motors: { leg: 'plan.x12', knee: 'plan.x15', arm: 'qdd.rs04', elbow: 'qdd.rs04', waist: 'plan.x12', neck: 'servo.neck' },
+  motors: { leg: 'plan.x12', knee: 'qdd.ake90x3', arm: 'qdd.rs04', elbow: 'qdd.rs04', waist: 'plan.x12', neck: 'servo.neck' },
   fist: 'block',
   head: 'slit',
   gyro: { maxTorqueNm: 195, momentumNms: 68, massKg: 9.1 }, // mgh ≈ 950 N·m: 0.2·mgh, the biggest core
@@ -115,7 +115,7 @@ export const PYLON = buildHumanoid({
   proportions: PYLON_PROPORTIONS,
   armor: 'carbon',
   frame: 'al7075',
-  motors: { leg: 'plan.x12', knee: 'plan.x12', arm: 'qdd.rs03', elbow: 'qdd.rs06', waist: 'qdd.rs04', neck: 'qdd.rs00' },
+  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs03', elbow: 'qdd.rs06', waist: 'qdd.rs04', neck: 'qdd.rs00' },
   fist: 'block',
   head: 'twin',
   gyro: { maxTorqueNm: 150, momentumNms: 51, massKg: 6.8 }, // mgh ≈ 745 N·m: 0.2·mgh (it saturates first: narrow hips, high COM)
@@ -128,7 +128,7 @@ export const PYLON = buildHumanoid({
   palette: { primary: '#c6f000', secondary: '#1c1d1f', accent: '#c9ccd1', finish: 'satin' },
   weightClass: 'middle',
   era: 'modern',
-  shell: { armorMm: 3, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 250, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
+  shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 120, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
 });
 
 // ---------------------------------------------------------------- iron age (hydraulic heavyweights)
