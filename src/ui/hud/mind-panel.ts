@@ -1,0 +1,71 @@
+// JEV MIND panel: the fighter's live tactic distribution (top 5), chosen target, the READ
+// on the opponent, aggression and latency, with a HOUSE MIND badge on fallback.
+import { h, meter, setFill, setText, toggleClass } from '../dom';
+import { tacticLabel, topTactics, type MindView } from '../minds';
+
+const ROWS = 5;
+
+interface Row { el: HTMLElement; name: HTMLElement; fill: HTMLElement; p: HTMLElement }
+
+export class MindPanel {
+  readonly el: HTMLElement;
+  private rows: Row[] = [];
+  private target: HTMLElement;
+  private latency: HTMLElement;
+  private reason: HTMLElement;
+  private read = meter('READ · COMMITTING', 'read');
+  private aggression = meter('AGGRESSION');
+  private lastKey = '';
+
+  constructor() {
+    this.latency = h('span', 'chip latency', '— ms');
+    const head = h('div', 'panel-head',
+      h('div', 'panel-title', 'JEV ', h('em', {}, 'MIND')),
+      h('div', {}, this.latency, h('span', 'badge-offline', 'JEV OFFLINE · HOUSE MIND')),
+    );
+    const list = h('div', 'tactics');
+    for (let i = 0; i < ROWS; i++) {
+      const name = h('span', 'tactic-name', '—');
+      const fill = h('i', 'bar-fill');
+      const p = h('span', 'tactic-p', '');
+      const el = h('div', 'tactic empty', name, h('div', 'bar', fill), p);
+      list.append(el);
+      this.rows.push({ el, name, fill, p });
+    }
+    this.target = h('b', {}, '—');
+    this.reason = h('div', 'mind-reason', '');
+    const rows = h('div', 'mind-rows',
+      h('div', 'mind-target', h('span', {}, 'TARGET'), this.target),
+      this.read.el,
+      this.aggression.el,
+      this.reason,
+    );
+    this.el = h('div', 'panel mind', head, list, rows);
+  }
+
+  update(mind: MindView | null): void {
+    toggleClass(this.el, 'waiting', !mind);
+    if (!mind) return;
+    toggleClass(this.el, 'offline', mind.source === 'fallback');
+    const ranked = topTactics(mind.tacticProbs, ROWS);
+    const key = ranked.map((r) => `${r.tactic}:${r.p.toFixed(3)}`).join('|') + mind.tactic;
+    if (key !== this.lastKey) {
+      this.lastKey = key;
+      this.rows.forEach((row, i) => {
+        const r = ranked[i];
+        toggleClass(row.el, 'empty', !r);
+        toggleClass(row.el, 'chosen', !!r && r.tactic === mind.tactic);
+        setText(row.name, r ? tacticLabel(r.tactic) : '—');
+        setText(row.p, r ? `${Math.round(r.p * 100)}` : '');
+        setFill(row.fill, r ? r.p : 0);
+      });
+    }
+    setText(this.target, mind.target.replace(/_/g, ' '));
+    const commit = mind.oppCommit;
+    this.read.set(commit ?? 0, commit === null ? '—' : `${Math.round(commit * 100)}%`);
+    this.aggression.set(mind.aggression);
+    const src = mind.source === 'local' ? 'LOCAL RULE' : mind.source === 'jev' ? 'JEV' : 'HOUSE';
+    setText(this.latency, mind.latencyMs === null ? src : `${src} · ${Math.round(mind.latencyMs)} ms`);
+    setText(this.reason, mind.reason ? `${mind.mode ? mind.mode.toUpperCase() + ' · ' : ''}${mind.reason}` : '');
+  }
+}

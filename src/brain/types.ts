@@ -1,0 +1,65 @@
+// Types shared inside the brain module and exposed to the HUD.
+import type { RobotTelemetry, SimEvent, Tactic, TargetZone } from '../core/protocol';
+
+/** Where a decision came from. 'local' = an obvious tick settled by a code rule, no Jev call. */
+export type DecisionSource = 'jev' | 'local' | 'fallback';
+
+/** How firmly the fighter commits, from Jev's confidence in the tactic. */
+export type CommitMode = 'commit' | 'probe' | 'guard';
+
+export type DistanceBand = 'clinch' | 'striking range' | 'just outside reach' | 'mid range' | 'far';
+
+export type OpponentPhaseClass = 'down' | 'windup' | 'striking' | 'staggered' | 'neutral';
+
+/** The subset of a worker frame the brain reads. */
+export interface BrainFrame {
+  tick: number;
+  time: number; // sim seconds
+  events: SimEvent[];
+  telemetry: [RobotTelemetry, RobotTelemetry];
+}
+
+/** Match clock, supplied by whoever runs rounds. The brain assumes round 1 of 3 otherwise. */
+export interface MatchClock {
+  round: number;
+  rounds: number;
+  remainingS: number;
+}
+
+/** Everything the HUD needs to draw one decision. */
+export interface BrainDecision {
+  tick: number; // sim tick the state was captured at (the intent's issuedAtTick)
+  time: number; // sim seconds at capture
+  source: DecisionSource;
+  mode: CommitMode;
+  tactic: Tactic;
+  target: TargetZone;
+  aggression: number; // 0..1, after gating
+  counterIfLunge: Tactic | undefined;
+  confidence: number; // Jev's confidence in the tactic question (1 for local rules)
+  tacticProbs: Record<string, number>; // Jev's raw distribution (or the rule's pseudo distribution)
+  targetProbs: Record<string, number>;
+  oppCommit: number | null; // P(opponent commits within 0.5 s)
+  winning: number | null; // 0 opponent clearly .. 1 you clearly
+  latencyMs: number | null; // wall ms for the Jev round trip
+  reason: string; // short human-readable why (rule name, "hysteresis kept guard", ...)
+  trigger: string; // 'cadence', 'stale', or the interrupt that forced the query ('big_hit', 'opp_windup', ...)
+}
+
+export interface LatencySummary { n: number; mean: number; p50: number; p90: number; p99: number; max: number }
+
+export interface BrainStats {
+  requests: number;
+  answered: number;
+  errors: number;
+  droppedStale: number; // coarse state changed while in flight
+  droppedSuperseded: number; // a newer answer was already applied
+  settledLocal: number;
+  fallbackDecisions: number;
+  inFlight: number;
+  latency: LatencySummary;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export type JevStatus = 'unknown' | 'online' | 'offline';

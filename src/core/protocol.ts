@@ -20,6 +20,8 @@ export interface Intent {
   counterIfLunge?: Tactic; // pre-armed reflex, fires without a round trip
   confidence: number; // Jev's confidence in the tactic, 0..1
   source: 'jev' | 'fallback';
+  /** True when a code rule settled an obvious tick (down, far apart) without asking Jev. */
+  settledLocally?: boolean;
 }
 
 // ---------------------------------------------------------------- body → world
@@ -117,5 +119,6 @@ export type WorkerToMain =
       events: SimEvent[];
       telemetry: [RobotTelemetry, RobotTelemetry];
       stepMs: number; // average wall time per physics step, for the perf HUD
+      blowups?: number; // physics divergences rolled back to the last keyframe
     }
   | { type: 'error'; message: string };

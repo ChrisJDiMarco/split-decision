@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@mujoco/mujoco": "3.14.0",
-    "three": "0.184.0"
+    "three": "0.184.0",
+    "threejs-particle-fluids": "0.2.0"
   },
   "devDependencies": {
     "@types/node": "26.6.3",

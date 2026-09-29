@@ -8,6 +8,7 @@
 import type { SimSystem } from '../sim-context';
 import { intentSystem } from './intents';
 import { motorSystem } from './motors';
-import { stanceSystem } from './stance';
+import { controlSystem } from '../control';
+import { damageSystem } from '../damage';
 
-export const SYSTEMS: readonly SimSystem[] = [intentSystem, stanceSystem, motorSystem];
+export const SYSTEMS: readonly SimSystem[] = [intentSystem, controlSystem, motorSystem, damageSystem];

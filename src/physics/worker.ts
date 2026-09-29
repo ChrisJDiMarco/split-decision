@@ -12,6 +12,8 @@ import { compileWorld } from './world';
 
 const FRAME_INTERVAL_MS = 1000 / 60;
 const MAX_STEPS_PER_SLICE = 60; // don't spiral if the machine falls behind: drop time instead
+const KEYFRAME_EVERY_STEPS = 100;
+const BLOWUP_QVEL = 400; // rad/s or m/s: no real joint or body gets near this
 
 let mj: Awaited<ReturnType<typeof loadMujoco>> | null = null;
 let ctx: SimContext | null = null;
@@ -23,6 +25,9 @@ let lastWall = 0;
 let lastFrame = 0;
 let stepMsAvg = 0;
 let loopHandle: ReturnType<typeof setTimeout> | null = null;
+let keyframe: Float64Array | null = null;
+let keyBuf: { GetView(): Float64Array; delete(): void } | null = null;
+let blowups = 0;
 
 const post = (msg: WorkerToMain, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(msg, transfer);
 
@@ -40,12 +45,40 @@ function meta(c: SimContext): WorldMeta {
   };
 }
 
+function integrationSpec(c: SimContext): number {
+  return c.mj.mjtState.mjSTATE_INTEGRATION.value;
+}
+
+function saveKeyframe(c: SimContext) {
+  const spec = integrationSpec(c);
+  keyBuf ??= new c.mj.DoubleBuffer(c.mj.mj_stateSize(c.model, spec));
+  c.mj.mj_getState(c.model, c.data, keyBuf, spec);
+  keyframe = Float64Array.from(keyBuf!.GetView());
+}
+
+/** MuJoCo can still diverge in a violent pile-up. Roll back rather than feed garbage to damage. */
+function exploded(c: SimContext): boolean {
+  const qvel = c.data.qvel;
+  for (let i = 0; i < c.model.nv; i++) {
+    const v = qvel[i];
+    if (!(Math.abs(v) < BLOWUP_QVEL)) return true; // also catches NaN
+  }
+  return false;
+}
+
 function stepOnce(c: SimContext) {
   for (const s of SYSTEMS) s.pre?.(c);
   c.mj.mj_step(c.model, c.data);
   c.tick++;
   c.time += c.dt;
+  if (exploded(c) && keyframe) {
+    blowups++;
+    c.mj.mj_setState(c.model, c.data, Array.from(keyframe), integrationSpec(c));
+    c.mj.mj_forward(c.model, c.data);
+    return;
+  }
   for (const s of SYSTEMS) s.post?.(c);
+  if (c.tick % KEYFRAME_EVERY_STEPS === 0) saveKeyframe(c);
 }
 
 function sendFrame(c: SimContext) {
@@ -72,6 +105,7 @@ function sendFrame(c: SimContext) {
     events,
     telemetry: [buildTelemetry(c, c.robots[0], SYSTEMS), buildTelemetry(c, c.robots[1], SYSTEMS)],
     stepMs: stepMsAvg,
+    blowups,
   }, [poses.buffer]);
 }
 
@@ -105,10 +139,17 @@ async function init(s: MatchSetup) {
     ctx.data.delete();
     ctx.model.delete();
   }
+  keyBuf?.delete();
+  keyBuf = null;
+  keyframe = null;
+  blowups = 0;
+  paused = false;
+  timescale = 1;
   setup = s;
   const world = compileWorld(s);
   ctx = buildContext(mj, world, s);
   for (const sys of SYSTEMS) sys.init?.(ctx);
+  saveKeyframe(ctx);
   post({ type: 'ready', meta: meta(ctx) });
   lastWall = performance.now();
   simDebtS = 0;

@@ -10,6 +10,8 @@ import type { SimContext, SimSystem, JointRuntime, RobotRuntime } from '../sim-c
 const AMBIENT_C = 28;
 const DERATE_BAND_C = 20;
 const MIN_TORQUE_FRAC = 0.02; // a dead joint still has gearbox drag
+const SLOP_RESAMPLE_S = 0.045; // worn gear lash wanders, it doesn't buzz
+const SLOP_TAU_S = 0.03;
 
 export function jointStateFor(health: number): JointRuntime['state'] {
   if (health <= 0.05) return 'limp';
@@ -29,6 +31,18 @@ function pressureFactor(r: RobotRuntime, j: JointRuntime): number {
   return r.hydraulics.get(j.hydraulicCircuit)?.pressure ?? 1;
 }
 
+function backlash(ctx: SimContext, j: JointRuntime): number {
+  if (j.slop <= 0) return 0;
+  j.slopTimer = (j.slopTimer ?? 0) - ctx.dt;
+  if (j.slopTimer <= 0) {
+    j.slopGoal = (ctx.rng() - 0.5) * j.slop;
+    j.slopTimer = SLOP_RESAMPLE_S * (0.5 + ctx.rng());
+  }
+  const offset = j.slopOffset ?? 0;
+  j.slopOffset = offset + ((j.slopGoal ?? 0) - offset) * Math.min(1, ctx.dt / SLOP_TAU_S);
+  return j.slopOffset;
+}
+
 export const motorSystem: SimSystem = {
   name: 'motors',
   pre(ctx: SimContext) {
@@ -40,8 +54,13 @@ export const motorSystem: SimSystem = {
       let draw = 0;
       for (let i = 0; i < r.joints.length; i++) {
         const j = r.joints[i];
-        const omega = Math.abs(data.qvel[j.dadr]);
-        const speedFactor = Math.max(0, 1 - omega / j.motor.noLoadSpeedRadS);
+        const qdot = data.qvel[j.dadr];
+        const omega = Math.abs(qdot);
+        // Back-EMF only limits a motor that drives along its velocity. When the servo is braking
+        // (commanded torque opposes motion, e.g. a collapsing knee) full torque is available.
+        const tauCmd = j.kp * (r.targets[i] - data.qpos[j.qadr]) - j.kd * qdot;
+        const braking = tauCmd * qdot < 0;
+        const speedFactor = braking ? 1 : Math.max(0, 1 - omega / j.motor.noLoadSpeedRadS);
         const healthFactor = j.state === 'limp' ? 0 : 0.25 + 0.75 * j.health;
         const avail = j.motor.stallTorqueNm * Math.max(
           MIN_TORQUE_FRAC,
@@ -57,9 +76,13 @@ export const motorSystem: SimSystem = {
         biasprm[j.act * 10 + 1] = -j.kp * kpScale;
         biasprm[j.act * 10 + 2] = -j.kd * (j.state === 'limp' ? 0.15 : 1);
 
-        // Damaged gear trains: dead band + jitter on the commanded position.
-        const jitter = j.slop > 0 ? (ctx.rng() - 0.5) * j.slop : 0;
-        data.ctrl[j.act] = r.targets[i] + jitter;
+        // A seized gearbox locks where it jammed; worn gears wander within their lash.
+        if (j.state === 'seized') {
+          j.seizedAt ??= data.qpos[j.qadr];
+          data.ctrl[j.act] = j.seizedAt;
+        } else {
+          data.ctrl[j.act] = r.targets[i] + backlash(ctx, j);
+        }
 
         // Thermal: copper loss from the torque actually delivered.
         const tau = Math.abs(data.actuator_force[j.act]);

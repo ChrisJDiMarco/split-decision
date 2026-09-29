@@ -23,6 +23,10 @@ export interface JointRuntime {
   tempC: number;
   availableTorque: number; // after speed, heat, damage, pressure
   slop: number; // radians of backlash added by damage
+  seizedAt?: number; // joint angle the gearbox locked at (state 'seized')
+  slopOffset?: number; // current backlash wander, radians
+  slopGoal?: number; // where the wander is drifting to
+  slopTimer?: number; // seconds until a new wander goal
 }
 
 export interface PartRuntime {

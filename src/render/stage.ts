@@ -13,9 +13,32 @@ export interface Stage {
   render(): void;
 }
 
-export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
+export interface StageOptions {
+  /** GPU limits some effects need (the PBF oil fluid). Falls back to defaults if the device refuses. */
+  requiredLimits?: Record<string, number>;
+  /** MSAA on the canvas. Off when a post-processing pipeline does the final pass. */
+  antialias?: boolean;
+}
+
+async function makeRenderer(canvas: HTMLCanvasElement, opts: StageOptions): Promise<THREE.WebGPURenderer> {
+  const base = { canvas, antialias: opts.antialias ?? true };
+  if (opts.requiredLimits) {
+    const renderer = new THREE.WebGPURenderer({ ...base, requiredLimits: opts.requiredLimits });
+    try {
+      await renderer.init();
+      return renderer;
+    } catch (err) {
+      console.warn('[stage] GPU refused the requested limits; effects that need them fall back', err);
+      renderer.dispose();
+    }
+  }
+  const renderer = new THREE.WebGPURenderer(base);
   await renderer.init();
+  return renderer;
+}
+
+export async function createStage(canvas: HTMLCanvasElement, opts: StageOptions = {}): Promise<Stage> {
+  const renderer = await makeRenderer(canvas, opts);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;

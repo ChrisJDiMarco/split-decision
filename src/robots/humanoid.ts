@@ -1,7 +1,7 @@
 // Parametric humanoid fighter. Local frame: x forward, y left, z up.
 // Limbs hang along -z in the zero pose; joint signs follow MuJoCo's right-hand rule:
 //   hinge about +y with a negative angle swings a hanging limb forward (+x).
-import type { GeomRole, JointDef, MaterialId, PartDef, PartTag, RobotDesign, Vec3 } from '../core/types';
+import type { GeomRole, HydraulicCircuit, JointDef, MaterialId, PartDef, PartTag, RobotDesign, Vec3 } from '../core/types';
 import { motor } from './catalog';
 
 export interface HumanoidSpec {
@@ -17,6 +17,8 @@ export interface HumanoidSpec {
   head: 'visor' | 'dome' | 'slit' | 'twin';
   gyro: { maxTorqueNm: number; momentumNms: number; massKg: number } | null;
   hydraulicArms: boolean;
+  /** Legs and waist driven off one hydraulic circuit ('legs'): puncture a thigh or shin and they sag. */
+  hydraulicLegs?: boolean;
   headBreakImpulseNs: number;
   eyeColor: string;
   abilities: RobotDesign['abilities'];
@@ -24,10 +26,15 @@ export interface HumanoidSpec {
 }
 
 const DEG = Math.PI / 180;
+/** Position servos reach stall torque at this error (~4°): stiff enough to swing a heavy leg
+ *  precisely; kv damping scales with kp and is integrated implicitly by MuJoCo. */
+const SERVO_FULL_TORQUE_ERROR_RAD = 0.07;
+/** Ankles press the sole against the canvas: stiffer than this and they chatter on contact. */
+const ANKLE_FULL_TORQUE_ERROR_RAD = 0.1;
 
-function hinge(name: string, axis: Vec3, rangeDeg: [number, number], motorId: string, extra: Partial<JointDef> = {}): JointDef {
+function hinge(name: string, axis: Vec3, rangeDeg: [number, number], motorId: string, extra: Partial<JointDef> = {}, fullTorqueErrorRad = SERVO_FULL_TORQUE_ERROR_RAD): JointDef {
   const spec = motor(motorId);
-  const kp = spec.stallTorqueNm / 0.3; // full torque at ~17° of error
+  const kp = spec.stallTorqueNm / fullTorqueErrorRad;
   return {
     name, type: 'hinge', axis, rangeDeg, motor: motorId,
     kp, kd: kp * 0.045,
@@ -65,6 +72,10 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
   };
   const rootHeight = L.thigh + L.shin + 2 * L.footHalf[2] + L.pelvisHalf[2] + 0.04 * k;
   const role = (r: GeomRole) => r;
+  // Only joints actually driven by a hydraulic actuator hang off the leg circuit.
+  const onLegCircuit = (motorId: string): Partial<JointDef> =>
+    spec.hydraulicLegs && motor(motorId).kind === 'hydraulic' ? { hydraulicCircuit: 'legs' } : {};
+  const legTags: PartTag[] = spec.hydraulicLegs ? ['hydraulic'] : [];
   const parts: PartDef[] = [];
 
   parts.push({
@@ -78,8 +89,9 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
   parts.push({
     id: 'torso', parent: 'pelvis', pos: [0, 0, L.pelvisHalf[2]], tags: torsoTags, hp: 1400,
     joints: [
-      hinge('waist_yaw', [0, 0, 1], [-70, 70], spec.motors.waist),
-      hinge('waist_pitch', [0, 1, 0], [-25, 35], spec.motors.waist),
+      hinge('waist_yaw', [0, 0, 1], [-70, 70], spec.motors.waist, onLegCircuit(spec.motors.waist)),
+      // Deep forward fold: getting up off the canvas needs knees to chest and a torso over the feet.
+      hinge('waist_pitch', [0, 1, 0], [-25, 50], spec.motors.waist, onLegCircuit(spec.motors.waist)),
     ],
     geoms: [
       { shape: { type: 'box', halfSize: L.torsoHalf }, pos: [0, 0, L.torsoCenterZ], material: spec.armor, role: 'armor' },
@@ -93,7 +105,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     joints: [hinge('neck_yaw', [0, 0, 1], [-80, 80], spec.motors.neck)],
     geoms: [{ shape: { type: 'box', halfSize: L.headHalf }, pos: [0, 0, L.headHalf[2]], material: spec.armor, role: 'sensor' }],
     visual: { kit: `head.${spec.head}` },
-    detachable: { impulseNs: spec.headBreakImpulseNs, damage: 260 },
+    detachable: { impulseNs: spec.headBreakImpulseNs, damage: 150 },
     smokePoint: [0, 0, L.headHalf[2] * 2],
   });
 
@@ -123,28 +135,30 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
       visual: { kit: `fist.${spec.fist}` },
     });
     parts.push({
-      id: `thigh_${tag}`, parent: 'pelvis', pos: [0, s * L.hipY, -L.pelvisHalf[2]], tags: ['thigh', t], hp: 700,
+      id: `thigh_${tag}`, parent: 'pelvis', pos: [0, s * L.hipY, -L.pelvisHalf[2]], tags: ['thigh', t, ...legTags], hp: 700,
       joints: [
-        hinge(`hip_yaw_${tag}`, [0, 0, 1], [-40, 40], spec.motors.leg),
-        hinge(`hip_roll_${tag}`, [1, 0, 0], tag === 'l' ? [-20, 45] : [-45, 20], spec.motors.leg),
-        hinge(`hip_pitch_${tag}`, [0, 1, 0], [-120, 35], spec.motors.leg),
+        hinge(`hip_yaw_${tag}`, [0, 0, 1], [-40, 40], spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_roll_${tag}`, [1, 0, 0], tag === 'l' ? [-20, 45] : [-45, 20], spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_pitch_${tag}`, [0, 1, 0], [-135, 35], spec.motors.leg, onLegCircuit(spec.motors.leg)),
       ],
       geoms: [{ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -L.thigh], radius: L.legR * 1.15 }, material: spec.frame, role: 'structure' }],
       visual: { kit: 'leg.thigh' },
       smokePoint: [0, 0, -L.thigh * 0.2],
     });
     parts.push({
-      id: `shin_${tag}`, parent: `thigh_${tag}`, pos: [0, 0, -L.thigh], tags: ['shin', t], hp: 650,
-      joints: [hinge(`knee_${tag}`, [0, 1, 0], [0, 150], spec.motors.knee)],
-      geoms: [{ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -L.shin], radius: L.legR }, material: spec.armor, role: 'armor' }],
+      id: `shin_${tag}`, parent: `thigh_${tag}`, pos: [0, 0, -L.thigh], tags: ['shin', t, ...legTags], hp: 650,
+      joints: [hinge(`knee_${tag}`, [0, 1, 0], [0, 150], spec.motors.knee, onLegCircuit(spec.motors.knee))],
+      // The capsule stops one radius short of the ankle so its end cap never reaches below the
+      // sole: a heavy biped must stand on its feet, not on its ankle balls.
+      geoms: [{ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -(L.shin - L.legR)], radius: L.legR }, material: spec.armor, role: 'armor' }],
       visual: { kit: 'leg.shin' },
       smokePoint: [0, 0, -0.05],
     });
     parts.push({
       id: `foot_${tag}`, parent: `shin_${tag}`, pos: [0, 0, -L.shin], tags: ['foot', t], hp: 600,
       joints: [
-        hinge(`ankle_pitch_${tag}`, [0, 1, 0], [-50, 45], spec.motors.leg),
-        hinge(`ankle_roll_${tag}`, [1, 0, 0], [-30, 30], spec.motors.leg),
+        hinge(`ankle_pitch_${tag}`, [0, 1, 0], [-60, 45], spec.motors.leg, onLegCircuit(spec.motors.leg), ANKLE_FULL_TORQUE_ERROR_RAD),
+        hinge(`ankle_roll_${tag}`, [1, 0, 0], [-30, 30], spec.motors.leg, onLegCircuit(spec.motors.leg), ANKLE_FULL_TORQUE_ERROR_RAD),
       ],
       geoms: [{ shape: { type: 'box', halfSize: L.footHalf }, pos: [L.footHalf[0] * 0.35, 0, -L.footHalf[2] - 0.02 * k], material: 'rubber', role: 'foot' }],
       visual: { kit: 'leg.foot' },
@@ -176,9 +190,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     tagline: spec.tagline,
     bodyType: 'biped',
     parts,
-    hydraulics: spec.hydraulicArms
-      ? [{ id: 'arms', pressureBar: 210, reservoirL: 6, leakLPerSAtFullDamage: 0.35, parts: ['forearm_l', 'forearm_r'] }]
-      : undefined,
+    hydraulics: hydraulicCircuits(spec),
     gyro: spec.gyro ? { part: 'torso', ...spec.gyro, powerW: spec.gyro.maxTorqueNm * 4 } : undefined,
     abilities: spec.abilities,
     stance,
@@ -186,6 +198,13 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     defaultSkin: spec.defaultSkin,
     eyeColor: spec.eyeColor,
   };
+}
+
+function hydraulicCircuits(spec: HumanoidSpec): HydraulicCircuit[] | undefined {
+  const out: HydraulicCircuit[] = [];
+  if (spec.hydraulicArms) out.push({ id: 'arms', pressureBar: 210, reservoirL: 6, leakLPerSAtFullDamage: 0.35, parts: ['forearm_l', 'forearm_r'] });
+  if (spec.hydraulicLegs) out.push({ id: 'legs', pressureBar: 210, reservoirL: 14, leakLPerSAtFullDamage: 0.5, parts: ['thigh_l', 'thigh_r', 'shin_l', 'shin_r'] });
+  return out.length ? out : undefined;
 }
 
 export const DEG_TO_RAD = DEG;

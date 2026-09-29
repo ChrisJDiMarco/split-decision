@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brain Harness</title>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <style>
+      :root { --ink: #f2efe8; --dim: #8d8a84; --panel: #0e0f12; --line: rgba(255, 255, 255, 0.08); --red: #e0452b; --blue: #2f7bff; --gold: #ffc23d; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #050506; color: var(--ink); font: 13px/1.4 'JetBrains Mono', monospace; }
+      header { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+      header h1 { font: 800 20px 'Barlow Condensed', sans-serif; letter-spacing: 0.06em; margin: 0; }
+      #mode { font: 700 13px 'Barlow Condensed', sans-serif; letter-spacing: 0.1em; color: var(--gold); }
+      #status { color: var(--dim); flex: 1; }
+      button { background: #1c1d21; color: var(--ink); border: 1px solid var(--line); padding: 4px 10px; font: inherit; cursor: pointer; }
+      main { display: grid; grid-template-columns: 1fr minmax(280px, 520px) 1fr; gap: 12px; padding: 12px; }
+      #arena { width: 100%; aspect-ratio: 1; display: block; }
+      .mind { background: var(--panel); border: 1px solid var(--line); padding: 12px; min-height: 520px; }
+      .name { font: 800 26px 'Barlow Condensed', sans-serif; letter-spacing: 0.05em; }
+      .badge { display: inline-block; font: 700 12px 'Barlow Condensed', sans-serif; letter-spacing: 0.1em; padding: 2px 6px; background: #22242a; margin: 4px 0 8px; }
+      .badge.jev { background: #173a24; color: #7ef0a4; }
+      .badge.local { background: #2a2a18; color: #f0e27e; }
+      .badge.fallback { background: #3a1717; color: #ff8d7e; }
+      .tactic { font: 800 34px 'Barlow Condensed', sans-serif; text-transform: uppercase; line-height: 1; margin-bottom: 6px; }
+      .row { margin: 4px 0; }
+      .row b { color: var(--ink); font-weight: 600; }
+      .dim { color: var(--dim); }
+      .bars { margin: 10px 0; }
+      .bar { position: relative; display: grid; grid-template-columns: minmax(0, 7fr) minmax(40px, 6fr) 36px; align-items: center; gap: 6px; height: 20px; color: var(--dim); }
+      .bar span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      .bar i { display: block; height: 8px; min-width: 2px; background: #3a3c42; }
+      .bar.on { color: var(--ink); }
+      .bar.on i { background: var(--gold); }
+      .bar b { text-align: right; font-weight: 400; }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>BRAIN HARNESS</h1>
+      <span id="mode"></span>
+      <span id="status"></span>
+      <label><input type="checkbox" id="live" /> Live Jev</label>
+      <button id="restart">Restart</button>
+    </header>
+    <main>
+      <section class="mind" id="mind0"></section>
+      <canvas id="arena"></canvas>
+      <section class="mind" id="mind1"></section>
+    </main>
+    <script type="module" src="/src/harness/brain.ts"></script>
+  </body>
+</html>
