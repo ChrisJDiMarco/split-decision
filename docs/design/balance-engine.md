@@ -320,6 +320,15 @@ Add these to `tools/fight-metrics.ts`, with self-falls split by activity, and ex
 - Phase 4, reactions: absorb, recover, brace and catch, the arm arbiter, the pre-brace. Gate: median ≤ 2 recovery steps, brace before contact in ≥ 90% of falls, head first in ≤ 10%.
 - Phase 5, mocap footwork on the plan: contact sync, a small motion-matching pick of the next clip segment at each lift-off, take-off planning for flashy moves. Offline SAMCON-style repair of flashy moves is optional, and Chris decides whether it counts as training.
 
+### Motion matching, the physics way (added 2026-09-29)
+
+Chris flagged a browser motion-matching demo (WebGPU + WASM: per-frame pose search against stick input and a predicted trajectory, inertialized blends, foot locking, motion warping). That is the kinematic half of DReCon; here it feeds the tracker, and physics does the rest:
+
+- **Search (Phase 5).** A feature per library frame: both feet's positions and velocities and the hip velocity in the root frame, plus the root's future position and facing at 0.2, 0.4 and 0.6 s. The query's future comes from the footstep plan and `Intent.move` (Jev or the player's WASD), not a stick. Brute force over ~20k frames at each lift-off is well under 1 ms. Only matches whose footsteps pass `step-adjust` are kept.
+- **Inertialization (pull into Phase 1).** Every switch of servo targets (clip to clip, clip to procedural, strike to guard) decays the old pose's offset and velocity with a critically damped spring over 0.1-0.2 s instead of jumping or crossfading. A target step jolts a position servo straight to stall torque, so this is a balance fix as much as a looks fix.
+- **Foot locking** is free: the contacts are real. The planner's footholds replace the demo's IK lock.
+- **Warping (Phase 3).** Time-warp a strike so its impact frame lands when the target will be in reach, and bend the chain toward the target with the IK already in `ik.ts`, capped so the COM path stays inside the centroid table's margin.
+
 ### First milestone: walk in like a fighter
 
 Build `dcm.ts`, `footsteps.ts` and `step-adjust.ts` (walk beyond 2.4 m, step-drag inside 2.0 m, arrival with the final ξ at the stance centroid); constant pelvis height, a 3-5% L lift and quintic swings; gyro policy v1 (no stiffness terms, damping 0.06·mgh, 50% reserve, bleed only in double support); stance ankles at 0.3 stiffness with full ground-force feed-forward, kept only if the drills improve; a world-locked head; a stance 1.0-1.05 × the hip spacing wide.
