@@ -21,6 +21,38 @@ export interface MindView {
   combo?: readonly string[] | null; // the combination being thrown
   getupStyle?: string; // 'safe' | 'kip_up', while down
   onOpening?: Readonly<Record<string, string | undefined>> | null; // pre-armed reflex: opening → move
+  plan?: MindPlan | null; // the setup → payoff combination running, step by step
+  read?: string | null; // his answer to the last feint, while fresh: 'HE BIT: COVERED HIGH'
+}
+
+/** A setup → payoff plan as the MIND panel shows it (the brain's PlanView). */
+export interface MindPlan {
+  setup: readonly string[]; // 'feint high'
+  payoff: readonly string[]; // 'low kick'
+  payoffZone: string;
+  note: string | null; // 'left knee 40%'
+  step: number;
+  phase: 'setup' | 'payoff';
+  read?: string | null;
+}
+
+/**
+ * "SETUP: FEINT HIGH → PAYOFF: LOW KICK · LEFT KNEE 40%"; a plain combination (no setup) reads
+ * "COMBO: JAB › CROSS › HOOK"; null with no plan.
+ */
+export function planLine(mind: MindView): string | null {
+  const p = mind.plan;
+  if (!p) return null;
+  const up = (xs: readonly string[]) => xs.map((x) => x.toUpperCase()).join(' › ');
+  if (!p.setup.length) return `COMBO: ${up(p.payoff)}`;
+  const where = p.note ? p.note.toUpperCase() : tacticLabel(p.payoffZone);
+  return `SETUP: ${up(p.setup)} → PAYOFF: ${up(p.payoff)} · ${where}`;
+}
+
+/** "READ · HE BIT: COVERED HIGH", or null. */
+export function readLine(mind: MindView): string | null {
+  const r = mind.read ?? mind.plan?.read ?? null;
+  return r ? `READ · ${r}` : null;
 }
 
 /** "OPENING: TURNED AWAY → SPINNING BACK KICK 41%" (or "GAMBLE → ..." with no opening), or null. */

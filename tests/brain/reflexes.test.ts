@@ -254,7 +254,12 @@ describe('injury-aware combos', () => {
     const q = b.calls[0].combo;
     if (q?.type !== 'choice') throw new Error('combo must be a choice');
     for (const id of Object.keys(q.criteria)) expect(id.split('-')).not.toContain('jab');
-    for (const i of b.intents.filter((x) => x.tactic === 'combo')) expect(Object.keys(q.criteria)).toContain(comboId(i.combo!));
+    for (const i of b.intents.filter((x) => x.tactic === 'combo')) {
+      // A setup → payoff pick is keyed by its setup id ('fake_low_go_high'); a plain one by its strikes.
+      if (i.comboPlan) expect(Object.values(q.criteria).some((t) => t?.startsWith('setup:'))).toBe(true);
+      else expect(Object.keys(q.criteria)).toContain(comboId(i.combo!));
+      for (const t of i.combo!) expect(['jab', 'hook']).not.toContain(t);
+    }
     const both = brainWith(sc, { tactic: 'combo' });
     await run(both, sc, 0, 1, { ...me(), ...limp(sc, ['elbow_l', 'elbow_r']), moveRisk: { ...RISK, jumping_knee: 1 } });
     expect(both.calls.every((c) => !c.combo)).toBe(true);

@@ -1,13 +1,14 @@
 // House Mind: the local behavior tree that fights whenever Jev is unreachable, and the
 // "obvious tick" rules that settle a decision without a call even when Jev is online.
 // Deterministic for a given (seed, corner, tick) so fallback fights replay exactly.
-import type { GetupStyle, Opening, Tactic, TargetZone } from '../core/protocol';
+import type { ComboPlan, GetupStyle, Opening, Tactic, TargetZone } from '../core/protocol';
 import { creativeRoll, gambleAppetite, openingMenu, reflexArming, reflexMenu, type MenuItem } from './gambles';
 import { readyCombos } from './limbs';
 import { sampleKip } from './policy';
 import { zoneHealth } from './questions';
 import { mixSeed, rng } from './rng';
 import type { FighterContext, Situation } from './situation';
+import { planOf, setupCombos } from './setups';
 import { designCombos, styleOf } from './style';
 import { abilityTactics, FINISHER_ORDER, isFlashy, isStrike, TACTIC_INFO } from './tactics';
 
@@ -15,6 +16,9 @@ const RULE_STREAM = 7;
 const GAMBLE_STREAM = 8;
 const COMBO_RULE_STREAM = 9;
 const REFLEX_RULE_STREAM = 12;
+const SETUP_RULE_STREAM = 13;
+/** When it throws a combination, a setup → payoff one (if any fits) this often. */
+const HOUSE_SETUP_RATE = 0.55;
 /** House Mind takes an opening move this often (before its risk gate). */
 const HOUSE_TAKE_OPENING = 0.6;
 /** ...if its fall risk is under this times the fighter's appetite (a creative gamble: half that). */
@@ -44,6 +48,7 @@ export interface RuleDecision {
   flourish?: boolean;
   gamble?: { move: Tactic; opening: Opening | null; risk: number | null };
   onOpening?: Partial<Record<Opening, Tactic>>;
+  comboPlan?: ComboPlan;
 }
 
 /** How readily this fighter gambles on a kip-up: its style and temperament at a neutral aggression. */
@@ -199,7 +204,15 @@ function houseTree(fc: FighterContext, s: Situation, seed: number): RuleDecision
   if (s.band === 'striking range') {
     if (s.oppPhase === 'staggered') return pack(finisher(fc), Math.max(agg, 0.85), 'opponent staggered: big shot');
     const combo = houseCombo(fc, s, seed, agg);
-    if (combo) return { ...pack('combo', agg, 'in range: combination', strikeTarget(combo[0], fc, s)), combo };
+    if (combo) {
+      const setups = setupCombos(fc.design, s.me, s.opp);
+      if (setups.length && rng(mixSeed(seed, fc.corner, s.tick, SETUP_RULE_STREAM))() < HOUSE_SETUP_RATE) {
+        const pick = setups[0];
+        const comboPlan = planOf(pick);
+        return { ...pack('combo', agg, `set him up: ${pick.why}`, comboPlan.zones[0]), combo: [...pick.steps], comboPlan };
+      }
+      return { ...pack('combo', agg, 'in range: combination', strikeTarget(combo[0], fc, s)), combo };
+    }
     const strike = pickStrike(fc, s, u);
     return pack(strike, agg, 'in range: strike');
   }

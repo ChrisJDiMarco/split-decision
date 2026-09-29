@@ -339,15 +339,25 @@ describe('intent mapping with a mocked Jev', () => {
     expect(b.intents.every((i) => !i.flourish)).toBe(true);
   });
 
-  test('tactic "combo" carries the combination Jev picked', async () => {
+  test('tactic "combo" carries the combination Jev picked, then runs it strike by strike', async () => {
     const sc = scene('firecracker', 'haymaker');
     const b = brainWith(sc, { tactic: 'combo', combo: 'jab-cross-hook-uppercut' });
-    await runFrames(b, sc, 0, 3, me([]));
-    const combos = b.intents.filter((x) => x.tactic === 'combo').map((x) => comboId(x.combo!));
+    await runFrames(b, sc, 0, 40, me([]));
+    const starts = b.intents.map((x, i) => [x, i] as const).filter(([x]) => x.tactic === 'combo');
+    const combos = starts.map(([x]) => comboId(x.combo!));
     const menu = designCombos(DESIGNS.firecracker).map(comboId);
-    expect(combos.length).toBeGreaterThan(5);
-    for (const c of combos) expect(menu).toContain(c); // sampled at the fighter's temperament, always from its menu
-    expect(combos.filter((c) => c === 'jab-cross-hook-uppercut').length).toBeGreaterThan(combos.length / 2);
+    expect(combos.length).toBeGreaterThanOrEqual(5);
+    for (const [x, i] of starts) {
+      if (x.comboPlan) continue; // a setup → payoff combination (its own test)
+      expect(menu).toContain(comboId(x.combo!)); // sampled at the fighter's temperament, always from its menu
+      // The brain sequences it (COMBO_SEQUENCING 'brain'): the next intents are the remaining strikes, in order.
+      const rest = b.intents.slice(i + 1, i + x.combo!.length).map((y) => y.tactic);
+      expect(rest).toEqual(x.combo!.slice(1, 1 + rest.length));
+    }
+    // Jev's favourite is the most thrown (sampled at temperament 1.3 against 7 others, setups included).
+    const counts = new Map<string, number>();
+    for (const c of combos) counts.set(c, (counts.get(c) ?? 0) + 1);
+    expect(counts.get('jab-cross-hook-uppercut')).toBe(Math.max(...counts.values()));
     expect(b.decisions.filter((d) => d.tactic === 'combo').every((d) => d.combo && d.combo.length >= 2)).toBe(true);
   });
 

@@ -6,6 +6,7 @@ import type { RobotDesign } from '../core/types';
 import * as B from './bands';
 import { designFlashy, openingsWords, riskBand } from './gambles';
 import type { RecentAction } from './observer';
+import { freshRead, habitsWords, readWords, weakSpotsWords } from './scouting';
 import type { FighterContext, Situation } from './situation';
 import { styleOf } from './style';
 import { abilityTactics, tacticWords } from './tactics';
@@ -134,6 +135,11 @@ export function flashyRiskWords(design: RobotDesign, tel: RobotTelemetry): strin
   return items.length ? items.join('; ') : null;
 }
 
+function lastReadWords(me: RobotTelemetry, now: number): string | null {
+  const r = freshRead(me, now);
+  return r ? readWords(r) : null;
+}
+
 function optional(entries: Array<[string, string | null]>): Record<string, string> {
   return Object.fromEntries(entries.filter((e): e is [string, string] => e[1] !== null));
 }
@@ -170,7 +176,12 @@ export function serializeState(
       facing: B.facingWords(geometry.oppBearingRad),
       damage: damageWords(opp, null, OPP_DAMAGE_ITEMS),
       recent: recentWords(recent, s.time),
-      ...optional([['openings', me.openings ? openingsWords(me.openings, opp) : null]]),
+      ...optional([
+        ['openings', me.openings ? openingsWords(me.openings, opp) : null],
+        ['weak_spots', weakSpotsWords(fc.design, me)],
+        ['habits', habitsWords(me.habits)],
+        ['last_read', lastReadWords(me, s.time)],
+      ]),
     },
     geometry: {
       distance: s.band,

@@ -1,5 +1,6 @@
 // Types shared inside the brain module and exposed to the HUD.
 import type { GetupStyle, Opening, RobotTelemetry, SimEvent, Tactic, TargetZone } from '../core/protocol';
+import type { PlanView } from './sequencer';
 
 /** Where a decision came from. 'local' = an obvious tick settled by a code rule, no Jev call. */
 export type DecisionSource = 'jev' | 'local' | 'fallback';
@@ -51,6 +52,10 @@ export interface BrainDecision {
   flourish: boolean;
   /** The pre-armed opening reflex riding on this intent ({ missed_recovering: 'spinning_backfist', ... }). */
   onOpening: Partial<Record<Opening, Tactic>> | null;
+  /** The setup → payoff plan running (live, step by step), or null. */
+  plan?: PlanView | null;
+  /** The read of his answer to this fighter's last feint, while fresh ("HE BIT: COVERED HIGH"). */
+  read?: string | null;
 }
 
 /** An opening move (or creative gamble) the fighter went for. */

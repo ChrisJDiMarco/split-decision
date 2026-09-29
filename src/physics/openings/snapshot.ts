@@ -8,6 +8,7 @@ import type { Vec3 } from '../../core/types';
 import { controllerOf } from '../control';
 import { readMat, readVec, yawOf } from '../control/math';
 import { views } from '../control/sense';
+import { MAX_SLOP_RAD } from '../damage/constants';
 import type { RobotRuntime, SimContext } from '../sim-context';
 
 export type SkillPhaseName = 'windup' | 'strike' | 'recover';
@@ -24,6 +25,7 @@ export interface JointSnapshot {
   health: number; // 0..1
   state: JointState;
   heat: number; // winding temperature as a fraction of the motor's max
+  slop?: number; // gear backlash from damage, as a fraction of MAX_SLOP_RAD
 }
 
 export interface BodySnapshot {
@@ -53,6 +55,10 @@ export interface BodySnapshot {
   chinZ: number | null;
   feet: { l: Vec3; r: Vec3 } | null;
   joints: JointSnapshot[];
+  // Guard and weak-spot reads (optional: hand-built snapshots in tests leave them out).
+  fists?: { l: Vec3; r: Vec3 } | null; // world positions of the fists
+  headPos?: Vec3 | null; // neck pivot (the head body origin); null once the head is off
+  torsoPos?: Vec3;
 }
 
 function bodyOf(r: RobotRuntime, id: string): number | null {
@@ -96,6 +102,9 @@ export function snapshot(ctx: SimContext, r: RobotRuntime): BodySnapshot {
     fistZ: fl !== null && fr !== null ? { l: v.xpos[fl * 3 + 2], r: v.xpos[fr * 3 + 2] } : null,
     chinZ: head !== null ? v.xpos[head * 3 + 2] : null,
     feet: footL !== null && footR !== null ? { l: readVec(v.xpos, footL), r: readVec(v.xpos, footR) } : null,
-    joints: r.joints.map((j) => ({ name: j.name, health: j.health, state: j.state, heat: j.tempC / j.motor.maxTempC })),
+    joints: r.joints.map((j) => ({ name: j.name, health: j.health, state: j.state, heat: j.tempC / j.motor.maxTempC, slop: j.slop / MAX_SLOP_RAD })),
+    fists: fl !== null && fr !== null ? { l: readVec(v.xpos, fl), r: readVec(v.xpos, fr) } : null,
+    headPos: head !== null ? readVec(v.xpos, head) : null,
+    torsoPos: readVec(v.xpos, torso),
   };
 }

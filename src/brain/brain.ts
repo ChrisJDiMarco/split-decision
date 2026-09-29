@@ -14,7 +14,10 @@ import { FightMemory } from './memory';
 import { FightObserver } from './observer';
 import { decide, decideGambles, parseAnswers, parseExtras } from './policy';
 import { buildQuestions, getupQuestion, type QuestionSet } from './questions';
+import { freshRead, readHud } from './scouting';
+import { COMBO_SEQUENCING, ComboSequencer, staticPlanView, type PlanSpec, type SeqStep } from './sequencer';
 import { serializeState } from './serializer';
+import { opensSetup, planOf, setupCombos } from './setups';
 import { coarseKey, makeFighterContext, readSituation, type FighterContext, type Situation } from './situation';
 import { BrainStatsTracker } from './stats';
 import { designCombos, styleOf } from './style';
@@ -100,6 +103,11 @@ export class Brain {
   /** This knockdown's get-up call: null until decided (asked once per knockdown). */
   private getupStyle: GetupStyle | null = null;
   private getupAsked = false;
+  /** Runs a combination step by step (setup → payoff) while the body cannot (COMBO_SEQUENCING). */
+  private readonly seq = new ComboSequencer();
+  /** The decision that started the running plan (its steps copy it for the HUD). */
+  private planOrigin: BrainDecision | null = null;
+  private latestView: { key: string; d: BrainDecision } | null = null;
 
   constructor(opts: BrainOptions) {
     const designs = opts.designs ?? DESIGNS;
@@ -132,6 +140,9 @@ export class Brain {
     this.lastAggression = 0.5;
     this.getupStyle = null;
     this.getupAsked = false;
+    this.seq.abort();
+    this.planOrigin = null;
+    this.latestView = null;
     this.nextDecisionAt = 0;
     this.lastQueryAt = -Infinity;
     this.pendingTrigger = null;
@@ -143,7 +154,18 @@ export class Brain {
 
   // ------------------------------------------------------------ HUD read-outs
 
-  get latest(): BrainDecision | null { return this.history[this.history.length - 1] ?? null; }
+  /** The last decision, with the live plan step and the fresh read of his last answer laid over it. */
+  get latest(): BrainDecision | null {
+    const d = this.history[this.history.length - 1] ?? null;
+    if (!d) return null;
+    const plan = this.seq.view() ?? (COMBO_SEQUENCING === 'body' ? d.plan ?? null : null);
+    const s = this.situation;
+    const r = s ? freshRead(s.me, s.time) : null;
+    const read = r ? readHud(r) : null;
+    const key = `${this.history.length}|${plan ? `${plan.step}:${plan.read ?? ''}:${plan.payoff.join()}` : '-'}|${read ?? ''}`;
+    if (this.latestView?.key !== key) this.latestView = { key, d: { ...d, plan, read } };
+    return this.latestView.d;
+  }
   get decisions(): readonly BrainDecision[] { return this.history; }
   get source(): DecisionSource { return this.link.offline ? 'fallback' : 'jev'; }
   get jevStatus(): JevStatus { return this.link.status; }
@@ -168,6 +190,14 @@ export class Brain {
     if (!this.active) return;
     this.startTime ??= frame.time;
     if (interrupts.length && this.pendingTrigger === null) this.pendingTrigger = interrupts[0];
+    if (this.seq.active) {
+      // A combination is running: the fighter is committed to it; no cadence questions until it ends.
+      const out = this.seq.update(s, interrupts, this.fc.design);
+      if (out === null) return;
+      if (out !== 'done' && out !== 'aborted') return this.emitStep(out, s);
+      this.planOrigin = null;
+      this.pendingTrigger ??= out === 'done' ? 'plan_done' : 'plan_aborted';
+    }
     const due = this.pendingTrigger !== null || frame.time >= this.nextDecisionAt;
     if (!due || frame.time - this.lastQueryAt < MIN_REQUEST_GAP_S) return;
     this.decideNow(s);
@@ -235,12 +265,13 @@ export class Brain {
   private extras(s: Situation, appetite: number) {
     const openings = s.me.openings ?? [];
     const combos = readyCombos(s.me, this.combos);
+    const setups = REFLEX_BANDS.has(s.band) || s.band === 'mid range' ? setupCombos(this.fc.design, s.me, s.opp) : [];
     const creative = !openings.length && CREATIVE_BANDS.has(s.band) && creativeRoll(appetite, this.opts.seed, this.corner, s.tick);
     const menu = GAMBLE_BANDS.has(s.band) && (openings.length || creative) && !s.me.down
       ? openingMenu(this.fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative, combos.length > 0)
       : null;
     const reflex = REFLEX_BANDS.has(s.band) && !s.me.down && s.oppPhase !== 'down' ? reflexMenu(this.fc.design, s.me) : null;
-    return { menu, combos, reflex };
+    return { menu, combos, setups, reflex };
   }
 
   private query(s: Situation, trigger: string) {
@@ -260,7 +291,7 @@ export class Brain {
   /** Down on the canvas: one small call, "try a kip-up?". Its answer holds for this knockdown. */
   private queryGetup(s: Situation, trigger: string) {
     const kipRisk = this.kipRisk(s) as number;
-    const qs: QuestionSet = { questions: { getup_style: getupQuestion(kipRisk) }, tactics: [], targets: [], counters: [], menu: [], creative: false, combos: [], getup: true, reflex: [] };
+    const qs: QuestionSet = { questions: { getup_style: getupQuestion(kipRisk) }, tactics: [], targets: [], counters: [], menu: [], creative: false, combos: [], setups: [], getup: true, reflex: [] };
     const state = serializeState(this.fc, s, this.observer.recentActions(s.time), this.matchClock(s), this.currentTactic, this.memory.words());
     const req: PendingRequest = { tick: s.tick, time: s.time, key: coarseKey(s), gen: this.generation, trigger, qs, appetite: kipAppetite(this.fc), kipRisk };
     this.getupAsked = true;
@@ -310,18 +341,22 @@ export class Brain {
     }
     const out = decide({ parsed, situation: now, current: this.currentTactic, temperature: this.fc.setup.temperament, seed: this.opts.seed, corner: this.corner, tick: req.tick });
     const g = decideGambles({ extras: parseExtras(res, req.qs), qs: req.qs, appetite: req.appetite, temperature: this.fc.setup.temperament, kipRisk: req.kipRisk, seed: this.opts.seed, corner: this.corner, tick: req.tick });
-    // An opening move overrides the tactic: code saw the opening, Jev chose to go for it.
-    const tactic = g.move ?? out.tactic;
+    // An opening move overrides the tactic: code saw the opening, Jev chose to go for it. A feint
+    // (or a jab, a low kick) that opens the setup Jev picked in the combo answer runs as that setup.
+    const promote = !g.move && out.tactic !== 'combo' && !!g.setup && opensSetup(out.tactic, g.setup);
+    const tactic = g.move ?? (promote ? 'combo' : out.tactic);
     const target = g.move ? g.target ?? out.target : out.target;
     const combo = tactic === 'combo' ? g.combo ?? req.qs.combos[0] ?? null : null;
+    const setup = combo && g.setup ? g.setup : null;
+    const comboPlan = setup ? planOf(setup) : undefined;
     const flourish = g.move !== null && (isFlashy(g.move) || g.opening !== null);
     const aggression = g.move ? Math.max(out.aggression, parsed.aggression) : out.aggression;
     const intent: Intent = {
-      tactic, target, aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence, source: 'jev',
-      ...(combo ? { combo } : {}), ...(flourish ? { flourish } : {}), ...(g.onOpening ? { onOpening: g.onOpening } : {}),
+      tactic, target: comboPlan ? comboPlan.zones[0] : target, aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence, source: 'jev',
+      ...(combo ? { combo } : {}), ...(comboPlan ? { comboPlan } : {}), ...(flourish ? { flourish } : {}), ...(g.onOpening ? { onOpening: g.onOpening } : {}),
     };
     const gamble: GambleView | null = g.move ? { move: g.move, opening: g.opening, p: g.moveP, risk: g.risk } : null;
-    const reason = g.move ? `${g.opening ? 'took the opening' : 'creative gamble'}${g.risk !== null ? `, ${riskBand(g.risk)}` : ''}` : out.reason;
+    const reason = g.move ? `${g.opening ? 'took the opening' : 'creative gamble'}${g.risk !== null ? `, ${riskBand(g.risk)}` : ''}` : setup ? `set him up: ${setup.why}` : out.reason;
     this.lastAppliedTick = req.tick;
     if (out.mode !== 'commit') this.nextDecisionAt = Math.min(this.nextDecisionAt, req.time + BAND_INTERVAL_S[now.band] * MODE_INTERVAL_SCALE[out.mode]);
     this.emit(intent, req.tick, {
@@ -330,7 +365,36 @@ export class Brain {
       tacticProbs: parsed.tacticProbs, targetProbs: parsed.targetProbs, oppCommit: parsed.oppCommit,
       winning: parsed.winning, latencyMs: res.latencyMs, reason, trigger: req.trigger,
       openings: now.me.openings ?? [], gamble, combo, flourish, onOpening: g.onOpening,
+      ...(comboPlan && combo && COMBO_SEQUENCING === 'body' ? { plan: staticPlanView({ steps: combo, ...comboPlan }, now.me) } : {}),
     }, now);
+    if (combo) this.startPlan(combo, comboPlan, intent, now);
+  }
+
+  /** Sequence a combination the body cannot run by itself yet (plain ones: every strike, no setup). */
+  private startPlan(combo: Tactic[], plan: Intent['comboPlan'], intent: Intent, s: Situation) {
+    if (COMBO_SEQUENCING !== 'brain' || combo.length < 2 || !this.seq.canStart(s)) return;
+    const spec: PlanSpec = plan
+      ? { steps: combo, zones: plan.zones, setup: plan.setup, payoffZone: plan.payoffZone, ...(plan.fishing ? { fishing: plan.fishing } : {}), ...(plan.tempo ? { tempo: plan.tempo } : {}) }
+      : { steps: combo, zones: combo.map(() => intent.target), setup: 0, payoffZone: intent.target };
+    this.seq.start(spec, intent, s);
+    this.planOrigin = this.history[this.history.length - 1] ?? null;
+    // Any answer still in flight was asked before the fighter committed to this plan: drop it on
+    // arrival, or it would cut into the plan's first step (Jev is often slower than the 0.25 s cadence).
+    this.lastAppliedTick = Math.max(this.lastAppliedTick, s.tick);
+  }
+
+  /** The next step of the running combination goes out as its own intent (no Jev call). */
+  private emitStep(step: SeqStep, s: Situation) {
+    const origin = this.planOrigin;
+    if (!origin) { this.seq.abort(); return; }
+    const i = step.intent;
+    this.lastAppliedTick = Math.max(this.lastAppliedTick, s.tick);
+    this.lastQueryAt = s.time;
+    this.emit(i, s.tick, {
+      ...origin, tick: s.tick, time: s.time, tactic: i.tactic, target: i.target, aggression: i.aggression,
+      reason: step.reason, trigger: 'plan', latencyMs: null, onOpening: i.onOpening ?? null,
+      gamble: null, openings: s.me.openings ?? [],
+    }, s);
   }
 
   /** Jev failed (the link is now offline): the House Mind takes this decision immediately. */
@@ -360,7 +424,8 @@ export class Brain {
       tactic: rule.tactic, target: rule.target, aggression: rule.aggression, counterIfLunge: rule.counterIfLunge,
       confidence: 1, source: source === 'fallback' ? 'fallback' : 'jev',
       ...(source === 'local' ? { settledLocally: true } : {}),
-      ...(rule.combo ? { combo: rule.combo } : {}), ...(getupStyle ? { getupStyle } : {}), ...(rule.flourish ? { flourish: true } : {}),
+      ...(rule.combo ? { combo: rule.combo } : {}), ...(rule.comboPlan ? { comboPlan: rule.comboPlan } : {}),
+      ...(getupStyle ? { getupStyle } : {}), ...(rule.flourish ? { flourish: true } : {}),
       ...(rule.onOpening ? { onOpening: rule.onOpening } : {}),
     };
     this.schedule(s);
@@ -374,6 +439,7 @@ export class Brain {
       onOpening: rule.onOpening ?? null,
       gamble: rule.gamble ? { ...rule.gamble, p: null } : null,
     }, s);
+    if (rule.combo && rule.tactic === 'combo') this.startPlan(rule.combo, rule.comboPlan, intent, s);
   }
 
   private emit(intent: Intent, issuedAtTick: number, d: BrainDecision, s: Situation) {

@@ -120,6 +120,19 @@ export type SimEvent =
   | { kind: 'ko'; corner: Corner; reason: 'head' | 'down' | 'power' | 'disabled' }
   | { kind: 'cage'; corner: Corner; pos: Vec3; speed: number };
 
+/**
+ * Referee break events (src/physics/systems/referee.ts). 'break': someone went down, the standing
+ * fighter is sent to a neutral spot and throws nothing; again with both corners if it becomes a
+ * double knockdown. 'fight': everyone has been fully up for the grace period, fighting resumes.
+ * A KO during a break ends it without a 'fight' (the 'ko' event says it all).
+ * Not yet part of SimEvent: src/ui/ticker-feed.ts fromEvent() switches over every SimEvent kind with
+ * no default, so a new kind fails the type check there. Until it gets a default branch the referee
+ * logs these in SimContext.referee.log and the frame carries RobotTelemetry.referee.
+ */
+export type RefereeEvent =
+  | { kind: 'break'; down: Corner[] }
+  | { kind: 'fight'; breakS: number };
+
 export type JointState = 'ok' | 'degraded' | 'limp' | 'seized';
 
 /**
@@ -128,6 +141,19 @@ export type JointState = 'ok' | 'degraded' | 'limp' | 'seized';
  * scan: no one in reach, sweeping.
  */
 export type GazeMode = 'track' | 'threat' | 'aim' | 'down' | 'scan';
+
+/**
+ * The referee's view of one fighter (src/physics/systems/referee.ts). role during a break: 'down' on
+ * the canvas or still rising; 'neutral' sent to (or standing at) a neutral spot, no blows; 'hold' back
+ * up, waiting for FIGHT. The body obeys the referee over the intent; RobotTelemetry.intent still shows
+ * what the brain (or player) asked for.
+ */
+export interface RefereeTelemetry {
+  break: boolean;
+  role?: 'down' | 'neutral' | 'hold';
+  neutral?: Vec3; // role 'neutral': the spot he was sent to (world, z = 0)
+  breakS?: number; // seconds since the break started
+}
 
 export interface Gaze {
   point: Vec3; // world point the head is fixated on
@@ -187,6 +213,7 @@ export interface RobotTelemetry {
   weakSpots?: WeakSpot[]; // his best targets right now, ranked (at most 3)
   reads?: FeintRead[]; // the last few feints this fighter threw and how he answered them (newest last)
   habits?: Habit[]; // his habits this fight, strongest first
+  referee?: RefereeTelemetry; // referee break state (src/physics/systems/referee.ts)
 }
 
 // ---------------------------------------------------------------- fighter IQ (src/physics/openings)
@@ -227,7 +254,7 @@ export interface FeintRead {
   level: FeintLevel; // where it showed
   limb: 'arm' | 'leg';
   skill: string; // the control skill whose windup was shown ('jab', 'low_kick', ...)
-  deliberate: boolean; // the intent asked for a feint (not a strike pulled for another reason)
+  deliberate: boolean; // the intent asked for a feint, or no mind drives the robot (a windup pulled for another reason is no feint and gets no read)
   bit: boolean;
   reactions: BiteReaction[];
 }

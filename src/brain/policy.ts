@@ -4,6 +4,7 @@ import type { GetupStyle, Opening, Tactic, TargetZone } from '../core/protocol';
 import { gambleWeights, IMPOSSIBLE_RISK, NONE, NOTHING, reflexArming } from './gambles';
 import type { JevAnswer, JevResult } from './jev-client';
 import { AGGRESSION_LEVELS, WINNING_LEVELS, type QuestionSet } from './questions';
+import type { SetupCombo } from './setups';
 import { comboId } from './style';
 import type { Situation } from './situation';
 import { mixSeed, rng } from './rng';
@@ -203,7 +204,7 @@ export function parseExtras(result: JevResult, qs: QuestionSet): ExtraParsed {
   const kip = a.getup_style;
   return {
     openingProbs: qs.menu.length ? choiceProbs(a.opening_move, [...qs.menu.map((i) => i.move), NONE]) : null,
-    comboProbs: qs.combos.length ? choiceProbs(a.combo, qs.combos.map(comboId)) : null,
+    comboProbs: qs.combos.length || qs.setups.length ? choiceProbs(a.combo, [...qs.combos.map(comboId), ...qs.setups.map((c) => c.id)]) : null,
     kipYes: qs.getup && kip?.type === 'noul' && Number.isFinite(kip.noul) ? Math.max(0, Math.min(1, kip.noul)) : null,
     reflexProbs: qs.reflex.length ? choiceProbs(a.on_opening, [...qs.reflex.map((i) => i.move), NOTHING]) : null,
   };
@@ -228,6 +229,7 @@ export interface GambleOutput {
   target: TargetZone | null;
   combo: Tactic[] | null; // the combination to run if the tactic is 'combo'
   comboP: number | null;
+  setup: SetupCombo | null; // the combination is a setup → payoff one (its steps are `combo`)
   getupStyle: GetupStyle | undefined;
   kipP: number | null; // the kip-up chance the draw used
   onOpening: Partial<Record<Opening, Tactic>> | null; // the armed reflex (null: 'nothing' or not asked)
@@ -236,17 +238,20 @@ export interface GambleOutput {
 
 export function decideGambles(input: GambleInput): GambleOutput {
   const { extras, qs, appetite, temperature, seed, corner, tick } = input;
-  const out: GambleOutput = { move: null, moveP: null, opening: null, risk: null, target: null, combo: null, comboP: null, getupStyle: undefined, kipP: null, onOpening: null, reflexP: null };
+  const out: GambleOutput = { move: null, moveP: null, opening: null, risk: null, target: null, combo: null, comboP: null, setup: null, getupStyle: undefined, kipP: null, onOpening: null, reflexP: null };
   if (extras.openingProbs) {
     const weighted = gambleWeights(extras.openingProbs, qs.menu, appetite);
     const pick = seededSample(weighted, temperature, seed, corner, tick, OPENING_STREAM);
     const item = qs.menu.find((i) => i.move === pick);
     if (item) Object.assign(out, { move: item.move, moveP: extras.openingProbs[pick], opening: item.opening, risk: item.risk, target: item.target });
   }
-  if (qs.combos.length) {
-    const probs = extras.comboProbs ?? Object.fromEntries(qs.combos.map((c, i) => [comboId(c), i === 0 ? 1 : 0]));
+  if (qs.combos.length || qs.setups.length) {
+    const ids = [...qs.combos.map(comboId), ...qs.setups.map((c) => c.id)];
+    const probs = extras.comboProbs ?? Object.fromEntries(ids.map((id, i) => [id, i === 0 ? 1 : 0]));
     const pick = extras.comboProbs ? seededSample(probs, temperature, seed, corner, tick, COMBO_STREAM) : argmax(probs);
-    out.combo = qs.combos.find((c) => comboId(c) === pick) ?? null;
+    const setup = qs.setups.find((c) => c.id === pick) ?? null;
+    out.setup = setup;
+    out.combo = setup ? [...setup.steps] : qs.combos.find((c) => comboId(c) === pick) ?? null;
     out.comboP = extras.comboProbs ? probs[pick] : null;
   }
   if (extras.reflexProbs) {

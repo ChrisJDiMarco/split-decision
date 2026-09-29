@@ -7,16 +7,28 @@
 //                 with every step; a real stumble, joints, battery and a knockdown count at once
 //   stance        orthodox / southpaw from the lead foot, read feet planted and held >= 0.4 s
 //   facingOffDeg  how far its shoulders are off square to the opponent
-// Snapshots are read once per telemetry frame (~60 Hz), never per physics step.
-import type { Opening, SimEvent } from '../../core/protocol';
+//   weakSpots     its opponent's best targets right now, ranked with reasons (weakspots.ts, guard.ts)
+//   reads         its last few feints and how the opponent answered them (feints.ts)
+//   habits        what it has learned about the opponent this fight (habits.ts)
+// Snapshots are read once per telemetry frame (~60 Hz), never per physics step; the feint, pressure
+// and hand-drop watchers sample cheap reads every SAMPLE_EVERY steps (4 ms).
+import type { FeintRead, Opening, SimEvent, TargetZone } from '../../core/protocol';
 import type { RobotRuntime, SimContext, SimSystem } from '../sim-context';
 import { detectOpenings, facingOffDeg, heldStance, isStunningHit, newStanceMemory, offBalance, type StanceMemory } from './detect';
+import { newFeintState, SAMPLE_EVERY, sampleOf, stepFeints, type FeintState } from './feints';
+import { guardRead } from './guard';
+import { habitsOf, newHabitState, onHisHands, onLanded, onPressure, onRead, type HabitState } from './habits';
 import { moveRisks } from './risk';
 import { snapshot, type BodySnapshot } from './snapshot';
+import { scoutDesign, weakSpots, zoneOfPart, type DesignScout, type PartState } from './weakspots';
 
 export { detectOpenings, facingOffDeg, fenceGap, heldStance, isStunningHit, newStanceMemory, stanceOf, STUN_PARTS, STANCE_HOLD_S, type StanceMemory } from './detect';
 export { moveRisks, riskOf, MOVE_PROFILES } from './risk';
 export { snapshot, type BodySnapshot } from './snapshot';
+export { guardRead, type GuardRead } from './guard';
+export { scoutDesign, weakSpots, zoneOfPart, type DesignScout, type PartState } from './weakspots';
+export { reactionsIn, levelOf, newFeintState, stepFeints, sampleOf, BITE_WINDOW_S, type FeintWatch, type ReactSample, type FeintState } from './feints';
+export { habitsOf, newHabitState, onHisHands, onLanded, onPressure, onRead, type HabitState } from './habits';
 
 interface OpeningsState {
   stunnedAt: [number, number]; // per corner: sim time of the last hard strike it took
@@ -28,6 +40,9 @@ interface OpeningsState {
   held: [HeldInputs, HeldInputs]; // per corner: gait-phase risk inputs, from planted reads only
   risk: [Record<string, number> | null, Record<string, number> | null]; // per corner: last published moveRisk
   sees: { tick: number; openings: [Opening[], Opening[]] } | null; // per corner, what it sees this tick
+  feints: FeintState; // per feinter: the feint being watched, the reads so far
+  habits: [HabitState, HabitState]; // per corner: what it has learned about its opponent
+  scouts: [DesignScout | null, DesignScout | null]; // per corner: the scouting report on its opponent's design
 }
 
 /** Time constants of the planted-read smoothing: getting shakier shows fast, settling back slowly. */
@@ -82,6 +97,7 @@ function freshState(): OpeningsState {
   return {
     stunnedAt: [-Infinity, -Infinity], events: null, seen: 0, last: null, snap: null,
     stance: [newStanceMemory(), newStanceMemory()], held: [newHeld(), newHeld()], risk: [null, null], sees: null,
+    feints: newFeintState(), habits: [newHabitState(), newHabitState()], scouts: [null, null],
   };
 }
 
@@ -113,9 +129,47 @@ function scanEvents(ctx: SimContext, st: OpeningsState): void {
     if (e.kind !== 'impact' || e.victim === null || e.striker === null || e.striker === e.victim) continue;
     const mass = ctx.model.body_subtreemass[ctx.robots[e.victim].rootBody] as number;
     if (isStunningHit(e, mass)) st.stunnedAt[e.victim] = ctx.time;
+    onLanded(st.habits[e.striker], zoneOf(ctx.robots[e.victim], e.part), e.energyJ, ctx.time);
   }
   st.seen = ev.length;
   st.last = ev.length ? ev[ev.length - 1] : null;
+}
+
+function zoneOf(r: RobotRuntime, part: string | null): TargetZone | null {
+  const def = part ? r.design.parts.find((p) => p.id === part) : undefined;
+  return def ? zoneOfPart(def) : null;
+}
+
+/** Every SAMPLE_EVERY steps: feints and bites, pressure episodes, his hands after a punch. */
+function sampleWatchers(ctx: SimContext, st: OpeningsState): void {
+  const samples = [sampleOf(ctx, ctx.robots[0]), sampleOf(ctx, ctx.robots[1])] as const;
+  for (const { corner, read } of stepFeints(ctx, st.feints, samples)) onRead(st.habits[corner], read);
+  const dt = SAMPLE_EVERY * ctx.dt;
+  for (const c of [0, 1] as const) {
+    const me = samples[c], him = samples[c === 0 ? 1 : 0];
+    onPressure(st.habits[c], { t: ctx.time, dt, me: me.com, meVel: me.comVel, him: him.com, himVel: him.comVel, eitherDown: me.down || him.down });
+    onHisHands(st.habits[c], ctx.time, him.run, him.fistZ, him.chinZ);
+  }
+}
+
+/** The scouting report `corner` holds on its opponent's design (built once). */
+function scoutFor(ctx: SimContext, st: OpeningsState, corner: 0 | 1): DesignScout {
+  const cached = st.scouts[corner];
+  if (cached) return cached;
+  const opp = ctx.robots[corner === 0 ? 1 : 0];
+  const hip = opp.joints.find((j) => j.name.startsWith('hip_pitch'));
+  const scout = scoutDesign(opp.design, ctx.model.body_subtreemass[opp.rootBody] as number, hip?.motor.noLoadSpeedRadS ?? 0);
+  st.scouts[corner] = scout;
+  return scout;
+}
+
+function partStates(r: RobotRuntime): PartState[] {
+  const out: PartState[] = [];
+  for (const def of r.design.parts) {
+    const p = r.parts.get(def.id);
+    if (p) out.push({ id: def.id, zone: zoneOfPart(def), hp: p.hp, attached: p.attached });
+  }
+  return out;
 }
 
 /** Both bodies, read once per tick and shared by the two telemetry calls (and openingsNow). */
@@ -138,13 +192,24 @@ export function openingsNow(ctx: SimContext, corner: 0 | 1): readonly Opening[] 
   return st.sees.openings[corner];
 }
 
+/**
+ * The newest read of `corner`'s feints (published BITE_GRACE_S after a bite is seen, or when the
+ * bite window closes with none). The control layer polls this to fire a combo's payoff on the bite.
+ */
+export function latestRead(ctx: SimContext, corner: 0 | 1): FeintRead | null {
+  const reads = stateOf(ctx).feints.reads[corner];
+  return reads[reads.length - 1] ?? null;
+}
+
 export const openingsSystem: SimSystem = {
   name: 'openings',
   init(ctx) {
     states.set(ctx, freshState());
   },
   post(ctx) {
-    scanEvents(ctx, stateOf(ctx));
+    const st = stateOf(ctx);
+    scanEvents(ctx, st);
+    if (ctx.tick % SAMPLE_EVERY === 0) sampleWatchers(ctx, st);
   },
   telemetry(ctx, robot: RobotRuntime, out) {
     const st = stateOf(ctx);
@@ -157,5 +222,9 @@ export const openingsSystem: SimSystem = {
     out.moveRisk = { ...st.risk[c] };
     out.stance = heldStance(st.stance[c], me, opp);
     out.facingOffDeg = Math.round(facingOffDeg(me, opp) * 10) / 10;
+    const oppRobot = ctx.robots[c === 0 ? 1 : 0];
+    out.weakSpots = weakSpots({ me, opp, scout: scoutFor(ctx, st, c), parts: partStates(oppRobot), guard: guardRead(opp, me), landed: st.habits[c].landed });
+    out.reads = [...st.feints.reads[c]];
+    out.habits = habitsOf(st.habits[c]);
   },
 };

@@ -5,8 +5,9 @@ import type { PartDef, RobotDesign } from '../core/types';
 import { hpWords } from './bands';
 import { NONE, NOTHING, riskBand, type MenuItem, type OpeningMenu } from './gambles';
 import type { JevQuestion } from './jev-client';
+import type { SetupCombo } from './setups';
 import type { FighterContext } from './situation';
-import { comboId, styleOf } from './style';
+import { COMBO_MAX, comboId, styleOf } from './style';
 import { designTactics, TACTIC_INFO, tacticWords } from './tactics';
 
 export const AGGRESSION_LEVELS = ['fully defensive', 'cautious', 'balanced', 'pressing', 'all-out'];
@@ -36,6 +37,7 @@ export interface QuestionSet {
   menu: MenuItem[];
   creative: boolean; // the menu is a creative gamble with no opening
   combos: Tactic[][]; // combo options (empty when not asked)
+  setups: SetupCombo[]; // setup → payoff options in the same combo question (empty when not asked)
   getup: boolean; // getup_style asked
   /** on_opening options (empty when not asked); the choice keys are their moves plus 'nothing'. */
   reflex: MenuItem[];
@@ -45,6 +47,7 @@ export interface QuestionSet {
 export interface ExtraQuestions {
   menu?: OpeningMenu | null; // ask opening_move when it has items
   combos?: Tactic[][] | null; // ask combo (and offer 'combo' as a tactic) when non-empty
+  setups?: SetupCombo[] | null; // setup → payoff combinations, offered in the combo question
   kipRisk?: number | null; // ask getup_style (only when down)
   reflex?: MenuItem[] | null; // ask on_opening (the pre-armed reflex) when non-empty
 }
@@ -111,14 +114,21 @@ export function openingMoveQuestion(menu: OpeningMenu): JevQuestion {
   return { type: 'choice', instructions, criteria };
 }
 
-export function comboQuestion(fc: FighterContext, combos: readonly Tactic[][]): JevQuestion {
+/** A setup → payoff option as Jev reads it: "setup, then payoff: <why>". */
+export function setupWords(c: SetupCombo): string {
+  return `setup: ${c.why}`;
+}
+
+export function comboQuestion(fc: FighterContext, combos: readonly Tactic[][], setups: readonly SetupCombo[] = []): JevQuestion {
   const style = styleOf(fc.design);
   const signature = new Set(style.combos.map(comboId));
   const lead = combos.findIndex((c) => !signature.has(comboId(c)));
   const n = lead < 0 ? combos.length : lead; // signature combos come first (designCombos)
   const note = n ? ` The first ${n === 1 ? 'one is a signature combination' : `${n} are signature combinations`} for ${style.words.split(':')[0]}.` : '';
-  const criteria = Object.fromEntries(combos.map((c) => [comboId(c), comboWords(c)]));
-  return { type: 'choice', instructions: `If \`you\` throw a combination next, which one fits this moment and \`plan\` best?${note}`, criteria };
+  const fool = setups.length ? ' Setups fool him first (his `habits`), then hit what that opens (his `weak_spots`).' : '';
+  const criteria: Record<string, string> = Object.fromEntries(combos.map((c) => [comboId(c), comboWords(c)]));
+  for (const c of setups) criteria[c.id] = setupWords(c);
+  return { type: 'choice', instructions: `If \`you\` throw a combination next, which one fits this moment and \`plan\` best?${fool}${note}`, criteria };
 }
 
 /** "If he whiffs or overcommits in the next second, what do you throw?": the pre-armed reflex. */
@@ -148,8 +158,9 @@ export function getupQuestion(kipRisk: number): JevQuestion {
 }
 
 export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: ExtraQuestions = {}): QuestionSet {
-  const combos = extras.combos?.length ? extras.combos : [];
-  const tactics = combos.length ? [...designTactics(fc.design), 'combo' as Tactic] : designTactics(fc.design);
+  const setups = extras.setups?.length ? extras.setups : [];
+  const combos = extras.combos?.length ? extras.combos.slice(0, Math.max(0, COMBO_MAX - setups.length)) : [];
+  const tactics = combos.length || setups.length ? [...designTactics(fc.design), 'combo' as Tactic] : designTactics(fc.design);
   const zones = targetOptions(fc.oppDesign, opp);
   const counters = counterOptions(fc.design);
   const menu = extras.menu?.items.length ? extras.menu : null;
@@ -158,7 +169,7 @@ export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: 
   const extra: Record<string, JevQuestion> = {};
   if (menu) extra.opening_move = openingMoveQuestion(menu);
   if (reflex.length) extra.on_opening = onOpeningQuestion(reflex);
-  if (combos.length) extra.combo = comboQuestion(fc, combos);
+  if (combos.length || setups.length) extra.combo = comboQuestion(fc, combos, setups);
   if (kip) extra.getup_style = getupQuestion(extras.kipRisk as number);
   return {
     tactics,
@@ -167,6 +178,7 @@ export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: 
     menu: menu?.items ?? [],
     creative: menu?.creative ?? false,
     combos,
+    setups,
     getup: kip,
     reflex,
     questions: {
