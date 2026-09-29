@@ -1,0 +1,22 @@
+:root {
+  --ink: #f2efe8;
+  --dim: #8d8a84;
+  --red: #e0452b;
+  --blue: #2f7bff;
+  --panel: rgba(8, 9, 11, 0.72);
+  --line: rgba(255, 255, 255, 0.1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #050506; overflow: hidden; }
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#hud {
+  position: fixed; inset: 0; pointer-events: none;
+  font-family: 'Barlow Condensed', system-ui, sans-serif; color: var(--ink);
+}
+.hud-perf {
+  position: absolute; right: 14px; bottom: 12px; font: 11px/1.4 'JetBrains Mono', monospace;
+  color: var(--dim); text-align: right;
+}
+.hud-help {
+  position: absolute; left: 14px; bottom: 12px; font: 12px/1.5 'JetBrains Mono', monospace; color: var(--dim);
+}
