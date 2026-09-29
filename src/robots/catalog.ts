@@ -14,6 +14,11 @@ export const MATERIALS: Record<MaterialId, MaterialSpec> = {
   polycarb: { id: 'polycarb', name: 'Polycarbonate', densityKgM3: 1200, yieldMPa: 62, brinell: 15, friction: 0.4, sparks: false },
   carbon: { id: 'carbon', name: 'Carbon fiber', densityKgM3: 1600, yieldMPa: 600, brinell: 60, friction: 0.4, sparks: false },
   rubber: { id: 'rubber', name: 'Rubber', densityKgM3: 1100, yieldMPa: 15, brinell: 1, friction: 1.1, sparks: false },
+  // Boxing glove: leather over layered EVA/PU foam. An 8 oz glove (0.23 kg) fills about 1.3 L, so the
+  // bulk density is ~180 kg/m³. It is the softest striker in the cage: a glove keeps the impulse about
+  // the same but lowers peak force and stretches contact to 18-29 ms (Nakano et al., ISBS 2009). The
+  // damage model treats it as a cushion (CUSHION_MATERIALS) and it never throws sparks.
+  glove: { id: 'glove', name: 'Boxing glove (leather over foam)', densityKgM3: 180, yieldMPa: 2, brinell: 1, friction: 0.8, sparks: false },
 };
 
 /**
@@ -54,6 +59,58 @@ export const MOTORS: Record<string, MotorSpec> = {
     heatCapacityJPerK: 200, thermalResistanceKPerW: 1.6, maxTempC: 110, copperLossAtStallW: 280,
     source: 'cubemars.com AK80-9 V3: 9/22 N·m, 570 rpm, 490 g',
   },
+
+  // ---------------------------------------------------------------- electric fighter modules
+  // The modern roster (docs/research/08-modern-roster.md) runs only on these. Two classes:
+  //  · quasi-direct-drive (QDD, 7.75-10:1): backdrivable, fast, forgiving under impact;
+  //  · planetary (20:1): more torque per kg, slower, backdrives less (more gear damage when hit).
+  // Peak torque, no-load speed and mass are from the vendor sheets cited per entry. The thermal
+  // numbers are not published: heat capacity is ~340 J/K per kg of module (as the RS04 entry), the
+  // winding resistance falls with module size, and copper loss at stall is set so that holding the
+  // rated torque warms the windings ~100 K above ambient (loss ∝ (τ/τ_stall)², as the motor model).
+  'qdd.ak10': {
+    id: 'qdd.ak10', name: 'CubeMars AK10-9 V3 QDD (9:1)', kind: 'electric',
+    stallTorqueNm: 53, noLoadSpeedRadS: (320 * 2 * Math.PI) / 60, massKg: 0.96,
+    heatCapacityJPerK: 326, thermalResistanceKPerW: 1.1, maxTempC: 110, copperLossAtStallW: 790,
+    source: 'cubemars.com/product/ak10-9-v3-0-kv60-robotic-actuator.html: 18/53 N·m, 320 rpm, 960 g, 48 V',
+  },
+  'qdd.rs00': {
+    id: 'qdd.rs00', name: 'RobStride 00 QDD (10:1)', kind: 'electric',
+    stallTorqueNm: 14, noLoadSpeedRadS: (315 * 2 * Math.PI) / 60, massKg: 0.31,
+    heatCapacityJPerK: 105, thermalResistanceKPerW: 1.9, maxTempC: 120, copperLossAtStallW: 410,
+    source: 'github.com/RobStride/Product_Information: RobStride 00, 5/14 N·m, 315 rpm, 310 g',
+  },
+  'qdd.rs02': {
+    id: 'qdd.rs02', name: 'RobStride 02 QDD (7.75:1)', kind: 'electric',
+    stallTorqueNm: 17, noLoadSpeedRadS: (410 * 2 * Math.PI) / 60, massKg: 0.405,
+    heatCapacityJPerK: 138, thermalResistanceKPerW: 1.6, maxTempC: 120, copperLossAtStallW: 370,
+    source: 'github.com/RobStride/Product_Information: RobStride 02, 7/17 N·m, 410 rpm, 405 g',
+  },
+  'qdd.rs03': {
+    id: 'qdd.rs03', name: 'RobStride 03 QDD (9:1)', kind: 'electric',
+    stallTorqueNm: 60, noLoadSpeedRadS: (195 * 2 * Math.PI) / 60, massKg: 0.9,
+    heatCapacityJPerK: 306, thermalResistanceKPerW: 1.0, maxTempC: 120, copperLossAtStallW: 820,
+    source: 'github.com/RobStride/Product_Information: RobStride 03, 21/60 N·m, 195 rpm, 900 g',
+  },
+  'qdd.rs06': {
+    id: 'qdd.rs06', name: 'RobStride 06 QDD (9:1)', kind: 'electric',
+    stallTorqueNm: 36, noLoadSpeedRadS: (480 * 2 * Math.PI) / 60, massKg: 0.621,
+    heatCapacityJPerK: 211, thermalResistanceKPerW: 1.3, maxTempC: 120, copperLossAtStallW: 820,
+    source: 'robstride.com/products/robStride06: 11/36 N·m, 480 rpm, 621 g',
+  },
+  'plan.x12': {
+    id: 'plan.x12', name: 'MyActuator RMD-X12-P20-320-E planetary (20:1)', kind: 'electric',
+    stallTorqueNm: 320, noLoadSpeedRadS: (125 * 2 * Math.PI) / 60, massKg: 2.37,
+    heatCapacityJPerK: 806, thermalResistanceKPerW: 0.7, maxTempC: 120, copperLossAtStallW: 2030,
+    source: 'openelab.io/products/myactuator-rmd-x12-p20-actuator: 85/320 N·m, 125 rpm, 2.37 kg, 48 V, 100 A rms peak',
+  },
+  'plan.x15': {
+    id: 'plan.x15', name: 'MyActuator RMD-X15-P20-450-E planetary (20.25:1)', kind: 'electric',
+    stallTorqueNm: 450, noLoadSpeedRadS: (108 * 2 * Math.PI) / 60, massKg: 3.5,
+    heatCapacityJPerK: 1190, thermalResistanceKPerW: 0.55, maxTempC: 120, copperLossAtStallW: 1750,
+    source: 'openelab.io/products/myactuator-rmd-x15-p20-actuator: 145/450 N·m, 108 rpm, 3.5 kg, 72 V (the 450 N·m class EngineAI quotes for the T800)',
+  },
+
   'hyd.cyl50': {
     id: 'hyd.cyl50', name: '50 mm bore hydraulic cylinder @ 210 bar', kind: 'hydraulic',
     // 41 kN at the rod through an ~0.12 m lever arm ≈ 4.9 kN·m; derated to a controllable 1.4 kN·m

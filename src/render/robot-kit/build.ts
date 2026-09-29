@@ -7,6 +7,7 @@ import type { PartDef, RobotDesign, SkinId } from '../../core/types';
 import { design as designById } from '../../robots/designs';
 import { FrameBuilder, newObjState, type BuiltFrame } from './geom/part-builder';
 import { hashString, rng } from './geom/xf';
+import { designLook } from './look';
 import { createRobotMaterials } from './materials';
 import { partDims, styleFor, type LinkageRequest, type RecipeContext } from './recipes/context';
 import { resolveRecipe } from './recipes/registry';
@@ -78,7 +79,7 @@ function buildPart(
     part, design, style: styleFor(design), dims: partDims(part), parentDims: parentDef ? partDims(parentDef) : null,
     params: part.visual.params ?? {}, side: sideOf(part), frames, own: frames[nJ], mats: env.mats,
     linkages: env.linkages, rotors: env.animated.rotors, rams: env.animated.rams,
-    rand: rng(partSeed),
+    rand: rng(partSeed), look: designLook(design),
   };
   resolveRecipe(part.visual.kit)(ctx);
   if (part.smokePoint) frames[nJ].anchor('vent', new THREE.Vector3(...part.smokePoint));
@@ -144,7 +145,7 @@ function buildDebris(view: RobotKitView, kit: KitPart, meta: PartMeta, parent: T
 /** Build one robot's view under `parent`, registering every body group in `bodyGroups`. */
 export function buildRobotKitView(design: RobotDesign, skin: SkinId, corner: 0 | 1, parts: PartMeta[], parent: THREE.Object3D, bodyGroups: Map<number, THREE.Group>): RobotKitView {
   const seed = hashString(`${design.id}:${corner}:${skin}`);
-  const robotMats = createRobotMaterials(skin, design.eyeColor, design.name, seed);
+  const robotMats = createRobotMaterials(skin, design, seed);
   const animated: KitAnimated = { rotors: [], rams: [] };
   const linkReqs: LinkageRequest[] = [];
   const metaById = new Map(parts.map((p) => [p.id, p]));

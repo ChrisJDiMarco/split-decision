@@ -198,7 +198,7 @@ function updateGround(view: RobotKitView): void {
   const root = view.parts.values().next().value?.attached.parent;
   if (!root) return;
   const y = root.getWorldPosition(groundPos).y;
-  for (const m of [view.materials.paint, view.materials.frame, view.materials.mech]) {
+  for (const m of Object.values(view.materials)) {
     const u = m.userData.groundUniform as { value: number } | undefined;
     if (u) u.value = y;
   }

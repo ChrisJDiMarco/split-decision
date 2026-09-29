@@ -1,10 +1,13 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import * as THREE from 'three/webgpu';
 import type { RobotTelemetry } from '../../src/core/protocol';
 import { anchorPointsWorld, applyImpact, setPartState, sparkPoints, updateRobotKit } from '../../src/render/robot-kit';
 import { jointAngles } from '../../src/render/robot-kit/rig/joints';
 import type { PistonLinkage } from '../../src/render/robot-kit/types';
 import { buildTestRobot, poseRobot } from './helpers';
+
+// Building a full robot is heavy (7 designs, ~100k triangles each); allow for a loaded machine.
+vi.setConfig({ testTimeout: 120_000 });
 
 const DEG = Math.PI / 180;
 

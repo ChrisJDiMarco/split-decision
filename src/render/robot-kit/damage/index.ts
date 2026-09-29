@@ -112,7 +112,7 @@ function dentBolts(inst: THREE.InstancedMesh, d: Dent): void {
 }
 
 /** Structural slots dent; optics, glass and glowing cores would crack instead, so they don't. */
-const DENTABLE = new Set<string>(['paint', 'frame', 'mech', 'chrome', 'rubber', 'wire']);
+const DENTABLE = new Set<string>(['paint', 'trim', 'glove', 'frame', 'mech', 'chrome', 'rubber', 'wire']);
 
 function dentable(o: THREE.Object3D): boolean {
   return (o as THREE.Mesh).isMesh && DENTABLE.has(o.userData.slot as string);

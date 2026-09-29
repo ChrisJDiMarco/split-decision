@@ -5,10 +5,14 @@ import type { PartDef, RobotDesign, SkinId } from '../../core/types';
 import type { KitObjState } from './geom/part-builder';
 import type { JointChain } from './rig/joints';
 
-/** Material slots. Each part frame merges its geometry into one mesh per slot. */
-export type MatSlot = 'paint' | 'frame' | 'mech' | 'chrome' | 'rubber' | 'glow' | 'lens' | 'core' | 'wire';
+/**
+ * Material slots. Each part frame merges its geometry into one mesh per slot. `trim` is the
+ * second paint colour (the livery accent: shin guards, joint bands, glove cuffs); `glove` is
+ * padded leather in the design's glove colour (gloves, headgear).
+ */
+export type MatSlot = 'paint' | 'trim' | 'glove' | 'frame' | 'mech' | 'chrome' | 'rubber' | 'glow' | 'lens' | 'core' | 'wire';
 
-export const MAT_SLOTS: readonly MatSlot[] = ['paint', 'frame', 'mech', 'chrome', 'rubber', 'glow', 'lens', 'core', 'wire'];
+export const MAT_SLOTS: readonly MatSlot[] = ['paint', 'trim', 'glove', 'frame', 'mech', 'chrome', 'rubber', 'glow', 'lens', 'core', 'wire'];
 
 /** Decal kinds baked into the `aDecal.z` attribute. 0 = none. */
 export const DECAL = { NONE: 0, ACCENT: 1, NUMBER: 2, LABEL: 3, WARNING: 4, SERIAL: 5 } as const;

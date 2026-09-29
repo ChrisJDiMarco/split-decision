@@ -17,7 +17,8 @@ export type MaterialId =
   | 'uhmw'
   | 'polycarb'
   | 'carbon'
-  | 'rubber';
+  | 'rubber'
+  | 'glove'; // boxing glove: leather over foam, a cushioned striker
 
 export interface MaterialSpec {
   id: MaterialId;
@@ -152,9 +153,30 @@ export interface RobotDesign {
   rootHeight: number; // spawn height of the root part origin
   defaultSkin: SkinId;
   eyeColor: string; // hex, emissive optics
+  /** Livery colours for the 'livery' skin (the modern roster's default skin). */
+  palette?: DesignPalette;
+  /** Padded boxing gloves on the fists (the fist parts are 'glove' strikers). */
+  gloves?: { color: string };
+  weightClass?: WeightClass;
+  era?: Era;
 }
 
-export type SkinId = 'factory' | 'chrome' | 'military' | 'racing' | 'scrapyard' | 'neon';
+export interface DesignPalette {
+  primary: string; // hex, main shell colour
+  secondary: string; // hex, frame / second shell colour
+  accent: string; // hex, trim, numbers, toe caps
+  finish: 'gloss' | 'satin' | 'matte';
+}
+
+/**
+ * Weight classes, loosely after the WHRG 2026 brackets (40 / 58 / 80 kg): bantam up to 40 kg, middle up
+ * to 85 kg, heavy up to 110 kg (the heaviest electric joints can carry), open above (the iron age).
+ */
+export type WeightClass = 'bantam' | 'middle' | 'heavy' | 'open';
+/** 'modern': the all-electric default roster. 'iron': the optional hydraulic heavyweights. */
+export type Era = 'modern' | 'iron';
+
+export type SkinId = 'factory' | 'chrome' | 'military' | 'racing' | 'scrapyard' | 'neon' | 'livery'; // livery: the design's own palette
 
 // ---------------------------------------------------------------- match
 

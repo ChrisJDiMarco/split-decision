@@ -4,9 +4,10 @@ import * as THREE from 'three/webgpu';
 import type { GeomDef, PartDef, RobotDesign } from '../../../core/types';
 import { motor } from '../../../robots/catalog';
 import type { BoltKind, FrameBuilder } from '../geom/part-builder';
+import { designLook, type DesignLook, type LimbStyle } from '../look';
 import type { KitAnimated, KitMaterials, PartDims } from '../types';
 
-export type StyleId = 'industrial' | 'sleek' | 'titan';
+export type StyleId = 'industrial' | 'sleek' | 'titan' | 'pebble' | 'blade' | 'slab' | 'hivis';
 
 export interface KitStyle {
   id: StyleId;
@@ -22,26 +23,50 @@ export interface KitStyle {
   cable: string;
   hose: string;
   signal: string; // coloured signal cable
+  limbs: LimbStyle; // 'iron' = the plated recipes; the rest dress limbs as modern electric shells
 }
+
+const NO_ACCENTS: ReadonlySet<string> = new Set();
 
 const STYLES: Record<StyleId, KitStyle> = {
   industrial: {
     id: 'industrial', round: false, plate: 0.016, boltKind: 'hex', boltSize: 0.0085, boltDensity: 0.85,
     hoses: true, pauldron: 0.75, exposed: 0.7,
     accents: new Set(['chest.pec', 'arm.front', 'thigh.front', 'knee', 'fore.plate', 'foot.toe', 'head.cheek']),
-    cable: '#141414', hose: '#9a4a1c', signal: '#b8321c',
+    cable: '#141414', hose: '#9a4a1c', signal: '#b8321c', limbs: 'iron',
   },
   sleek: {
     id: 'sleek', round: true, plate: 0.009, boltKind: 'rivet', boltSize: 0.005, boltDensity: 0.25,
     hoses: false, pauldron: 0.45, exposed: 0.85,
     accents: new Set(['chest.pec', 'thigh.side', 'shin', 'fore.plate', 'head.cheek']),
-    cable: '#101214', hose: '#1d2a30', signal: '#1aa6c4',
+    cable: '#101214', hose: '#1d2a30', signal: '#1aa6c4', limbs: 'iron',
   },
   titan: {
     id: 'titan', round: true, plate: 0.02, boltKind: 'rivet', boltSize: 0.0075, boltDensity: 1,
     hoses: true, pauldron: 1.25, exposed: 0.45,
     accents: new Set(['pauldron', 'fore.plate', 'shin', 'chest.pec', 'foot.toe']),
-    cable: '#161412', hose: '#2a2622', signal: '#a8741a',
+    cable: '#161412', hose: '#2a2622', signal: '#a8741a', limbs: 'iron',
+  },
+  // Modern electric fighters: moulded shells over exposed rotary actuators, no hoses.
+  pebble: {
+    id: 'pebble', round: true, plate: 0.008, boltKind: 'rivet', boltSize: 0.0038, boltDensity: 0.1,
+    hoses: false, pauldron: 0, exposed: 0.5, accents: NO_ACCENTS,
+    cable: '#151515', hose: '#1d1d1d', signal: '#e8641a', limbs: 'pebble',
+  },
+  blade: {
+    id: 'blade', round: true, plate: 0.008, boltKind: 'rivet', boltSize: 0.0042, boltDensity: 0.15,
+    hoses: false, pauldron: 0, exposed: 0.6, accents: NO_ACCENTS,
+    cable: '#121214', hose: '#1d1d22', signal: '#9dffd6', limbs: 'blade',
+  },
+  slab: {
+    id: 'slab', round: false, plate: 0.018, boltKind: 'rivet', boltSize: 0.0072, boltDensity: 0.8,
+    hoses: false, pauldron: 0, exposed: 0.5, accents: NO_ACCENTS,
+    cable: '#121212', hose: '#1b1b1b', signal: '#ff4d1a', limbs: 'slab',
+  },
+  hivis: {
+    id: 'hivis', round: true, plate: 0.007, boltKind: 'rivet', boltSize: 0.0034, boltDensity: 0.1,
+    hoses: false, pauldron: 0, exposed: 0.7, accents: NO_ACCENTS,
+    cable: '#111214', hose: '#1a1b1e', signal: '#b58cff', limbs: 'hivis',
   },
 };
 
@@ -55,6 +80,8 @@ const DESIGN_STYLE: Record<string, StyleId> = {
 };
 
 export function styleFor(design: RobotDesign): KitStyle {
+  const limbs = designLook(design).limbs;
+  if (limbs !== 'iron') return STYLES[limbs];
   return STYLES[DESIGN_STYLE[design.id] ?? 'industrial'];
 }
 
@@ -79,6 +106,7 @@ export interface RecipeContext {
   rotors: Array<{ object: THREE.Object3D; axis: THREE.Vector3; speed: number }>;
   rams: KitAnimated['rams'];
   rand: () => number;
+  look: DesignLook;
 }
 
 export type KitRecipe = (ctx: RecipeContext) => void;

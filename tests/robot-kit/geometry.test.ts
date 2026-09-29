@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import * as THREE from 'three/webgpu';
 import { DESIGNS } from '../../src/robots/designs';
 import { SKIN_IDS } from '../../src/render/robot-kit';
@@ -9,6 +9,9 @@ import type { KitMaterials } from '../../src/render/robot-kit/types';
 import { partDims } from '../../src/render/robot-kit/recipes/context';
 import { registeredRecipes } from '../../src/render/robot-kit/recipes/registry';
 import { buildTestRobot, meshBox } from './helpers';
+
+// Building a full robot is heavy (7 designs, ~100k triangles each); allow for a loaded machine.
+vi.setConfig({ testTimeout: 120_000 });
 
 const ENVELOPE_TOLERANCE = 0.15; // fraction of the collision size on each side
 const MIN_TOLERANCE_M = 0.012; // bevels and bolt heads on very thin parts
@@ -38,7 +41,7 @@ function windingAgreement(geo: THREE.BufferGeometry): number {
 
 function dummyMaterials(): KitMaterials {
   const m = new THREE.MeshBasicMaterial();
-  return { paint: m, frame: m, mech: m, chrome: m, rubber: m, glow: m, lens: m, core: m, wire: m };
+  return { paint: m, trim: m, glove: m, frame: m, mech: m, chrome: m, rubber: m, glow: m, lens: m, core: m, wire: m };
 }
 
 function outwardFraction(geo: THREE.BufferGeometry, centre: THREE.Vector3): number {
@@ -125,7 +128,7 @@ describe('robot kit builds', () => {
     });
   }
 
-  test('all six skins build for a design', () => {
+  test('every skin builds for a design', () => {
     for (const skin of SKIN_IDS) {
       const r = buildTestRobot('bruiser', skin);
       expect(r.view.materials.paint.name).toContain(skin);

@@ -12,7 +12,7 @@ import {
 } from './tsl';
 import { bumpNormal, fbm01, heatColor, objectValue, planar, scratchLines, srgb } from './tsl-util';
 
-export type KitFlavor = 'paint' | 'frame' | 'mech';
+export type KitFlavor = 'paint' | 'trim' | 'glove' | 'frame' | 'mech';
 
 const HEAT_GLOW = 0.55; // emissive gain for overheated metal (higher saturates to a flat cream under ACES)
 const CHIP_DEPTH_M = 0.0005; // bump depth of chipped paint
@@ -25,13 +25,25 @@ interface FlavorTuning {
   wear: number;
   neon: number;
   colorVar: number;
+  chipMetal: number; // chips and scratches expose bare metal (1) or scuffed material (0)
 }
 
 const FLAVOR: Record<KitFlavor, FlavorTuning> = {
-  paint: { accent: 1, decals: 1, wear: 1, neon: 1, colorVar: 1 },
-  frame: { accent: 0, decals: 0, wear: 0.55, neon: 0, colorVar: 0.5 },
-  mech: { accent: 0, decals: 0, wear: 0.35, neon: 0, colorVar: 0.3 },
+  paint: { accent: 1, decals: 1, wear: 1, neon: 1, colorVar: 1, chipMetal: 1 },
+  trim: { accent: 0, decals: 1, wear: 0.8, neon: 1, colorVar: 0.6, chipMetal: 1 },
+  glove: { accent: 0, decals: 0, wear: 0.7, neon: 0, colorVar: 0.5, chipMetal: 0 },
+  frame: { accent: 0, decals: 0, wear: 0.55, neon: 0, colorVar: 0.5, chipMetal: 1 },
+  mech: { accent: 0, decals: 0, wear: 0.35, neon: 0, colorVar: 0.3, chipMetal: 1 },
 };
+
+/** Padded leather: satin, a light sheen, scuffs to a paler leather instead of metal. */
+const GLOVE_LEATHER = { metal: 0, rough: 0.5, clearcoat: 0.35, clearcoatRough: 0.35 };
+
+function scaleHex(hex: string, k: number): string {
+  const c = new THREE.Color(hex);
+  c.lerp(new THREE.Color(k > 1 ? '#ffffff' : '#000000'), Math.abs(k - 1));
+  return `#${c.getHexString()}`;
+}
 
 /** Selects one of the accent patterns by mode (see ACCENT in skins.ts). */
 function accentColor(mode: Nd, base: Nd, a: Nd, b: Nd, p: Nd, decalU: Nd, variant: Nd): Nd {
@@ -56,11 +68,16 @@ export interface KitMaterialOptions {
   skin: SkinParams;
   flavor: KitFlavor;
   atlas: THREE.Texture | null;
+  /** Glove flavor: the leather colour (gloves and headgear keep it in every skin). */
+  gloveColor?: string;
 }
 
-export function createKitMaterial({ skin, flavor, atlas }: KitMaterialOptions): THREE.MeshPhysicalNodeMaterial {
+export function createKitMaterial({ skin, flavor, atlas, gloveColor }: KitMaterialOptions): THREE.MeshPhysicalNodeMaterial {
   const tune = FLAVOR[flavor];
-  const layer = flavor === 'paint' ? skin.paint : flavor === 'frame' ? skin.frame : skin.mech;
+  const glove = flavor === 'glove';
+  const leather = gloveColor ?? '#9e1a1f';
+  const layer = flavor === 'paint' ? skin.paint : flavor === 'trim' ? skin.trim : flavor === 'frame' ? skin.frame : flavor === 'mech' ? skin.mech
+    : { color: leather, metal: GLOVE_LEATHER.metal, rough: GLOVE_LEATHER.rough };
   const alts = flavor === 'paint' ? skin.paintAlt : [];
   const U = {
     base: uniform(srgb(layer.color)),
@@ -72,23 +89,25 @@ export function createKitMaterial({ skin, flavor, atlas }: KitMaterialOptions): 
     colorVar: uniform(skin.colorVar * tune.colorVar),
     metal: uniform(layer.metal),
     rough: uniform(layer.rough),
-    clearcoat: uniform(flavor === 'paint' ? skin.clearcoat : 0),
-    ccRough: uniform(skin.clearcoatRough),
+    clearcoat: uniform(flavor === 'paint' ? skin.clearcoat : flavor === 'trim' ? skin.clearcoat * 0.6 : glove ? GLOVE_LEATHER.clearcoat : 0),
+    ccRough: uniform(glove ? GLOVE_LEATHER.clearcoatRough : skin.clearcoatRough),
     accentOn: uniform(tune.accent),
     accentMode: uniform(skin.accentMode),
     accentA: uniform(srgb(skin.accentA)),
     accentB: uniform(srgb(skin.accentB)),
-    bare: uniform(srgb(skin.bare)),
-    primer: uniform(srgb(skin.primer)),
+    bare: uniform(srgb(glove ? scaleHex(leather, 1.35) : skin.bare)),
+    primer: uniform(srgb(glove ? scaleHex(leather, 0.6) : skin.primer)),
+    chipMetal: uniform(tune.chipMetal * (flavor === 'paint' || flavor === 'trim' ? skin.bareMetal ?? 1 : 1)),
     wear: uniform(skin.wear * tune.wear),
-    scratches: uniform(skin.scratches * tune.wear),
+    scratches: uniform(skin.scratches * tune.wear * (glove ? 0.35 : 1)),
     grime: uniform(skin.grime),
     grimeColor: uniform(srgb(skin.grimeColor)),
-    rust: uniform(skin.rust * (flavor === 'mech' ? 0.5 : 1)),
-    carbon: uniform(flavor === 'mech' ? 0 : skin.carbon),
+    rust: uniform(glove ? 0 : skin.rust * (flavor === 'mech' ? 0.5 : 1)),
+    carbon: uniform(flavor === 'mech' || glove ? 0 : skin.carbon),
     neon: uniform(srgb(skin.neon).multiplyScalar(skin.neonIntensity * tune.neon)),
     decalOn: uniform(atlas ? tune.decals : 0),
-    decalFill: uniform(srgb(skin.decalFill)),
+    // Numbers on trim (shin guards) are painted in the main colour so they read on the pale trim.
+    decalFill: uniform(srgb(flavor === 'trim' && skin.id === 'livery' ? skin.paint.color : skin.decalFill)),
     decalLine: uniform(srgb(skin.decalLine)),
     decalOpacity: uniform(skin.decalOpacity),
     dust: uniform(skin.dust),
@@ -182,7 +201,7 @@ export function createKitMaterial({ skin, flavor, atlas }: KitMaterialOptions): 
   let rough: Nd = U.rough.add(mx_noise_float(ps.mul(12.0)).mul(0.05));
   metal = mix(metal, float(0.1), rustAmt);
   rough = mix(rough, float(0.9), rustAmt);
-  metal = mix(metal, float(1.0), max(chip, scratch));
+  metal = mix(metal, float(1.0), max(chip, scratch).mul(U.chipMetal));
   rough = mix(rough, float(0.32), chip);
   rough = mix(rough, float(0.24), scratch);
   rough = mix(rough, float(0.92), grime.mul(0.55));

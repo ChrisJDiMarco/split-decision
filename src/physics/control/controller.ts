@@ -42,6 +42,11 @@ const RISE_PAUSE_OUTSIDE_M = 0.03; // ...and all but stops this far outside them
 const RISE_MIN_RATE = 0.1;
 const WALK_SPEED = 0.55; // m/s closing the distance, at aggression 0.5
 const WALK_ASSIST_SHARE = 0.6; // share of the gyro's torque a walk may use to steer the COM
+/**
+ * The fast walker (walk.ts) is unfinished: it drops the lighter robots within ~2-3 s. Until the
+ * mocap footwork replaces it, fighters cover ground with the slower, stable stepping planner.
+ */
+const FAST_WALK_ENABLED = false;
 const WALK_ASSIST_SAT = 0.6; // ...tapering to none as its rotor fills to this
 const SPRINT_FACTOR = 1.15;
 
@@ -325,7 +330,7 @@ export class HumanoidController {
       return;
     }
     // Covering ground: walk (the COM keeps travelling) until close, then square up in stance.
-    if (this.walker.active || this.walker.wants(s, this.goal, s.heading - this.stance.pelvisYaw)) {
+    if (FAST_WALK_ENABLED && (this.walker.active || this.walker.wants(s, this.goal, s.heading - this.stance.pelvisYaw))) {
       if (this.walker.update(s, this.goal, this.walker.params(this.walkSpeed(), this.gyroAssistM(s)), dt)) return;
     }
     const cur = gait.bothPlanted() ? gait.currentFrame() : null;

@@ -51,6 +51,8 @@ export class ShowroomRobot {
   readonly jointTemp = new Map<string, number>();
   gyroLoad = 0.25;
   pump = true;
+  /** Hold the plain stance (no idle sway): turntable comparisons against concept art. */
+  still = false;
 
   constructor(readonly design: RobotDesign, skin: SkinId, parent: THREE.Object3D, offset: THREE.Vector3, yaw = 0, phase = 0, corner: 0 | 1 = 0) {
     this.root.position.copy(offset);
@@ -93,7 +95,7 @@ export class ShowroomRobot {
 
   update(dt: number, animate: boolean): void {
     if (animate) this.t += dt;
-    const q = idleAngles(this.design, this.t, this.pump);
+    const q = this.still ? { ...this.design.stance } : idleAngles(this.design, this.t, this.pump);
     const poses = forwardKinematics(this.design, q, new THREE.Vector3(0, 0, this.design.rootHeight - this.groundZ), new THREE.Quaternion());
     applyBodyPoses(poses, this.byPart);
     for (const [id, toy] of this.toys) this.stepToy(id, toy, dt);

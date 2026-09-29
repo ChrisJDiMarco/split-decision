@@ -22,8 +22,8 @@ const QUALITIES: Quality[] = ['high', 'medium', 'low'];
 
 const DEFAULT_SETUP: MatchSetup = {
   fighters: [
-    { design: 'bruiser', skin: 'factory', plan: 'Walk him down behind the guard. Jab to find range, then the overhand. When he kicks, step in and punish the body.', temperament: 1 },
-    { design: 'striker', skin: 'neon', plan: 'Stay long and light. Low kicks to the lead leg until the knee fails, then go upstairs with the head kick. Never stand still in front of him.', temperament: 1.2 },
+    { design: 'savate', skin: 'livery', plan: 'Orthodox kickboxer. Measure him with the jab and live at kicking range. Chop his lead leg with low kicks until his stance or his gyro gives, then go upstairs with the head kick. When he walks in behind the guard, front kick him off his base and sprint off the angle. Never stand in the clinch with him. Finish every combination with a kick: jab, cross, hook, low kick.', temperament: 1.1 },
+    { design: 'haymaker', skin: 'livery', plan: 'Pressure brawler. Walk him down behind a high guard, chin tucked, and cut off the cage; do not chase, cut the angle. Get inside his kicks and smother him in the clinch. Dig hooks and uppercuts to the body, and when he covers up, load the overhand. If he circles out, chop his leg with a low kick. Every punch is thrown to end it.', temperament: 1.3 },
   ],
   seed: 7,
   timestep: 0.001,
@@ -204,7 +204,9 @@ function frame(now: number) {
     applyPendingImpacts();
     updateRobotKit(views, shown.telemetry, dt);
   }
-  const simDt = workerPaused ? 0 : dt * (broadcast.replaying() ? 0.25 : timescale);
+  const replaying = broadcast.replaying();
+  vfx.setReplay(replaying);
+  const simDt = workerPaused && !replaying ? 0 : dt * (replaying ? 0.25 : timescale);
   vfx.update(simDt);
   arena.update(dt);
   post.render();

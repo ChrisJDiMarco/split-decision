@@ -70,7 +70,7 @@ export function wireMaterial(): THREE.MeshStandardNodeMaterial {
 }
 
 /** Emissive optics in the design's eye colour; `glow` per object drives flicker and power-down. */
-export function glowMaterial(hex: string): THREE.MeshStandardNodeMaterial {
+export function glowMaterial(hex: string, gain = 1): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
   m.name = `kit-glow-${hex}`;
   const eye = srgb(hex);
@@ -79,7 +79,7 @@ export function glowMaterial(hex: string): THREE.MeshStandardNodeMaterial {
   m.colorNode = color(eye).mul(0.15);
   m.roughnessNode = float(0.25);
   m.metalnessNode = float(0);
-  m.emissiveNode = color(eye).mul(oGlow).mul(shimmer).mul(EYE_INTENSITY);
+  m.emissiveNode = color(eye).mul(oGlow).mul(shimmer).mul(EYE_INTENSITY * gain);
   return m;
 }
 

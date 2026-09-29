@@ -1,0 +1,32 @@
+{
+  "bruiser/0": {
+    "sha256": "31b19e51ae1f3b1173c0849a89984ebb3fbe2dfc3076fca530a8320c79b02b46",
+    "length": 12313,
+    "totalMassKg": 235.93608275373686
+  },
+  "bruiser/1": {
+    "sha256": "e956cc77f88a9fd7c0cc2f1bd6b535d08c6180af9ec0846c6a63334d0eeca664",
+    "length": 12312,
+    "totalMassKg": 235.93608275373686
+  },
+  "striker/0": {
+    "sha256": "6970868aac1f6f4ab76b4a3fce424b75cda3eb0210ab7384c6c96e0afe1c2bc7",
+    "length": 12382,
+    "totalMassKg": 146.10091621857305
+  },
+  "striker/1": {
+    "sha256": "68cd5611541376ddf7fac423b022ad2d49ba8dee0762e864ebb8f18e89847ce3",
+    "length": 12381,
+    "totalMassKg": 146.10091621857305
+  },
+  "goliath/0": {
+    "sha256": "d843927ba9cb9741b8895d7588bf94b125cfe37f5931e5b8c7a5ccdb3a154b7e",
+    "length": 12279,
+    "totalMassKg": 408.53144272846134
+  },
+  "goliath/1": {
+    "sha256": "d96426de72b06a1e812fcf482d2cc972a62af5e1303d22cf5b2042afbbb64f96",
+    "length": 12278,
+    "totalMassKg": 408.53144272846134
+  }
+}
