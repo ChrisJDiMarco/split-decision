@@ -20,6 +20,12 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
 - Self-falls happen mostly while stepping or standing, then in the get-up rise.
 - A get-up parameter search (cross-entropy) was mid-run: some settings rose 3/3.
 
+## Chris's newer asks (2026-09-29 afternoon)
+
+- Heads must only pop from a "really nice hard solid hit" (done in e03d382: clean-strike rule; thresholds to be set from measured strike distributions of the new roster, top few percent only).
+- No blinding flash in slow-motion replays (done in e03d382).
+- Superhuman balance and capability, but physically grounded; robots should ATTEMPT tornado kicks, kip-ups and other flashy moves, not always squared up, "opportunistic, creative and intelligent". Spec: `docs/design/fighter-intelligence.md`. Twenty more CMU clips for this (spin and jump kicks, handspring family, feints) are in assets-src/mocap/cmu/ (approved).
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
