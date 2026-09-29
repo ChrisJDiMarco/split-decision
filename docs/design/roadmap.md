@@ -28,6 +28,14 @@ Every upgrade is a slot with real mass, power and heat (`docs/design/loadouts-an
 - **Armor**: plate materials and thickness per part.
 - **Repair** between fights; damage persists across a season.
 
+## Live and community (Chris, 2026-09-29)
+
+- **24/7 Twitch stream** of Jev fights: Twitch Channel Points Predictions on every fight (no real money), chat votes the corner plan between rounds, channel-point/bit redemptions for fair flavour (name the next challenger, pick the arena).
+- **Build and compete**: a public submission page (build + fight plan) feeding a fight queue on stream, public Elo ladder, weekly title fights; free entry, prizes funded by sponsors or the channel.
+- **Money**: subs/bits/ads, sponsors (TypeSafe as the natural first; robotics and AI labs for a bring-your-own-brain league), Patreon, later a Steam game with cosmetic skins.
+- **No real-money betting or paid-entry prize pools**: that is regulated gambling (state licences in the US; Twitch bans unlicensed gambling streams).
+- **Cost**: ~$0.16 per full Jev fight, ~10 fights/hour -> ~$40/day on Jev, or $0 on the local Kev model; fights are deterministic, so they can be simulated server-side and broadcast, and every KO is a shareable clip.
+
 ## Always
 
 Physics stays honest (every part has real specs), Jev stays the mind, and it runs in any browser.
