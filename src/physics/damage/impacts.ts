@@ -8,8 +8,7 @@ import type { Corner, Vec3 } from '../../core/types';
 import type { SimContext } from '../sim-context';
 import {
   CAGE_MIN_SPEED, CHAIN_MASS_SHARE, IMPACT_WINDOW_S, MAX_ENTRY_PENETRATION_M, MIN_EVENT_IMPULSE_NS, MIN_SPEED_DEBRIS, MIN_SPEED_FOOT_CANVAS,
-  MIN_SPEED_PROP, MIN_SPEED_ROBOT_ROBOT, MIN_SPEED_ROBOT_WORLD, OVERLOAD_ARM_TAIL_S,
-} from './constants';
+  MIN_SPEED_PROP, MIN_SPEED_ROBOT_ROBOT, MIN_SPEED_ROBOT_WORLD, OVERLOAD_ARM_TAIL_S, NON_STRIKE_DAMAGE_SCALE, CLEAN_HIT_MIN_SPEED } from './constants';
 import { maybeDetach } from './detach';
 import { GEOM_KIND, type DamageState, type Episode, type GeomInfo } from './state';
 import { applyPartDamage, armLoadPath, damagePoints } from './wear';
@@ -117,11 +116,25 @@ function accumulate(ep: Episode, c: ContactView, force: number, dt: number): voi
 
 /** A detachable part whose running impulse already beats its break spec pops now, not at episode end. */
 function breaksNow(st: DamageState, ep: Episode): boolean {
-  for (const g of [st.geoms[ep.a]!, st.geoms[ep.b]!]) {
-    const spec = isRobot(g) ? g.part?.def.detachable : undefined;
-    if (spec && g.part!.part.attached && ep.impulse >= spec.impulseNs) return true;
+  const ga = st.geoms[ep.a]!, gb = st.geoms[ep.b]!;
+  for (const [victim, striker] of [[ga, gb], [gb, ga]] as const) {
+    const spec = victim.part?.def.detachable;
+    if (spec && victim.part!.part.attached && ep.impulse >= spec.impulseNs && isCleanHit(victim, striker, ep.speed)) return true;
   }
   return false;
+}
+
+/** The other robot (or a thrown prop): the only contacts that count as strikes. */
+function isStrike(victim: GeomInfo, other: GeomInfo): boolean {
+  if (other.kind === GEOM_KIND.PROP) return true;
+  return isRobot(victim) && isRobot(other) && victim.corner !== other.corner;
+}
+
+/** A clean, committed shot: a striking surface (fist, glove, foot, shin) landing fast. */
+function isCleanHit(victim: GeomInfo, other: GeomInfo, speed: number): boolean {
+  if (!isStrike(victim, other) || speed < CLEAN_HIT_MIN_SPEED) return false;
+  if (other.kind === GEOM_KIND.PROP) return true;
+  return other.role === 'striker' || other.role === 'foot' || !!other.part?.def.tags.includes('shin');
 }
 
 function unit(v: Vec3): Vec3 {
@@ -174,8 +187,12 @@ function finalize(ctx: SimContext, st: DamageState, ep: Episode): void {
   for (const [self, other, impulseOnSelf] of sides) {
     if (!isRobot(self) || !self.part || !self.part.part.attached) continue;
     const rd = st.robots[self.corner!];
-    applyPartDamage(ctx, rd, self.part, damagePoints(ep.impulse, energyJ, other.surface, self.surface));
-    maybeDetach(ctx, st, self.part, ep.impulse, impulseOnSelf);
+    const strike = isStrike(self, other);
+    const points = damagePoints(ep.impulse, energyJ, other.surface, self.surface) * (strike ? 1 : NON_STRIKE_DAMAGE_SCALE);
+    applyPartDamage(ctx, rd, self.part, points);
+    // Only a clean hard strike pops a part in one blow; anything else can finish it off through
+    // accumulated damage, never in one go.
+    maybeDetach(ctx, st, self.part, isCleanHit(self, other, ep.speed) ? ep.impulse : 0, impulseOnSelf);
   }
 }
 

@@ -51,6 +51,8 @@ export interface Vfx {
    */
   setKeyLight(toLight: THREE.Vector3, color?: THREE.Color, ambient?: THREE.Color): void;
   /** Remove every particle, puddle and piece of debris (between rounds). */
+  /** Dim impact flashes while a slow-motion replay plays. */
+  setReplay(replaying: boolean): void;
   clear(): void;
   dispose(): void;
   readonly stats: VfxStats;
@@ -65,7 +67,7 @@ export function createVfx(stage: VfxStage, seed = 1337): Vfx {
   const root = new THREE.Group();
   root.name = 'vfx';
   const sparks = new SparkSystem(rng);
-  const flash = new FlashSystem();
+  const flash = new FlashSystem(stage.camera);
   const debris = new DebrisSystem(rng);
   const smoke = new SmokeSystem(rng);
   const oil: OilSystem = createOil(stage, rng);
@@ -109,6 +111,9 @@ export function createVfx(stage: VfxStage, seed = 1337): Vfx {
       oilKeyDir.value.copy(toLight).normalize();
       if (color) smoke.keyColor.value.copy(color);
       if (ambient) smoke.ambient.value.copy(ambient);
+    },
+    setReplay(replaying) {
+      flash.setReplay(replaying);
     },
     clear() {
       sparks.clear();

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { setSetting } from '../../src/core/settings';
+import { describe, expect, test, beforeAll, afterAll } from 'vitest';
 import * as THREE from 'three/webgpu';
 import type { PartTelemetry, RobotTelemetry, SimEvent, WorldMeta } from '../../src/core/protocol';
 import { makeRng, toWorld } from '../../src/render/vfx/coords';
@@ -158,6 +159,10 @@ describe('event routing', () => {
 });
 
 describe('telemetry emitters', () => {
+  // Oil effects are a player setting, off by default; these tests exercise the emitter itself.
+  beforeAll(() => setSetting('oilEffects', true));
+  afterAll(() => setSetting('oilEffects', false));
+
   function setup() {
     const rng = makeRng(4);
     const smoke = new SmokeSystem(rng);

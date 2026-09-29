@@ -40,9 +40,11 @@ describe('impacts', () => {
         step(ctx, 300);
         expect(ofKind(drain(ctx), 'impact')).toHaveLength(0);
         for (const r of ctx.robots) for (const j of r.joints) expect(j.health).toBe(1);
+        ctx.data.delete(); // 7 designs = 49 worlds: free each one or the WASM heap runs out
+        ctx.model.delete();
       }
     }
-  });
+  }, 120_000);
 
   it('a heavy fast ram knocks the head off', () => {
     const { ctx, head, events } = hitHead(60, 12);

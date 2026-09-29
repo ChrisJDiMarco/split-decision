@@ -42,7 +42,7 @@ export function dustPuffs(speed: number): number {
 
 /** Light flash intensity (candela-ish, three.js physical units) for an impact. */
 export function flashIntensity(energyJ: number): number {
-  return clamp(Math.sqrt(Math.max(0, energyJ)) * 3.2, 0, 160);
+  return clamp(Math.sqrt(Math.max(0, energyJ)) * 1.6, 0, 45);
 }
 
 /**

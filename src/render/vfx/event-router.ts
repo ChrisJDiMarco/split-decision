@@ -14,6 +14,8 @@ import type { SparkSystem } from './sparks';
 const FLOOR_HIT_HEIGHT_M = 0.3;
 /** A detached part sheds its seam like a hit of this energy. */
 const DETACH_ENERGY_J = 900;
+/** The flash for a popped part is a modest pop: the sparks, bolts and flying part carry the moment. */
+const DETACH_FLASH_J = 150;
 /** Cage hits are chain link and posts: rattly, few sparks. */
 const CAGE_SPARK_SCALE = 0.25;
 /** Below this squared length a direction is degenerate and gets a fallback. */
@@ -90,7 +92,7 @@ function detach(e: Extract<SimEvent, { kind: 'detach' }>, fx: EffectSystems, rng
   toWorld(e.vel, V);
   randomInCone(rng, UP, 1.2, D);
   fx.sparks.burst(P, DETACH_ENERGY_J, { normal: D });
-  fx.flash.flash(P, DETACH_ENERGY_J);
+  fx.flash.flash(P, DETACH_FLASH_J);
   // Sheared fasteners and a few fragments of the mount.
   fx.debris.throw('bolt', 3 + Math.floor(rng() * 4), P, UP, 2.4, 1.3, V);
   fx.debris.throw('nut', 1 + Math.floor(rng() * 3), P, UP, 2.0, 1.3, V);

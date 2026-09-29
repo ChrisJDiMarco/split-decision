@@ -42,7 +42,7 @@ export const RESISTANCE_MAX = 1.5;
  * and a kicker would shred its own ankles in a few kicks. A pad soaks the blow for the part behind it the
  * way it softens the blow for the target, so a cushioned victim takes HARDNESS_MIN of the base points.
  */
-export const CUSHION_MATERIALS: readonly MaterialId[] = ['rubber'];
+export const CUSHION_MATERIALS: readonly MaterialId[] = ['rubber', 'glove'];
 
 /** Hardness stand-ins for arena surfaces (the canvas and pads give, the chain link a little less). */
 export const WORLD_SURFACES = {
@@ -52,6 +52,18 @@ export const WORLD_SURFACES = {
 } as const;
 
 // ---------------------------------------------------------------- detachment
+
+/**
+ * Only a strike from the other robot can pop a part off in one blow. Falls into the canvas, the cage
+ * and flying debris still dent it (at this share of the damage points) and count toward the
+ * accumulated-damage break, but a stumble can't decapitate anyone.
+ */
+export const NON_STRIKE_DAMAGE_SCALE = 0.35;
+/**
+ * A one-blow knockoff also needs a clean, committed shot: a fist, glove, foot or shin landing at
+ * least this fast. Pushes, clinch bumps and slow shots only add accumulated damage.
+ */
+export const CLEAN_HIT_MIN_SPEED = 4.5;
 
 /** Share of the hit's impulse that becomes the flying part's extra velocity (J / m · share). */
 export const DETACH_KICK_SHARE = 0.35;
