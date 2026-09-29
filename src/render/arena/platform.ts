@@ -41,7 +41,7 @@ function bannerTexture(): THREE.CanvasTexture | null {
   ctx.fillStyle = '#050506';
   ctx.fillRect(0, 0, 2048, 128);
   const items: Array<[string, string]> = [
-    ['SPLIT DECISION', '#f3efe6'], ['POWERED BY JEV', '#ff5a36'], ['TYPESAFE AI', '#f3efe6'],
+    ['JEV KUNE DO', '#f3efe6'], ['POWERED BY JEV', '#ff5a36'], ['TYPESAFE AI', '#f3efe6'],
     ['KILN FORGE', '#ffb347'], ['HYDRAULIX', '#3fd0c4'], ['CAGE 01', '#6d9bff'],
   ];
   ctx.font = `italic 800 84px ${DISPLAY_FONT}`;

@@ -1,6 +1,6 @@
-# Split Decision
+# Jev Kune Do
 
-Physically simulated robot fights in the browser. MuJoCo (WASM) runs the physics in a Web Worker, three.js (WebGPU) renders, and Jev (TypeSafe AI) is each fighter's mind.
+Physically simulated robot fights in the browser, with Jev as every fighter's mind. (Codename and folder: split-decision; "Split Decision" is also the fight-night event mode.) MuJoCo (WASM) runs the physics in a Web Worker, three.js (WebGPU) renders, and Jev (TypeSafe AI) is each fighter's mind.
 
 - `docs/PRD.md`: Demo 1 scope and success criteria
 - `docs/CONCEPT.md`: research synthesis

@@ -144,7 +144,7 @@ export interface CageView {
 export function buildCage(): CageView {
   const group = new THREE.Group();
   group.name = 'arena-cage';
-  const black = vinyl(0xffffff, padTexture('#161618', 'rgba(232,228,218,0.85)', 'SPLIT DECISION'));
+  const black = vinyl(0xffffff, padTexture('#161618', 'rgba(232,228,218,0.85)', 'JEV KUNE DO'));
   const red = vinyl(0xffffff, padTexture('#a3201a', 'rgba(250,244,236,0.92)', 'RED CORNER'));
   const blue = vinyl(0xffffff, padTexture('#1b44a6', 'rgba(250,244,236,0.92)', 'BLUE CORNER'));
   const plain = vinyl(0x141416, null);

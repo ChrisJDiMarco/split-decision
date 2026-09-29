@@ -1,6 +1,6 @@
 // Painted canvas mat artwork: a hand-painted look drawn once into 2D canvases.
 // Color: off-white duck canvas, a dark perimeter band, sponsor panels, red/blue corner
-// wedges and the big SPLIT DECISION center emblem, then worn paint, scuffs, rubber streaks
+// wedges and the big JEV KUNE DO center emblem, then worn paint, scuffs, rubber streaks
 // and resin/oil stains. Roughness: the same shapes in gray levels (paint and resin are
 // glossier than raw canvas). Coordinates are physics metres (z-up, x right, y away from
 // the default camera), mapped by a flipped transform so y points up on the canvas.
@@ -122,7 +122,7 @@ function drawBand(p: Painter): void {
   panels().forEach((pn, i) => {
     const r = APOTHEM - BAND_WIDTH_M / 2;
     const [cx, cy] = [Math.cos(pn.normalAngle) * r, Math.sin(pn.normalAngle) * r];
-    const label = i % 2 === 0 ? 'SPLIT DECISION' : 'POWERED BY JEV';
+    const label = i % 2 === 0 ? 'JEV KUNE DO' : 'POWERED BY JEV';
     text(p, label, cx, cy, pn.normalAngle, 0.15, pn.length * 0.55, p.mode === 'color' ? 'rgba(236,232,222,0.78)' : gray(ROUGH_PAINT), 700, false);
   });
 }
@@ -217,12 +217,12 @@ function drawEmblem(p: Painter): void {
   const outline = paint ? INK : gray(ROUGH_PAINT);
   const fill = paint ? '#f6f3ec' : gray(ROUGH_PAINT);
   for (const [dx, dy] of [[0.035, -0.035], [-0.02, 0.02], [0.02, 0.02], [-0.02, -0.02]] as const) {
-    text(p, 'SPLIT', dx - 0.18, 0.3 + dy, up, 0.78, 2.1, outline, 800);
-    text(p, 'DECISION', dx + 0.1, -0.48 + dy, up, 0.56, 3.3, outline, 800);
+    text(p, 'JEV', dx - 0.1, 0.3 + dy, up, 0.86, 1.7, outline, 800);
+    text(p, 'KUNE DO', dx + 0.1, -0.48 + dy, up, 0.56, 3.0, outline, 800);
   }
-  text(p, 'SPLIT', -0.18, 0.3, up, 0.78, 2.1, fill, 800);
-  text(p, 'DECISION', 0.1, -0.48, up, 0.56, 3.3, fill, 800);
-  text(p, 'CAGE 01  ·  JEV FIGHT SERIES', 0, -1.05, up, 0.085, 1.6, fill, 700, false);
+  text(p, 'JEV', -0.1, 0.3, up, 0.86, 1.7, fill, 800);
+  text(p, 'KUNE DO', 0.1, -0.48, up, 0.56, 3.0, fill, 800);
+  text(p, 'CAGE 01  ·  SPLIT DECISION FIGHT NIGHT', 0, -1.05, up, 0.085, 1.6, fill, 700, false);
 }
 
 function drawGuideRing(p: Painter): void {
