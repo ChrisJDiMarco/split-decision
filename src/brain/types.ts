@@ -1,5 +1,5 @@
 // Types shared inside the brain module and exposed to the HUD.
-import type { RobotTelemetry, SimEvent, Tactic, TargetZone } from '../core/protocol';
+import type { GetupStyle, Opening, RobotTelemetry, SimEvent, Tactic, TargetZone } from '../core/protocol';
 
 /** Where a decision came from. 'local' = an obvious tick settled by a code rule, no Jev call. */
 export type DecisionSource = 'jev' | 'local' | 'fallback';
@@ -44,6 +44,19 @@ export interface BrainDecision {
   latencyMs: number | null; // wall ms for the Jev round trip
   reason: string; // short human-readable why (rule name, "hysteresis kept guard", ...)
   trigger: string; // 'cadence', 'stale', or the interrupt that forced the query ('big_hit', 'opp_windup', ...)
+  openings: Opening[]; // what the fighter saw on its opponent when it decided
+  gamble: GambleView | null; // the opening move it went for, if any
+  combo: Tactic[] | null; // the combination it is running (tactic 'combo')
+  getupStyle?: GetupStyle; // chosen while down
+  flourish: boolean;
+}
+
+/** An opening move (or creative gamble) the fighter went for. */
+export interface GambleView {
+  move: Tactic;
+  opening: Opening | null; // null: a creative gamble with no opening
+  p: number | null; // Jev's probability for the move (null: House Mind rule)
+  risk: number | null; // its fall risk (flashy moves only)
 }
 
 export interface LatencySummary { n: number; mean: number; p50: number; p90: number; p99: number; max: number }

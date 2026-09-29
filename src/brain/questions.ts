@@ -3,9 +3,11 @@
 import type { RobotTelemetry, Tactic, TargetZone } from '../core/protocol';
 import type { PartDef, RobotDesign } from '../core/types';
 import { hpWords } from './bands';
+import { NONE, riskBand, type MenuItem, type OpeningMenu } from './gambles';
 import type { JevQuestion } from './jev-client';
 import type { FighterContext } from './situation';
-import { designTactics, TACTIC_INFO } from './tactics';
+import { comboId, styleOf } from './style';
+import { designTactics, TACTIC_INFO, tacticWords } from './tactics';
 
 export const AGGRESSION_LEVELS = ['fully defensive', 'cautious', 'balanced', 'pressing', 'all-out'];
 export const WINNING_LEVELS = ['opponent clearly', 'opponent slightly', 'even', 'you slightly', 'you clearly'];
@@ -30,6 +32,18 @@ export interface QuestionSet {
   tactics: Tactic[];
   targets: TargetZone[];
   counters: Tactic[];
+  /** opening_move options (empty when not asked); the choice keys are their moves plus 'none'. */
+  menu: MenuItem[];
+  creative: boolean; // the menu is a creative gamble with no opening
+  combos: Tactic[][]; // combo options (empty when not asked)
+  getup: boolean; // getup_style asked
+}
+
+/** The optional questions for one decision (all ride in the same Jev call). */
+export interface ExtraQuestions {
+  menu?: OpeningMenu | null; // ask opening_move when it has items
+  combos?: Tactic[][] | null; // ask combo (and offer 'combo' as a tactic) when non-empty
+  kipRisk?: number | null; // ask getup_style (only when down)
 }
 
 /** Which target zone a part belongs to, from its tags. */
@@ -81,15 +95,62 @@ function describe(tactics: readonly Tactic[]): Record<string, string> {
   return Object.fromEntries(tactics.map((t) => [t, TACTIC_INFO[t].description]));
 }
 
-export function buildQuestions(fc: FighterContext, opp: RobotTelemetry): QuestionSet {
-  const tactics = designTactics(fc.design);
+export function comboWords(c: readonly Tactic[]): string {
+  return c.map(tacticWords).join(', ');
+}
+
+export function openingMoveQuestion(menu: OpeningMenu): JevQuestion {
+  const criteria: Record<string, string> = Object.fromEntries(menu.items.map((i) => [i.move, i.description]));
+  criteria[NONE] = menu.creative ? 'no gamble: keep to the plan' : 'let the opening go and stay patient';
+  const instructions = menu.creative
+    ? 'There is no clear opening. Should `you` try a creative gamble right now, given the fall risks in `you.flashy_risk`, your `personality` and your `record`?'
+    : 'The `opponent` shows an opening (see `opponent.openings`). Which move should `you` go for right now, weighing each fall risk and payoff against your `personality` and your `record`?';
+  return { type: 'choice', instructions, criteria };
+}
+
+export function comboQuestion(fc: FighterContext, combos: readonly Tactic[][]): JevQuestion {
+  const style = styleOf(fc.design);
+  const signature = new Set(style.combos.map(comboId));
+  const criteria = Object.fromEntries(combos.map((c) => [comboId(c), signature.has(comboId(c)) ? `${comboWords(c)} (a signature combination for ${style.words.split(':')[0]})` : comboWords(c)]));
+  return { type: 'choice', instructions: 'If `you` throw a combination next, which one fits this moment and `plan` best?', criteria };
+}
+
+/** Plain odds for a kip-up from its risk ("it usually works for your body right now"). */
+export function kipOddsWords(kipRisk: number): string {
+  if (kipRisk < 0.2) return 'it almost always works for your body right now';
+  if (kipRisk < 0.4) return 'it usually works for your body right now';
+  if (kipRisk < 0.65) return 'it works about half the time for your body right now';
+  return 'it usually fails for your body right now';
+}
+
+export function getupQuestion(kipRisk: number): JevQuestion {
+  return {
+    type: 'noul',
+    instructions: `\`you\` are down on the canvas. Should \`you\` try a kip-up (spring straight up off your back: fast and spectacular, the crowd loves it; ${riskBand(kipRisk)}, ${kipOddsWords(kipRisk)}; a failed one costs a second on the canvas) instead of the safe get-up?`,
+  };
+}
+
+export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: ExtraQuestions = {}): QuestionSet {
+  const combos = extras.combos?.length ? extras.combos : [];
+  const tactics = combos.length ? [...designTactics(fc.design), 'combo' as Tactic] : designTactics(fc.design);
   const zones = targetOptions(fc.oppDesign, opp);
   const counters = counterOptions(fc.design);
+  const menu = extras.menu?.items.length ? extras.menu : null;
+  const kip = extras.kipRisk !== undefined && extras.kipRisk !== null && Number.isFinite(extras.kipRisk);
+  const extra: Record<string, JevQuestion> = {};
+  if (menu) extra.opening_move = openingMoveQuestion(menu);
+  if (combos.length) extra.combo = comboQuestion(fc, combos);
+  if (kip) extra.getup_style = getupQuestion(extras.kipRisk as number);
   return {
     tactics,
     targets: [...zones.keys()],
     counters,
+    menu: menu?.items ?? [],
+    creative: menu?.creative ?? false,
+    combos,
+    getup: kip,
     questions: {
+      ...extra,
       tactic: { type: 'choice', instructions: 'Which tactic should `you` run for the next second, following `plan` and `personality`?', criteria: describe(tactics) },
       target: { type: 'choice', instructions: 'Where on the `opponent` should `you` aim right now?', criteria: Object.fromEntries(zones) },
       opp_commit: { type: 'noul', instructions: 'Will the `opponent` commit to a strike or lunge within the next half second?' },

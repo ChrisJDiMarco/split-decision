@@ -1,7 +1,7 @@
 // JEV MIND panel: the fighter's live tactic distribution (top 5), chosen target, the READ
 // on the opponent, aggression and latency, with a HOUSE MIND badge on fallback.
 import { h, meter, setFill, setText, toggleClass } from '../dom';
-import { tacticLabel, topTactics, type MindView } from '../minds';
+import { comboLine, gambleLine, seesLine, tacticLabel, topTactics, type MindView } from '../minds';
 
 const ROWS = 5;
 
@@ -13,6 +13,8 @@ export class MindPanel {
   private target: HTMLElement;
   private latency: HTMLElement;
   private reason: HTMLElement;
+  private gamble: HTMLElement;
+  private combo: HTMLElement;
   private read = meter('READ · COMMITTING', 'read');
   private aggression = meter('AGGRESSION');
   private lastKey = '';
@@ -34,7 +36,11 @@ export class MindPanel {
     }
     this.target = h('b', {}, '—');
     this.reason = h('div', 'mind-reason', '');
+    this.gamble = h('div', 'mind-gamble', '');
+    this.combo = h('div', 'mind-combo', '');
     const rows = h('div', 'mind-rows',
+      this.gamble,
+      this.combo,
       h('div', 'mind-target', h('span', {}, 'TARGET'), this.target),
       this.read.el,
       this.aggression.el,
@@ -67,5 +73,10 @@ export class MindPanel {
     const src = mind.source === 'local' ? 'LOCAL RULE' : mind.source === 'jev' ? 'JEV' : 'HOUSE';
     setText(this.latency, mind.latencyMs === null ? src : `${src} · ${Math.round(mind.latencyMs)} ms`);
     setText(this.reason, mind.reason ? `${mind.mode ? mind.mode.toUpperCase() + ' · ' : ''}${mind.reason}` : '');
+    const gamble = gambleLine(mind) ?? seesLine(mind) ?? (mind.getupStyle === 'kip_up' ? 'GET-UP: KIP-UP' : null);
+    setText(this.gamble, gamble ?? '');
+    toggleClass(this.gamble, 'taken', !!mind.gamble || mind.getupStyle === 'kip_up');
+    const combo = comboLine(mind);
+    setText(this.combo, combo ? `COMBO: ${combo}` : '');
   }
 }

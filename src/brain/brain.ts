@@ -2,19 +2,23 @@
 // 1.5-4 Hz, immediate on interrupts), turns the answer's distributions into an Intent,
 // and hands it to onIntent(corner, intent, issuedAtTick); the worker applies it after the
 // fixed reaction delay. If Jev is unreachable the House Mind fights instead.
-import type { Intent, Tactic, WorldMeta } from '../core/protocol';
+import type { GetupStyle, Intent, Tactic, WorldMeta } from '../core/protocol';
 import type { Corner, FighterSetup, RobotDesign } from '../core/types';
 import { DESIGNS } from '../robots/designs';
-import { houseMind, obviousDecision, type RuleDecision } from './house-mind';
+import { creativeRoll, gambleAppetite, IMPOSSIBLE_RISK, openingMenu, riskBand } from './gambles';
+import { houseGetupStyle, houseMind, obviousDecision, type RuleDecision } from './house-mind';
 import type { JevResult } from './jev-client';
 import { JevLink } from './link';
+import { FightMemory } from './memory';
 import { FightObserver } from './observer';
-import { decide, parseAnswers } from './policy';
-import { buildQuestions, type QuestionSet } from './questions';
+import { decide, decideGambles, parseAnswers, parseExtras } from './policy';
+import { buildQuestions, getupQuestion, type QuestionSet } from './questions';
 import { serializeState } from './serializer';
 import { coarseKey, makeFighterContext, readSituation, type FighterContext, type Situation } from './situation';
 import { BrainStatsTracker } from './stats';
-import type { BrainDecision, BrainFrame, BrainStats, CommitMode, DecisionSource, DistanceBand, JevStatus, MatchClock } from './types';
+import { designCombos, styleOf } from './style';
+import { isFlashy, TACTIC_INFO } from './tactics';
+import type { BrainDecision, BrainFrame, BrainStats, CommitMode, DecisionSource, DistanceBand, GambleView, JevStatus, MatchClock } from './types';
 
 export const MAX_IN_FLIGHT = 2;
 export const MIN_REQUEST_GAP_S = 0.1; // sim seconds between two queries, even on interrupts
@@ -48,7 +52,11 @@ export interface BrainOptions {
   rounds?: number;
 }
 
-interface PendingRequest { tick: number; time: number; key: string; gen: number; trigger: string; qs: QuestionSet }
+interface PendingRequest { tick: number; time: number; key: string; gen: number; trigger: string; qs: QuestionSet; appetite: number; kipRisk: number | null }
+
+/** Bands where an opening move (or a creative gamble) is worth asking about. */
+const GAMBLE_BANDS = new Set<DistanceBand>(['clinch', 'striking range', 'just outside reach', 'mid range']);
+const CREATIVE_BANDS = new Set<DistanceBand>(['striking range', 'just outside reach']);
 
 let defaultLink: JevLink | null = null;
 /** The page-wide link used when a Brain is not given one. */
@@ -83,6 +91,12 @@ export class Brain {
   private clock: MatchClock | null = null;
   private startTime: number | null = null;
   private history: BrainDecision[] = [];
+  private memory: FightMemory;
+  private readonly combos: Tactic[][];
+  private lastAggression = 0.5;
+  /** This knockdown's get-up call: null until decided (asked once per knockdown). */
+  private getupStyle: GetupStyle | null = null;
+  private getupAsked = false;
 
   constructor(opts: BrainOptions) {
     const designs = opts.designs ?? DESIGNS;
@@ -92,6 +106,8 @@ export class Brain {
     const other: Corner = opts.corner === 0 ? 1 : 0;
     this.fc = makeFighterContext(opts.corner, resolveDesign(opts.meta, opts.corner, designs), resolveDesign(opts.meta, other, designs), opts.fighter);
     this.observer = new FightObserver(opts.corner);
+    this.memory = new FightMemory(opts.corner);
+    this.combos = designCombos(this.fc.design);
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -109,6 +125,10 @@ export class Brain {
   reset() {
     this.stop();
     this.observer = new FightObserver(this.corner);
+    this.memory = new FightMemory(this.corner);
+    this.lastAggression = 0.5;
+    this.getupStyle = null;
+    this.getupAsked = false;
     this.nextDecisionAt = 0;
     this.lastQueryAt = -Infinity;
     this.pendingTrigger = null;
@@ -126,14 +146,21 @@ export class Brain {
   get jevStatus(): JevStatus { return this.link.status; }
   get statsSnapshot(): BrainStats { return this.stats.snapshot(this.inFlight); }
   get inFlightCount(): number { return this.inFlight; }
+  /** Per-fight memory (gambles, kip-ups, what of his keeps landing). */
+  get fightMemory(): FightMemory { return this.memory; }
 
   // ------------------------------------------------------------ frame loop
 
   /** Feed every telemetry frame. `clock` comes from the round keeper when there is one. */
   onFrame(frame: BrainFrame, clock?: MatchClock) {
     const interrupts = this.observer.update(frame);
+    this.memory.onFrame(frame);
     const s = readSituation(this.fc, frame);
     this.situation = s;
+    if (!s.me.down) {
+      this.getupStyle = null;
+      this.getupAsked = false;
+    }
     if (clock) this.clock = clock;
     if (!this.active) return;
     this.startTime ??= frame.time;
@@ -146,6 +173,12 @@ export class Brain {
   private decideNow(s: Situation) {
     const trigger = this.pendingTrigger ?? 'cadence';
     const obvious = obviousDecision(this.fc, s);
+    // Down: ask Jev once per knockdown whether to try a kip-up (a one-question call).
+    if (s.me.down && !this.getupAsked && !this.link.offline && this.kipPossible(s)) {
+      if (this.inFlight >= MAX_IN_FLIGHT || !this.link.canSend()) return;
+      this.queryGetup(s, trigger);
+      return;
+    }
     if (obvious && !this.link.offline) {
       this.stats.settledLocal++;
       this.emitRule(obvious, 'local', s, trigger);
@@ -176,10 +209,36 @@ export class Brain {
 
   // ------------------------------------------------------------ Jev round trip
 
+  private kipRisk(s: Situation): number | null {
+    const r = s.me.moveRisk?.kip_up;
+    return r !== undefined && Number.isFinite(r) ? r : null;
+  }
+
+  /** A kip-up the body could attempt (worth one Jev call); a limp or seized joint rules it out. */
+  private kipPossible(s: Situation): boolean {
+    const r = this.kipRisk(s);
+    return r !== null && r < IMPOSSIBLE_RISK;
+  }
+
+  private appetite(): number {
+    return gambleAppetite(styleOf(this.fc.design), this.fc.setup.temperament, this.lastAggression);
+  }
+
+  /** The optional questions for this decision: opening_move (openings, or a creative roll) and combo. */
+  private extras(s: Situation, appetite: number) {
+    const openings = s.me.openings ?? [];
+    const creative = !openings.length && CREATIVE_BANDS.has(s.band) && creativeRoll(appetite, this.opts.seed, this.corner, s.tick);
+    const menu = GAMBLE_BANDS.has(s.band) && (openings.length || creative) && !s.me.down
+      ? openingMenu(this.fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative)
+      : null;
+    return { menu, combos: this.combos };
+  }
+
   private query(s: Situation, trigger: string) {
-    const qs = buildQuestions(this.fc, s.opp);
-    const state = serializeState(this.fc, s, this.observer.recentActions(s.time), this.matchClock(s), this.currentTactic);
-    const req: PendingRequest = { tick: s.tick, time: s.time, key: coarseKey(s), gen: this.generation, trigger, qs };
+    const appetite = this.appetite();
+    const qs = buildQuestions(this.fc, s.opp, this.extras(s, appetite));
+    const state = serializeState(this.fc, s, this.observer.recentActions(s.time), this.matchClock(s), this.currentTactic, this.memory.words());
+    const req: PendingRequest = { tick: s.tick, time: s.time, key: coarseKey(s), gen: this.generation, trigger, qs, appetite, kipRisk: this.kipRisk(s) };
     this.inFlight++;
     this.stats.requests++;
     this.schedule(s);
@@ -187,6 +246,37 @@ export class Brain {
       (res) => this.onAnswer(req, res),
       () => this.onFailure(req),
     );
+  }
+
+  /** Down on the canvas: one small call, "try a kip-up?". Its answer holds for this knockdown. */
+  private queryGetup(s: Situation, trigger: string) {
+    const kipRisk = this.kipRisk(s) as number;
+    const qs: QuestionSet = { questions: { getup_style: getupQuestion(kipRisk) }, tactics: [], targets: [], counters: [], menu: [], creative: false, combos: [], getup: true };
+    const state = serializeState(this.fc, s, this.observer.recentActions(s.time), this.matchClock(s), this.currentTactic, this.memory.words());
+    const req: PendingRequest = { tick: s.tick, time: s.time, key: coarseKey(s), gen: this.generation, trigger, qs, appetite: this.appetite(), kipRisk };
+    this.getupAsked = true;
+    this.inFlight++;
+    this.stats.requests++;
+    this.schedule(s);
+    this.link.send(state, qs.questions).then(
+      (res) => this.onGetupAnswer(req, res),
+      () => this.onFailure(req),
+    );
+  }
+
+  private onGetupAnswer(req: PendingRequest, res: JevResult) {
+    this.inFlight--;
+    if (req.gen !== this.generation) return;
+    this.stats.recordAnswer(res.latencyMs, res.inputTokens, res.outputTokens);
+    const now = this.situation;
+    if (!now || !now.me.down) { this.stats.droppedStale++; return; }
+    const g = decideGambles({ extras: parseExtras(res, req.qs), qs: req.qs, appetite: req.appetite, temperature: this.fc.setup.temperament, kipRisk: req.kipRisk, seed: this.opts.seed, corner: this.corner, tick: req.tick });
+    this.getupStyle = g.getupStyle ?? 'safe';
+    const kipYes = res.answers.getup_style?.type === 'noul' ? res.answers.getup_style.noul : null;
+    const rule = obviousDecision(this.fc, now) ?? houseMind(this.fc, now, this.opts.seed);
+    const pct = kipYes === null ? '' : ` (kip-up ${Math.round(kipYes * 100)}%)`;
+    const reason = `${this.getupStyle === 'kip_up' ? 'down: Jev says kip-up' : 'down: Jev says safe get-up'}${pct}`;
+    this.emitRule({ ...rule, getupStyle: this.getupStyle, reason }, 'jev', now, req.trigger, res.latencyMs);
   }
 
   private onAnswer(req: PendingRequest, res: JevResult) {
@@ -209,15 +299,28 @@ export class Brain {
       return;
     }
     const out = decide({ parsed, situation: now, current: this.currentTactic, temperature: this.fc.setup.temperament, seed: this.opts.seed, corner: this.corner, tick: req.tick });
-    const intent: Intent = { tactic: out.tactic, target: out.target, aggression: out.aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence, source: 'jev' };
+    const g = decideGambles({ extras: parseExtras(res, req.qs), qs: req.qs, appetite: req.appetite, temperature: this.fc.setup.temperament, kipRisk: req.kipRisk, seed: this.opts.seed, corner: this.corner, tick: req.tick });
+    // An opening move overrides the tactic: code saw the opening, Jev chose to go for it.
+    const tactic = g.move ?? out.tactic;
+    const target = g.move ? g.target ?? out.target : out.target;
+    const combo = tactic === 'combo' ? g.combo ?? this.combos[0] ?? null : null;
+    const flourish = g.move !== null && (isFlashy(g.move) || g.opening !== null);
+    const aggression = g.move ? Math.max(out.aggression, parsed.aggression) : out.aggression;
+    const intent: Intent = {
+      tactic, target, aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence, source: 'jev',
+      ...(combo ? { combo } : {}), ...(flourish ? { flourish } : {}),
+    };
+    const gamble: GambleView | null = g.move ? { move: g.move, opening: g.opening, p: g.moveP, risk: g.risk } : null;
+    const reason = g.move ? `${g.opening ? 'took the opening' : 'creative gamble'}${g.risk !== null ? `, ${riskBand(g.risk)}` : ''}` : out.reason;
     this.lastAppliedTick = req.tick;
     if (out.mode !== 'commit') this.nextDecisionAt = Math.min(this.nextDecisionAt, req.time + BAND_INTERVAL_S[now.band] * MODE_INTERVAL_SCALE[out.mode]);
     this.emit(intent, req.tick, {
-      tick: req.tick, time: req.time, source: 'jev', mode: out.mode, tactic: out.tactic, target: out.target,
-      aggression: out.aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence,
+      tick: req.tick, time: req.time, source: 'jev', mode: out.mode, tactic, target,
+      aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence,
       tacticProbs: parsed.tacticProbs, targetProbs: parsed.targetProbs, oppCommit: parsed.oppCommit,
-      winning: parsed.winning, latencyMs: res.latencyMs, reason: out.reason, trigger: req.trigger,
-    });
+      winning: parsed.winning, latencyMs: res.latencyMs, reason, trigger: req.trigger,
+      openings: now.me.openings ?? [], gamble, combo, flourish,
+    }, now);
   }
 
   /** Jev failed (the link is now offline): the House Mind takes this decision immediately. */
@@ -233,11 +336,17 @@ export class Brain {
 
   // ------------------------------------------------------------ output
 
-  private emitRule(rule: RuleDecision, source: DecisionSource, s: Situation, trigger: string) {
+  private emitRule(rule: RuleDecision, source: DecisionSource, s: Situation, trigger: string, latencyMs: number | null = null) {
+    // Down: this knockdown's get-up call holds for every intent until up. While Jev's answer is
+    // in flight it stays undecided (the body's default, a safe get-up), never the House Mind's guess.
+    const pending = this.getupAsked && this.getupStyle === null && source !== 'fallback';
+    const getupStyle = !s.me.down || pending ? undefined : this.getupStyle ?? rule.getupStyle ?? houseGetupStyle(this.fc, s);
+    if (s.me.down && source === 'fallback' && this.getupStyle === null) this.getupStyle = getupStyle ?? 'safe';
     const intent: Intent = {
       tactic: rule.tactic, target: rule.target, aggression: rule.aggression, counterIfLunge: rule.counterIfLunge,
       confidence: 1, source: source === 'fallback' ? 'fallback' : 'jev',
       ...(source === 'local' ? { settledLocally: true } : {}),
+      ...(rule.combo ? { combo: rule.combo } : {}), ...(getupStyle ? { getupStyle } : {}), ...(rule.flourish ? { flourish: true } : {}),
     };
     this.schedule(s);
     this.lastAppliedTick = Math.max(this.lastAppliedTick, s.tick);
@@ -245,11 +354,15 @@ export class Brain {
       tick: s.tick, time: s.time, source, mode: 'commit', tactic: rule.tactic, target: rule.target,
       aggression: rule.aggression, counterIfLunge: rule.counterIfLunge, confidence: 1,
       tacticProbs: { [rule.tactic]: 1 }, targetProbs: { [rule.target]: 1 }, oppCommit: null,
-      winning: null, latencyMs: null, reason: rule.reason, trigger,
-    });
+      winning: null, latencyMs, reason: rule.reason, trigger,
+      openings: s.me.openings ?? [], combo: rule.combo ?? null, flourish: !!rule.flourish, ...(getupStyle ? { getupStyle } : {}),
+      gamble: rule.gamble ? { ...rule.gamble, p: null } : null,
+    }, s);
   }
 
-  private emit(intent: Intent, issuedAtTick: number, d: BrainDecision) {
+  private emit(intent: Intent, issuedAtTick: number, d: BrainDecision, s: Situation) {
+    this.memory.onIntent(intent, s.time, isFlashy(intent.tactic), s.me.down);
+    this.lastAggression = intent.aggression;
     this.currentTactic = intent.tactic;
     this.history = [...this.history.slice(-(HISTORY_LEN - 1)), d];
     this.opts.onIntent(this.corner, intent, issuedAtTick);

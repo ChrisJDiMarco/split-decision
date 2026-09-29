@@ -30,7 +30,26 @@ export const TACTIC_INFO: Record<Tactic, { kind: TacticKind; description: string
   feint: { kind: 'defense', description: 'show a windup without committing to draw a reaction' },
   sidestep_counter: { kind: 'defense', description: 'wait for his lunge, step off the line, strike back' },
   cage_pin: { kind: 'grapple', description: 'drive him back into the cage and trap him there' },
+  spinning_back_kick: { kind: 'strike', description: 'spin and drive the heel straight back into his body' },
+  tornado_kick: { kind: 'strike', description: 'jumping spin into a round kick to the head: spectacular, a huge fall risk' },
+  jump_kick: { kind: 'strike', description: 'flying front kick that closes the distance in the air' },
+  jumping_knee: { kind: 'strike', description: 'leap in behind a knee to the body or chin' },
+  superman_punch: { kind: 'strike', description: 'fake a kick, spring off the back foot and fly in behind a straight punch' },
+  spinning_backfist: { kind: 'strike', description: 'turn a full circle and whip the back of the fist into his head' },
+  switch_stance: { kind: 'footwork', description: 'swap your lead foot to open new angles' },
+  pivot_left: { kind: 'footwork', description: 'pivot on the lead foot to your left and attack off the angle' },
+  pivot_right: { kind: 'footwork', description: 'pivot on the lead foot to your right and attack off the angle' },
+  feint_left: { kind: 'defense', description: 'show a strike on the left to draw his guard' },
+  feint_right: { kind: 'defense', description: 'show a strike on the right to draw his guard' },
+  combo: { kind: 'strike', description: 'chain two to four strikes in a row (the combination you pick)' },
 };
+
+/** Flashy moves as tactics (the kip-up is a get-up style, not a tactic). */
+export const FLASHY_TACTICS: readonly Tactic[] = ['tornado_kick', 'spinning_back_kick', 'jump_kick', 'jumping_knee', 'superman_punch', 'spinning_backfist'];
+
+export function isFlashy(t: Tactic): boolean {
+  return FLASHY_TACTICS.includes(t);
+}
 
 export const FOOTWORK_TACTICS: readonly Tactic[] = [
   'hold_range', 'close_distance', 'circle_left', 'circle_right', 'retreat', 'guard', 'feint', 'sidestep_counter', 'cage_pin',

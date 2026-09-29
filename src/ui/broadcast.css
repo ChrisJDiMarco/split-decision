@@ -96,6 +96,11 @@
 .mind-target b::before { content: '⌖ '; color: var(--corner); }
 .mind .read .bar-fill { background: var(--amber); }
 .mind .meter { grid-template-columns: 116px 1fr 40px; }
+.mind-gamble, .mind-combo { font: 700 11px/1.3 var(--mono); letter-spacing: 0.04em; color: var(--dim); overflow-wrap: anywhere; }
+.mind-gamble:empty, .mind-combo:empty { display: none; }
+.mind-gamble.taken { color: var(--ink); }
+.mind-gamble.taken::before { content: '◆ '; color: var(--corner); }
+.mind-combo { color: var(--ink); }
 .mind-reason { font: 500 10px/1.3 var(--mono); color: var(--dim); min-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge-offline {
   display: none; font: 700 10px/1 var(--mono); letter-spacing: 0.08em; padding: 4px 7px;

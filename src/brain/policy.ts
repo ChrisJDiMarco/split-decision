@@ -1,8 +1,10 @@
 // Turning Jev's distributions into one intent: seeded temperature sampling,
 // confidence gating and hysteresis. Pure functions, so replays are deterministic.
-import type { Tactic, TargetZone } from '../core/protocol';
+import type { GetupStyle, Opening, Tactic, TargetZone } from '../core/protocol';
+import { gambleWeights, IMPOSSIBLE_RISK, NONE } from './gambles';
 import type { JevAnswer, JevResult } from './jev-client';
 import { AGGRESSION_LEVELS, WINNING_LEVELS, type QuestionSet } from './questions';
+import { comboId } from './style';
 import type { Situation } from './situation';
 import { mixSeed, rng } from './rng';
 import type { CommitMode } from './types';
@@ -154,4 +156,73 @@ export function decide(input: PolicyInput): PolicyOutput {
   const reason = tactic === sampled ? `sampled at T=${temperature.toFixed(2)}` : `hysteresis kept ${tactic}`;
   const aggression = mode === 'probe' ? parsed.aggression * PROBE_AGGRESSION_SCALE : parsed.aggression;
   return { tactic, target, aggression, mode, reason };
+}
+
+// ---------------------------------------------------------------- openings, combos, get-ups
+
+export const OPENING_STREAM = 3;
+export const COMBO_STREAM = 4;
+/** P(yes) a kip-up needs at appetite 1; bolder fighters need less, disciplined ones more. */
+export const KIP_THRESHOLD = 0.5;
+
+export interface ExtraParsed {
+  openingProbs: Record<string, number> | null; // Jev's distribution over the menu plus 'none'
+  comboProbs: Record<string, number> | null;
+  kipYes: number | null; // P(try a kip-up)
+}
+
+/** Reads the optional answers; any that are missing or malformed are simply null. */
+export function parseExtras(result: JevResult, qs: QuestionSet): ExtraParsed {
+  const a = result.answers;
+  const kip = a.getup_style;
+  return {
+    openingProbs: qs.menu.length ? choiceProbs(a.opening_move, [...qs.menu.map((i) => i.move), NONE]) : null,
+    comboProbs: qs.combos.length ? choiceProbs(a.combo, qs.combos.map(comboId)) : null,
+    kipYes: qs.getup && kip?.type === 'noul' && Number.isFinite(kip.noul) ? Math.max(0, Math.min(1, kip.noul)) : null,
+  };
+}
+
+export interface GambleInput {
+  extras: ExtraParsed;
+  qs: QuestionSet;
+  appetite: number; // gambleAppetite(style, temperament, aggression)
+  temperature: number;
+  kipRisk: number | null;
+  seed: number;
+  corner: number;
+  tick: number;
+}
+
+export interface GambleOutput {
+  move: Tactic | null; // the opening move taken (null: none)
+  moveP: number | null; // Jev's own probability for it
+  opening: Opening | null; // the opening it exploits (null: a creative gamble)
+  risk: number | null;
+  target: TargetZone | null;
+  combo: Tactic[] | null; // the combination to run if the tactic is 'combo'
+  comboP: number | null;
+  getupStyle: GetupStyle | undefined;
+}
+
+export function decideGambles(input: GambleInput): GambleOutput {
+  const { extras, qs, appetite, temperature, seed, corner, tick } = input;
+  const out: GambleOutput = { move: null, moveP: null, opening: null, risk: null, target: null, combo: null, comboP: null, getupStyle: undefined };
+  if (extras.openingProbs) {
+    const weighted = gambleWeights(extras.openingProbs, qs.menu, appetite);
+    const pick = seededSample(weighted, temperature, seed, corner, tick, OPENING_STREAM);
+    const item = qs.menu.find((i) => i.move === pick);
+    if (item) Object.assign(out, { move: item.move, moveP: extras.openingProbs[pick], opening: item.opening, risk: item.risk, target: item.target });
+  }
+  if (qs.combos.length) {
+    const probs = extras.comboProbs ?? Object.fromEntries(qs.combos.map((c, i) => [comboId(c), i === 0 ? 1 : 0]));
+    const pick = extras.comboProbs ? seededSample(probs, temperature, seed, corner, tick, COMBO_STREAM) : argmax(probs);
+    out.combo = qs.combos.find((c) => comboId(c) === pick) ?? null;
+    out.comboP = extras.comboProbs ? probs[pick] : null;
+  }
+  if (qs.getup && extras.kipYes !== null) {
+    const possible = input.kipRisk === null || input.kipRisk < IMPOSSIBLE_RISK;
+    const threshold = Math.max(0.25, Math.min(0.8, KIP_THRESHOLD / appetite));
+    out.getupStyle = possible && extras.kipYes >= threshold ? 'kip_up' : 'safe';
+  }
+  return out;
 }

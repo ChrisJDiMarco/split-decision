@@ -8,7 +8,26 @@ export type Tactic =
   | 'jab' | 'cross' | 'hook' | 'uppercut' | 'overhand'
   | 'front_kick' | 'low_kick' | 'head_kick'
   | 'hammer_smash' | 'shield_bash' | 'rocket_punch' | 'jaw_crush' | 'lunge' | 'ram'
-  | 'clinch' | 'guard' | 'feint' | 'sidestep_counter' | 'cage_pin';
+  | 'clinch' | 'guard' | 'feint' | 'sidestep_counter' | 'cage_pin'
+  // Flashy and angle tactics (docs/design/fighter-intelligence.md). Until the control build lands,
+  // the controller runs each as a safe fallback (tactics.ts, TODO(control-build)).
+  | 'spinning_back_kick' | 'tornado_kick' | 'jump_kick' | 'jumping_knee' | 'superman_punch'
+  | 'spinning_backfist' | 'switch_stance' | 'pivot_left' | 'pivot_right' | 'feint_left' | 'feint_right'
+  | 'combo'; // run Intent.combo in order
+
+/** Flashy moves: each has a fall/failure risk published in RobotTelemetry.moveRisk. */
+export const FLASHY_MOVES = [
+  'tornado_kick', 'spinning_back_kick', 'jump_kick', 'jumping_knee', 'superman_punch', 'spinning_backfist', 'kip_up',
+] as const;
+export type FlashyMove = (typeof FLASHY_MOVES)[number];
+
+/** An opening one fighter sees on its opponent, computed in physics every frame. */
+export type Opening =
+  | 'off_balance' | 'turned_away' | 'missed_recovering' | 'stunned' | 'rising'
+  | 'on_cage' | 'gyro_saturated' | 'weak_left_leg' | 'weak_right_leg' | 'low_guard' | 'overcommitted';
+
+export type Stance = 'orthodox' | 'southpaw';
+export type GetupStyle = 'safe' | 'kip_up';
 
 export type TargetZone = 'head' | 'torso' | 'left_arm' | 'right_arm' | 'left_leg' | 'right_leg' | 'weapon';
 
@@ -22,6 +41,9 @@ export interface Intent {
   source: 'jev' | 'fallback';
   /** True when a code rule settled an obvious tick (down, far apart) without asking Jev. */
   settledLocally?: boolean;
+  combo?: Tactic[]; // 2-4 strikes/feints run in order when tactic is 'combo', e.g. ['jab','cross','low_kick']
+  getupStyle?: GetupStyle; // how to rise when down
+  flourish?: boolean; // allowed to attempt a flashy variant if the opening is still there
 }
 
 // ---------------------------------------------------------------- body → world
@@ -86,6 +108,12 @@ export interface RobotTelemetry {
   joints: JointTelemetry[];
   damageTotal: number; // 0..1 overall
   intent: Intent | null;
+  // Fighter intelligence (src/physics/openings). Optional so hand-built telemetry (fixtures, the
+  // showroom puppet, the dev fake fight) stays valid; the physics worker always fills them.
+  openings?: Opening[]; // what this fighter sees on its opponent right now
+  moveRisk?: Record<string, number>; // 0..1 fall/failure risk per flashy move (FlashyMove), from body state
+  stance?: Stance; // from the lead foot
+  facingOffDeg?: number; // signed angle of the shoulders off square to the opponent (CCW positive)
 }
 
 /** Static layout the renderer needs to build meshes and read poses. */

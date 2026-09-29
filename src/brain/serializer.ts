@@ -4,8 +4,10 @@
 import type { RobotTelemetry, Tactic } from '../core/protocol';
 import type { RobotDesign } from '../core/types';
 import * as B from './bands';
+import { designFlashy, openingsWords, riskBand } from './gambles';
 import type { RecentAction } from './observer';
 import type { FighterContext, Situation } from './situation';
+import { styleOf } from './style';
 import { abilityTactics, tacticWords } from './tactics';
 import type { MatchClock } from './types';
 
@@ -23,6 +25,8 @@ export interface FightState {
   round: Record<string, string>;
   plan: string;
   personality: string;
+  /** Per-fight memory: how your gambles went, what of his keeps landing. Absent until something happened. */
+  record?: Record<string, string>;
 }
 
 interface DamageItem { sev: number; text: string }
@@ -114,16 +118,37 @@ export function planWords(plan: string): string {
 
 const CORNER_NAMES = ['red', 'blue'] as const;
 
+/** 'orthodox, squared up' / 'southpaw, angled off' from the stance and the shoulders' angle off square. */
+export function stanceWords(tel: RobotTelemetry): string | null {
+  if (!tel.stance) return null;
+  const off = Math.abs(tel.facingOffDeg ?? 0);
+  const angle = off < 15 ? 'squared up' : off < 35 ? 'slightly bladed' : off < 60 ? 'angled off' : off < 120 ? 'turned side-on' : 'turned away';
+  return `${tel.stance}, ${angle}`;
+}
+
+/** 'tornado kick: high fall risk; kip-up: moderate fall risk' for the moves this design can attempt. */
+export function flashyRiskWords(design: RobotDesign, tel: RobotTelemetry): string | null {
+  const risk = tel.moveRisk;
+  if (!risk) return null;
+  const items = designFlashy(design).filter((m) => Number.isFinite(risk[m])).map((m) => `${m === 'kip_up' ? 'kip-up' : tacticWords(m)}: ${riskBand(risk[m])}`);
+  return items.length ? items.join('; ') : null;
+}
+
+function optional(entries: Array<[string, string | null]>): Record<string, string> {
+  return Object.fromEntries(entries.filter((e): e is [string, string] => e[1] !== null));
+}
+
 export function serializeState(
   fc: FighterContext,
   s: Situation,
   recent: RecentAction[],
   clock: MatchClock,
   lastTactic: Tactic | null,
+  record: { yours: string; his: string } | null = null,
 ): FightState {
   const { me, opp, geometry } = s;
   const oppCorner = CORNER_NAMES[fc.corner === 0 ? 1 : 0];
-  return {
+  const state: FightState = {
     you: {
       name: `${fc.design.name} (${CORNER_NAMES[fc.corner]} corner)`,
       build: `${buildWords(fc.design)}. ${fc.design.tagline}`,
@@ -133,6 +158,8 @@ export function serializeState(
       damage: damageWords(me, fc.maxTempC, MY_DAMAGE_ITEMS),
       power: powerWords(me, fc.design),
       doing: lastTactic ? `running ${tacticWords(lastTactic)}` : 'squared up, no tactic yet',
+      style: styleOf(fc.design).words,
+      ...optional([['stance', stanceWords(me)], ['flashy_risk', flashyRiskWords(fc.design, me)]]),
     },
     opponent: {
       name: `the ${oppCorner} corner fighter`,
@@ -143,6 +170,7 @@ export function serializeState(
       facing: B.facingWords(geometry.oppBearingRad),
       damage: damageWords(opp, null, OPP_DAMAGE_ITEMS),
       recent: recentWords(recent, s.time),
+      ...optional([['openings', me.openings ? openingsWords(me.openings, opp) : null]]),
     },
     geometry: {
       distance: s.band,
@@ -159,4 +187,6 @@ export function serializeState(
     plan: planWords(fc.setup.plan),
     personality: B.temperamentWords(fc.setup.temperament),
   };
+  if (record) state.record = { yours: record.yours, his: record.his };
+  return state;
 }
