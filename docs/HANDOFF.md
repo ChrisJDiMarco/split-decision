@@ -30,6 +30,7 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
 
 - Committed since resume: electric roster + kits (5e2616f), mocap library for all 7 designs (e8d860d), openings detector + creative brain (8437d7f), head-pop/flash fixes (e03d382), select-screen livery fix (6a831f0).
 - Running: `tracking-controller` workflow (mocap tracking core + flashy library → flashy moves + kip-up search → metrics + live critic) and `brain-gaps` workflow (pre-armed opening reflexes `Intent.onOpening`, kip-up appetite, stance hysteresis, side_on vs turned_away, injury-aware combos, stable MIND panel).
+- Fast leg drives DONE (a036c68): kicks now ~0.9-1.2x human speed. Open: PYLON/SAVATE torso internals got light to pay for leg stacks (PYLON 4.84 kg, below FIRECRACKER's 5.67; battery realism); front kick falls a bit more under the old procedural controller (SAVATE X12-hip fallback exists if needed); docs/research/08-modern-roster.md actuator tables are stale.
 - brain-gaps DONE. After the tracking workflow: the control layer must consume `Intent.onOpening` exactly per docs/design/onopening-control-contract.md, and replace any remaining TODO(control-build) fallbacks. Known brain follow-ups: reflexes may fire too often (spinning backfist dominates the menu), `stunned` rarely fires, `rising` spans the whole knockdown.
 
 ## Next steps, in order
