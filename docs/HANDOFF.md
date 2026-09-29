@@ -50,6 +50,7 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
   - Publish `RobotTelemetry.committed`.
   - Main game (after the fighter-IQ build frees main.ts/broadcast.ts): JEV/YOU toggle per corner, PlayerMode wiring per the integration doc, BREAK on the player HUD from the referee events.
   - Controls: remap main's S/Q/R and the broadcast's C/H; move the default guard off Ctrl (Ctrl+Tab/W/Space clash with browser and OS shortcuts); check pointer lock in real Chrome.
+- Chris approved OFFLINE CPU MOVE POLISH (SAMCON family; no GPU, no neural net) so mocap moves play fluidly in real physics, but heavy runs ONLY OVERNIGHT while he sleeps. `move-polish-poc` (wf_34e4f671-4ea) runs the light design phase now (three methods judged → docs/design/move-polish.md). At bedtime, resume it with args {runProof: true} and resumeFromRunId wf_34e4f671-4ea to polish 5 PoC moves (4 workers), then an adversarial verify and go/no-go for all ~875 moves. The runtime hook-up belongs to the balance engine (control/**).
 - After the balance engine: flashy moves + kip-ups in the body (consume `Intent.onOpening`, replace TODO(control-build) fallbacks), then a live critic.
 
 ## Next steps, in order
