@@ -45,9 +45,23 @@ const AO_FAR_M = 16; // none beyond (the crowd)
 const ABERRATION = 0.0035; // UV shift at the frame corners
 const VIGNETTE = 0.42;
 const GRAIN = 0.045;
+/**
+ * Hit pulse on the heaviest impacts: a very short chromatic-aberration and contrast punch in
+ * display space. Capped (a stack of hits can't exceed PULSE_MAX), decays in wall time over
+ * ~0.1 s, and is compiled out on 'low' along with the aberration.
+ */
+const PULSE_MAX = 1;
+const PULSE_DECAY_PER_S = 22;
+const PULSE_ABERRATION_GAIN = 3.5; // aberration multiplier added at a full pulse
+const PULSE_CONTRAST = 0.16; // contrast gain at a full pulse
+const PULSE_MAX_FRAME_S = 0.1; // a hitch must not skip the decay
 
 export interface PostProcessing {
   render(): void;
+  /** Hit pulse 0..1 (adds, capped at 1; decays in ~0.1 s wall time). No effect on 'low'. */
+  pulse(amount: number): void;
+  /** Current pulse level (debug handle). */
+  readonly pulseLevel: number;
   setQuality(q: Quality): void;
   readonly quality: Quality;
   readonly pipeline: THREE.RenderPipeline;
@@ -78,6 +92,8 @@ export function installPostProcessing(stage: Stage, listener?: QualityListener, 
   const aberration = uniform(ABERRATION);
   const vignette = uniform(VIGNETTE);
   const grain = uniform(GRAIN);
+  const kick = uniform(0);
+  let kickT = performance.now();
   let disposables: Array<{ dispose(): void }> = [];
   let quality: Quality = initial;
 
@@ -91,7 +107,7 @@ export function installPostProcessing(stage: Stage, listener?: QualityListener, 
     const fromCentre = screen.sub(0.5);
     let rgb: Node<'vec3'>;
     if (p.aberration) {
-      const shift = fromCentre.mul(aberration.mul(dot(fromCentre, fromCentre)).mul(2));
+      const shift = fromCentre.mul(aberration.mul(kick.mul(PULSE_ABERRATION_GAIN).add(1)).mul(dot(fromCentre, fromCentre)).mul(2));
       rgb = vec3(color.sample(screen.add(shift)).r, color.sample(screen).g, color.sample(screen.sub(shift)).b);
     } else {
       rgb = color.rgb;
@@ -126,7 +142,8 @@ export function installPostProcessing(stage: Stage, listener?: QualityListener, 
     }
     const vig = float(1).sub(vignette.mul(smoothstep(0.2, 0.75, fromCentre.length())));
     const noise = rand(fract(screen.add(fract(time.mul(0.713))))).sub(0.5);
-    const graded: Node<'vec3'> = display.rgb.mul(vig).mul(noise.mul(grain).add(1));
+    let graded: Node<'vec3'> = display.rgb.mul(vig).mul(noise.mul(grain).add(1));
+    if (p.aberration) graded = graded.sub(0.5).mul(kick.mul(PULSE_CONTRAST).add(1)).add(0.5).max(0);
     return vec4(graded, 1);
   };
 
@@ -145,6 +162,10 @@ export function installPostProcessing(stage: Stage, listener?: QualityListener, 
 
   return {
     render() {
+      const now = performance.now();
+      const dt = Math.min(PULSE_MAX_FRAME_S, (now - kickT) / 1000);
+      kickT = now;
+      kick.value = kick.value < 1e-3 ? 0 : kick.value * Math.exp(-PULSE_DECAY_PER_S * dt);
       stage.controls.update();
       near.value = camera.near;
       far.value = camera.far;
@@ -153,6 +174,11 @@ export function installPostProcessing(stage: Stage, listener?: QualityListener, 
     setQuality(q) {
       if (q !== quality) apply(q);
     },
+    pulse(amount) {
+      if (!PRESETS[quality].aberration || !(amount > 0)) return;
+      kick.value = Math.min(PULSE_MAX, kick.value + amount);
+    },
+    get pulseLevel() { return kick.value; },
     get quality() { return quality; },
     pipeline,
   };

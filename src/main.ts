@@ -7,9 +7,11 @@ import type { MainToWorker, SimEvent, WorkerToMain, WorldMeta } from './core/pro
 import type { Corner, MatchSetup } from './core/types';
 import { buildArenaView, installPostProcessing, type Quality } from './render/arena';
 import { applyImpact, buildRobotKitViews, updateRobotKit, type RobotKitView } from './render/robot-kit';
+import { TimeWarp } from './render/camera/time-warp';
 import { applyPoses } from './render/robot-view';
 import { createStage } from './render/stage';
 import { createVfx, VFX_REQUIRED_LIMITS } from './render/vfx';
+import { HIT, strikeStrength } from './render/vfx/scaling';
 import { createBroadcast } from './ui/broadcast';
 import type { FightPhase } from './ui/broadcast';
 import type { Minds } from './ui/minds';
@@ -19,6 +21,9 @@ type FrameMsg = Extract<WorkerToMain, { type: 'frame' }>;
 const SLOW_MO = 0.15;
 const MAX_DT = 1 / 20;
 const QUALITIES: Quality[] = ['high', 'medium', 'low'];
+/** Post pulse for a detached head, and the share replays get. */
+const PULSE_DETACH = 0.8;
+const PULSE_REPLAY = 0.5;
 
 const DEFAULT_SETUP: MatchSetup = {
   fighters: [
@@ -54,8 +59,12 @@ let bodyGroups = new Map<number, THREE.Group>();
 let brains: Brain[] = [];
 let pendingImpacts: SimEvent[] = [];
 let workerPaused = false;
-let timescale = 1;
+let timescale = 1; // the S key's slow motion
 let qualityIndex = 0;
+// Hit-stop and KO slow motion (presentation only: the worker's fixed-step physics is unchanged).
+// ?hitstop=0 turns both off for testing; so does splitDecision.hitFeel.warp.enabled = false.
+const warp = new TimeWarp(new URLSearchParams(location.search).get('hitstop') !== '0');
+let sentScale = 1; // the scale the worker is running at
 
 function minds(): Minds {
   return [brains[0]?.latest ?? null, brains[1]?.latest ?? null];
@@ -104,6 +113,8 @@ const broadcast = createBroadcast(stage, {
   onStart(s) {
     setup = s;
     timescale = 1;
+    warp.cancel();
+    sentScale = 1; // init resets the worker to real time
     vfx.clear();
     send({ type: 'init', setup: s });
   },
@@ -116,10 +127,32 @@ const broadcast = createBroadcast(stage, {
   },
   onPhase,
   onReplayEvents(events) {
-    vfx.onEvents(events);
+    const tel = broadcast.displayFrame()?.telemetry ?? null;
+    vfx.onEvents(events, tel);
     queueImpacts(events);
+    pulseFor(events, PULSE_REPLAY, tel);
   },
 });
+
+// ---------------------------------------------------------------- hit feel
+
+/** The live fight is running forward on screen (hit-stop and slow-mo only apply then). */
+function liveFight(): boolean {
+  const p = broadcast.phase();
+  return (p === 'fight' || p === 'ko') && !broadcast.replaying() && !workerPaused;
+}
+
+/** A short capped post pulse on the heaviest hits and a head knockoff. */
+function pulseFor(events: readonly SimEvent[], scale: number, tel: FrameMsg['telemetry'] | null) {
+  let amount = 0;
+  for (const e of events) {
+    if (e.kind === 'impact') {
+      const s = strikeStrength(e, tel);
+      if (s >= HIT.PULSE) amount = Math.max(amount, 0.4 + 0.6 * (s - HIT.PULSE) / (1 - HIT.PULSE));
+    } else if (e.kind === 'detach' && e.part === 'head') amount = Math.max(amount, PULSE_DETACH);
+  }
+  if (amount > 0) post.pulse(amount * scale);
+}
 
 // ---------------------------------------------------------------- worker traffic
 
@@ -145,7 +178,9 @@ function onFrame(msg: FrameMsg) {
   const clock = broadcast.clock();
   for (const b of brains) b.onFrame(msg, clock);
   if (broadcast.replaying()) return;
-  vfx.onEvents(msg.events);
+  warp.onEvents(msg.events, liveFight(), msg.telemetry);
+  pulseFor(msg.events, 1, msg.telemetry);
+  vfx.onEvents(msg.events, msg.telemetry);
   vfx.onTelemetry(msg.telemetry, msg.poses);
   queueImpacts(msg.events);
 }
@@ -163,8 +198,7 @@ window.addEventListener('keydown', (e) => {
   const t = e.target as HTMLElement | null;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
   if (e.code === 'KeyS' && broadcast.phase() === 'fight') {
-    timescale = timescale === 1 ? SLOW_MO : 1;
-    send({ type: 'timescale', scale: timescale });
+    timescale = timescale === 1 ? SLOW_MO : 1; // the render loop sends it (combined with hit-stop)
   } else if (e.code === 'KeyQ') {
     qualityIndex = (qualityIndex + 1) % QUALITIES.length;
     post.setQuality(QUALITIES[qualityIndex]);
@@ -205,8 +239,13 @@ function frame(now: number) {
     updateRobotKit(views, shown.telemetry, dt);
   }
   const replaying = broadcast.replaying();
+  const scale = Math.min(timescale, warp.update(dt, liveFight()));
+  if (Math.abs(scale - sentScale) > 1e-4) {
+    sentScale = scale;
+    send({ type: 'timescale', scale });
+  }
   vfx.setReplay(replaying);
-  const simDt = workerPaused && !replaying ? 0 : dt * (replaying ? 0.25 : timescale);
+  const simDt = workerPaused && !replaying ? 0 : dt * (replaying ? 0.25 : scale);
   vfx.update(simDt);
   arena.update(dt);
   post.render();
@@ -215,4 +254,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Debug handle for the console and automated checks.
-Object.assign(window, { splitDecision: { stage, broadcast, vfx, arena, link, get brains() { return brains; }, send } });
+Object.assign(window, { splitDecision: { stage, broadcast, vfx, arena, link, get brains() { return brains; }, send, hitFeel: { warp, post } } });

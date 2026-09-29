@@ -11,8 +11,11 @@ import type { SimEvent, WorkerToMain, WorldMeta, RobotTelemetry } from '../core/
 import type { Corner, MatchSetup, RobotDesign } from '../core/types';
 import { BroadcastAudio } from '../audio/broadcast-audio';
 import { CameraRig } from '../render/camera/camera-rig';
-import { Director } from '../render/camera/director';
+import { Director, type DirectorMode } from '../render/camera/director';
+import { PunchIn, constrainPunch } from '../render/camera/punch-in';
 import { CameraShake } from '../render/camera/shake';
+import type { Subjects } from '../render/camera/shots';
+import { strikeStrength } from '../render/vfx/scaling';
 import type { Stage } from '../render/stage';
 import { DESIGNS, design as getDesign } from '../robots/designs';
 import { h, toggleClass } from './dom';
@@ -69,7 +72,7 @@ export interface Broadcast {
   clock(): { round: number; rounds: number; remainingS: number };
   replay(): boolean; // start a manual replay; false if there's nothing to show
   replaying(): boolean;
-  camera: { toggleFree(): boolean; isFree(): boolean; director: Director; shake(amount: number): void };
+  camera: { toggleFree(): boolean; isFree(): boolean; director: Director; shake(amount: number): void; punch: PunchIn };
   audio: { start(): Promise<void>; setMuted(muted: boolean): void; isMuted(): boolean };
   showSelect(): void;
   dispose(): void;
@@ -82,6 +85,11 @@ const HUD_INTERVAL_S = 1 / 30;
 const MAX_SIM_STEP_S = 0.5; // a bigger jump in frame.time is a reset, not elapsed time
 const SHAKE_DETACH = 0.55;
 const SHAKE_FALL = 0.35;
+const REPLAY_SHAKE = 0.6;
+/** Punch-ins during a replay are gentler: the replay's own slow push carries the moment. */
+const REPLAY_PUNCH = 0.5;
+/** A KO push-in aims between the loser's centre of mass and head. */
+const KO_AIM_HEAD_SHARE = 0.4;
 const PHASE_LABEL: Partial<Record<FightPhase, string>> = { intro: 'WALKOUT', break: 'BREAK', ko: 'KO', decision: 'JUDGES', over: 'FINAL' };
 const KO_REASON: Record<string, string> = { head: 'HEAD REMOVED', down: 'DOWN FOR THE COUNT', power: 'POWER FAILURE', disabled: 'DISABLED' };
 
@@ -135,6 +143,8 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
   const director = new Director();
   const shake = new CameraShake();
   const rig = new CameraRig(stage);
+  const punch = new PunchIn();
+  let punchMode: DirectorMode = director.mode;
   const audio = new BroadcastAudio();
   director.setMode('idle');
 
@@ -317,17 +327,40 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
       scorecard.record(fresh, telemetry);
       for (const item of feed.ingest(fresh, telemetry, time)) ticker.push(item, clock.label());
     }
-    director.onEvents(fresh);
+    director.onEvents(fresh, telemetry);
     audio.onEvents(fresh);
-    applyShake(fresh, 1);
+    applyShake(fresh, 1, telemetry);
+    applyPunch(fresh, 1, live, telemetry);
     for (const e of fresh) if (e.kind === 'ko' && live) onKO(e.corner, e.reason);
   }
 
-  function applyShake(events: readonly SimEvent[], scale: number): void {
+  function applyShake(events: readonly SimEvent[], scale: number, tel: readonly RobotTelemetry[] | null): void {
     for (const e of events) {
-      if (e.kind === 'impact') shake.add(CameraShake.forEnergy(e.energyJ) * scale);
-      else if (e.kind === 'detach') shake.add(SHAKE_DETACH * scale);
+      if (e.kind === 'impact') {
+        const s = strikeStrength(e, tel);
+        shake.add(Math.max(CameraShake.forEnergy(e.energyJ), CameraShake.forStrength(s)) * scale);
+        if (s > 0) shake.kick(e.normal, s * scale);
+      } else if (e.kind === 'detach') shake.add(SHAKE_DETACH * scale);
       else if (e.kind === 'fall') shake.add(SHAKE_FALL * scale);
+    }
+  }
+
+  /** Hit punch-ins on landed strikes; a KO or a head knockoff gets the slow dramatic push-in. */
+  function applyPunch(events: readonly SimEvent[], scale: number, live: boolean, tel: readonly RobotTelemetry[] | null): void {
+    for (const e of events) {
+      if (e.kind === 'impact') {
+        punch.hit(e.pos, strikeStrength(e, tel), scale);
+      } else if (live && e.kind === 'detach' && e.part === 'head') {
+        const body = e.debrisBody;
+        const at = e.pos;
+        punch.drama((sub: Subjects) => sub.bodyPos?.(body) ?? at); // follow the flying head
+      } else if (live && e.kind === 'ko' && !punch.dramatic) {
+        const loser = e.corner;
+        punch.drama((sub: Subjects) => {
+          const p = sub.pos[loser];
+          return [p[0], p[1], p[2] + (sub.headZ[loser] - p[2]) * KO_AIM_HEAD_SHARE];
+        });
+      }
     }
   }
 
@@ -350,7 +383,9 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     const tick = p.update(dt);
     if (tick.events.length) {
       audio.onEvents(tick.events, REPLAY_AUDIO_RATE);
-      applyShake(tick.events, 0.6);
+      const tel = p.telemetry();
+      applyShake(tick.events, REPLAY_SHAKE, tel);
+      applyPunch(tick.events, REPLAY_PUNCH, false, tel);
       opts.onReplayEvents?.(tick.events, tick.speed);
     }
     if (!replaySecondAngle && p.highlight && p.t >= p.highlight.time - 0.25) {
@@ -444,7 +479,12 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
       const subjects = buildSubjects(world, frame?.telemetry ?? null, frame?.poses ?? null);
       director.aspect = stage.camera.aspect; // shots fit both fighters to the real frame
       const out = director.update(dt, subjects);
-      rig.apply(rig.free ? null : out, dt, shake.update(dt));
+      if (director.mode !== punchMode) {
+        punchMode = director.mode; // a new mode (replay, victory, select) ends any push-in
+        punch.reset();
+      }
+      const fx = punch.update(dt, subjects);
+      rig.apply(rig.free ? null : out, dt, shake.update(dt), rig.free ? null : constrainPunch(fx, out.shot, out.pose, subjects, director.aspect));
       audio.onFrame(frame?.poses ?? null, frame?.telemetry ?? null, dt, frame?.time);
       hudT += dt;
       if (hudT >= HUD_INTERVAL_S) {
@@ -463,6 +503,7 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
       isFree: () => rig.free,
       director,
       shake: (amount: number) => shake.add(amount),
+      punch,
     },
     audio: {
       start: () => audio.start(),

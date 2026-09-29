@@ -8,6 +8,7 @@
 //   every rAF       → vfx.update(dt)   (before rendering)
 import * as THREE from 'three/webgpu';
 import type { RobotTelemetry, SimEvent, WorldMeta } from '../../core/protocol';
+import { ContactSystem } from './contact';
 import { makeRng } from './coords';
 import { DebrisSystem } from './debris';
 import { TelemetryEmitters } from './emitters';
@@ -31,6 +32,7 @@ export interface VfxStage {
 
 export interface VfxStats {
   sparks: number;
+  contactMarks: number; // live shockwave rings + surface flashes
   smokePuffs: number;
   debris: number;
   debrisMoving: number;
@@ -40,7 +42,8 @@ export interface VfxStats {
 }
 
 export interface Vfx {
-  onEvents(events: SimEvent[]): void;
+  /** `tel`: the same frame's telemetry, when known (a ground scramble gets no strike marks). */
+  onEvents(events: SimEvent[], tel?: readonly RobotTelemetry[] | null): void;
   onTelemetry(tel: [RobotTelemetry, RobotTelemetry], poses: Float32Array): void;
   update(dt: number): void;
   /** Optional: part → body mapping so smoke and oil follow parts before the damage module publishes vents. */
@@ -68,21 +71,22 @@ export function createVfx(stage: VfxStage, seed = 1337): Vfx {
   root.name = 'vfx';
   const sparks = new SparkSystem(rng);
   const flash = new FlashSystem(stage.camera);
+  const contact = new ContactSystem(stage.camera);
   const debris = new DebrisSystem(rng);
   const smoke = new SmokeSystem(rng);
   const oil: OilSystem = createOil(stage, rng);
-  root.add(debris.object, oil.object, smoke.object, sparks.object, flash.object);
+  root.add(debris.object, oil.object, smoke.object, contact.object, sparks.object, flash.object);
   stage.scene.add(root);
 
   const emitters = new TelemetryEmitters(rng, { smoke, oil, embers: sparks });
-  const fx: EffectSystems = { sparks, flash, debris, smoke, com: (c, out) => emitters.com(c, out) };
-  const stats: VfxStats = { sparks: 0, smokePuffs: 0, debris: 0, debrisMoving: 0, oilParticles: 0, oilMode: oil.kind, cpuMs: 0 };
+  const fx: EffectSystems = { sparks, contact, flash, debris, smoke, com: (c, out) => emitters.com(c, out) };
+  const stats: VfxStats = { sparks: 0, contactMarks: 0, smokePuffs: 0, debris: 0, debrisMoving: 0, oilParticles: 0, oilMode: oil.kind, cpuMs: 0 };
 
   return {
     root,
     stats,
-    onEvents(events) {
-      for (const e of events) routeEvent(e, fx, rng);
+    onEvents(events, tel) {
+      for (const e of events) routeEvent(e, fx, rng, tel);
     },
     onTelemetry(tel, poses) {
       emitters.setTelemetry(tel, poses);
@@ -96,10 +100,12 @@ export function createVfx(stage: VfxStage, seed = 1337): Vfx {
       emitters.update(dt);
       sparks.update(dt);
       flash.update(dt);
+      contact.update(dt);
       debris.update(dt);
       smoke.update(dt, stage.camera);
       oil.update(dt);
       stats.sparks = sparks.alive;
+      stats.contactMarks = contact.alive;
       stats.smokePuffs = smoke.alive;
       stats.debris = debris.total;
       stats.debrisMoving = debris.moving;
@@ -114,9 +120,11 @@ export function createVfx(stage: VfxStage, seed = 1337): Vfx {
     },
     setReplay(replaying) {
       flash.setReplay(replaying);
+      contact.setReplay(replaying);
     },
     clear() {
       sparks.clear();
+      contact.clear();
       smoke.clear();
       debris.clear();
       oil.clear();
@@ -126,6 +134,7 @@ export function createVfx(stage: VfxStage, seed = 1337): Vfx {
       root.removeFromParent();
       sparks.dispose();
       flash.dispose();
+      contact.dispose();
       debris.dispose();
       smoke.dispose();
       oil.dispose();

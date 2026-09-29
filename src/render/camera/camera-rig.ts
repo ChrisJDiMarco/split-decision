@@ -1,11 +1,13 @@
 // Drives the stage camera from the director (eased, snapping on cuts) or leaves it to
-// OrbitControls in free mode. Shake is layered on top in both modes.
+// OrbitControls in free mode. Shake is layered on top in both modes; a hit punch-in
+// (punch-in.ts) is layered on the director's shot after the easing, so it stays sharp.
 // Stage.render() calls controls.update(), which re-aims the camera at controls.target, so
 // the rig always moves the target together with the camera.
 import * as THREE from 'three/webgpu';
 import type { Vec3 } from '../../core/types';
 import type { Stage } from '../stage';
 import type { DirectorOutput } from './director';
+import type { PunchFx } from './punch-in';
 import type { ShotKind } from './shots';
 
 type RigStage = Pick<Stage, 'camera' | 'controls' | 'physicsRoot'>;
@@ -34,6 +36,7 @@ export class CameraRig {
   private fov: number;
   private lastShake = new THREE.Vector3();
   private tmp = new THREE.Vector3();
+  private punchPoint = new THREE.Vector3();
   private rootQuat = new THREE.Quaternion();
   private freeLimits: ControlLimits;
   private initialised = false;
@@ -61,13 +64,13 @@ export class CameraRig {
     return this.stage.physicsRoot.localToWorld(out.set(p[0], p[1], p[2]));
   }
 
-  apply(shot: DirectorOutput | null, dt: number, shakePhysics: Vec3): void {
+  apply(shot: DirectorOutput | null, dt: number, shakePhysics: Vec3, punch: PunchFx | null = null): void {
     const cam = this.stage.camera;
     const controls = this.stage.controls;
     cam.position.sub(this.lastShake);
     controls.target.sub(this.lastShake);
 
-    if (!this.free && shot) this.follow(shot, dt);
+    if (!this.free && shot) this.follow(shot, dt, punch);
 
     this.stage.physicsRoot.getWorldQuaternion(this.rootQuat);
     this.lastShake.set(shakePhysics[0], shakePhysics[1], shakePhysics[2]).applyQuaternion(this.rootQuat);
@@ -75,7 +78,7 @@ export class CameraRig {
     controls.target.add(this.lastShake);
   }
 
-  private follow(out: DirectorOutput, dt: number): void {
+  private follow(out: DirectorOutput, dt: number, punch: PunchFx | null): void {
     const cam = this.stage.camera;
     const desiredPos = this.toWorld(out.pose.pos, this.tmp);
     const snap = out.cut || !this.initialised;
@@ -90,9 +93,19 @@ export class CameraRig {
 
     cam.position.copy(this.pos);
     this.stage.controls.target.copy(this.target);
-    cam.lookAt(this.target);
-    if (Math.abs(cam.fov - this.fov) > 1e-3) {
-      cam.fov = this.fov;
+    let fov = this.fov;
+    if (punch) {
+      // Same math as punchedPose(): push the lens toward the contact, slide the aim toward it, squeeze the lens.
+      const p = this.toWorld(punch.point, this.punchPoint);
+      const toPoint = this.tmp.copy(p).sub(cam.position);
+      const len = toPoint.length();
+      if (len > 1e-6) cam.position.addScaledVector(toPoint, Math.min(punch.maxPushM, len * punch.push) / len);
+      this.stage.controls.target.lerp(p, punch.aim);
+      fov *= punch.fovScale;
+    }
+    cam.lookAt(this.stage.controls.target);
+    if (Math.abs(cam.fov - fov) > 1e-3) {
+      cam.fov = fov;
       cam.updateProjectionMatrix();
     }
   }

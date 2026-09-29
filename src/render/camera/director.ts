@@ -5,6 +5,7 @@
 // (seeded rng), unit-tested.
 import type { SimEvent } from '../../core/protocol';
 import type { Corner, Vec3 } from '../../core/types';
+import { strikeStrength } from '../vfx/scaling';
 import { checkPose, planShot, type PlannedShot, type ShotCheck } from './shot-plan';
 import { DEFAULT_ASPECT, hardCamSide, shotPose, type CameraPose, type Shot, type ShotKind, type Subjects } from './shots';
 
@@ -13,6 +14,8 @@ export type DirectorMode = 'idle' | 'live' | 'intro' | 'replay' | 'victory';
 export const DIRECTOR = {
   MIN_SHOT_S: 2,
   CUT_IMPACT_J: 180, // impacts above this cut to a reaction shot
+  CUT_STRENGTH: 0.72, // ...and so do landed hits this strong (vfx/scaling hitStrength: ~30 J on the electric roster)
+  CUT_LOW_STRENGTH: 0.9, // the hardest of those cut cage-side low
   PENDING_TTL_S: 2, // a queued reaction cut goes stale after this (>= MIN_SHOT_S so early hits still land)
   INTRO_SHOT_S: 2.6,
   BLOCKED_GRACE_S: 0.25, // a pose must stay blocked this long before it forces a cut
@@ -97,10 +100,11 @@ export class Director {
     this.startShot({ kind, subject, anchor: extra.anchor ?? null, focusBody: extra.focusBody ?? null, angle: extra.angle ?? this.rng() * Math.PI * 2 }, this.pickLen(kind));
   }
 
-  onEvents(events: readonly SimEvent[]): void {
+  /** `tel`: the frame's telemetry, so a ground scramble (striker down) doesn't read as a big hit. */
+  onEvents(events: readonly SimEvent[], tel?: readonly { down: boolean }[] | null): void {
     if (this.mode !== 'live') return;
     for (const ev of events) {
-      const req = reactionFor(ev);
+      const req = reactionFor(ev, tel);
       if (req && (!this.pending || req.priority >= this.pending.priority)) {
         this.pending = { ...req, queuedAt: this.clock };
       }
@@ -184,7 +188,7 @@ export class Director {
   }
 }
 
-function reactionFor(ev: SimEvent): { shot: Omit<Shot, 'side'>; priority: number } | null {
+function reactionFor(ev: SimEvent, tel?: readonly { down: boolean }[] | null): { shot: Omit<Shot, 'side'>; priority: number } | null {
   const base = { anchor: null, focusBody: null, angle: 0 };
   switch (ev.kind) {
     case 'detach':
@@ -193,9 +197,13 @@ function reactionFor(ev: SimEvent): { shot: Omit<Shot, 'side'>; priority: number
       return { shot: { ...base, kind: 'cage_low', subject: ev.corner }, priority: 2 };
     case 'ko':
       return { shot: { ...base, kind: 'follow', subject: ev.corner === 0 ? 1 : 0 }, priority: 4 };
-    case 'impact':
-      if (ev.striker === null || ev.victim === null || ev.energyJ < DIRECTOR.CUT_IMPACT_J) return null;
-      return { shot: { ...base, kind: ev.energyJ > DIRECTOR.CUT_IMPACT_J * 2 ? 'cage_low' : 'follow', subject: ev.victim }, priority: 1 };
+    case 'impact': {
+      if (ev.striker === null || ev.victim === null) return null;
+      const s = strikeStrength(ev, tel);
+      if (ev.energyJ < DIRECTOR.CUT_IMPACT_J && s < DIRECTOR.CUT_STRENGTH) return null;
+      const low = ev.energyJ > DIRECTOR.CUT_IMPACT_J * 2 || s >= DIRECTOR.CUT_LOW_STRENGTH;
+      return { shot: { ...base, kind: low ? 'cage_low' : 'follow', subject: ev.victim }, priority: 1 };
+    }
     default:
       return null;
   }

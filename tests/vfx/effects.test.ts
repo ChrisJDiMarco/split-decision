@@ -2,6 +2,7 @@ import { setSetting } from '../../src/core/settings';
 import { describe, expect, test, beforeAll, afterAll } from 'vitest';
 import * as THREE from 'three/webgpu';
 import type { PartTelemetry, RobotTelemetry, SimEvent, WorldMeta } from '../../src/core/protocol';
+import { ContactSystem } from '../../src/render/vfx/contact';
 import { makeRng, toWorld } from '../../src/render/vfx/coords';
 import { DebrisSystem } from '../../src/render/vfx/debris';
 import { PARTICLES_PER_LITRE, TelemetryEmitters } from '../../src/render/vfx/emitters';
@@ -114,6 +115,7 @@ describe('event routing', () => {
     const rng = makeRng(2);
     const fx = {
       sparks: new SparkSystem(rng),
+      contact: new ContactSystem(),
       flash: new FlashSystem(),
       debris: new DebrisSystem(rng),
       smoke: new SmokeSystem(rng),
