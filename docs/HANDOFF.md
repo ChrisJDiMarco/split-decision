@@ -55,7 +55,7 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
   - Feints need a real, sellable windup, and a low feint. Right now reads are about 4 per minute and carry no signal (34% react to a feint vs 38% to no feint).
   - Chain combos in the body (`COMBO_SEQUENCING = 'body'`): 44% of plan steps are never thrown.
   - Other open items: tests/openings/perf is tight under load; the hit-feel shockwave ring may look too stylised (taste call); the harness 'Head off' holds the push-in.
-- Running: `player-mode-integration` (wf_5d295099-a06). JEV/YOU per corner, FAIR MODE, main.ts wiring, camera `setExternal`, key remaps, guard key moved off Ctrl.
+- Running: `minds-and-player-integration` (wf_b27aa470-00c), which replaces the stopped player-integration run. Mind picker per corner: JEV (cloud) / LOCAL (open-source Jev on this Mac, via /api/local-jev) / HOUSE (rules only) / YOU (player); global MINDS override; player mode in the main game; FAIR MODE; guard key moved off Ctrl. The local model (Kev or Mapika decider) waits for Chris's OK on the exact download sizes.
 - After the balance engine: flashy moves + kip-ups in the body (consume `Intent.onOpening`, replace TODO(control-build) fallbacks), then a live critic.
 
 ## Next steps, in order
