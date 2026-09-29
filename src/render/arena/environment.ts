@@ -7,7 +7,7 @@ import { clamp, mix, normalize, positionLocal, smoothstep, vec3 } from 'three/ts
 const FOG_COLOR = 0x1a2027;
 const FOG_DENSITY = 0.027;
 const DOME_RADIUS = 150;
-const ENV_INTENSITY = 0.6;
+const ENV_INTENSITY = 0.45; // dimmer reflections so robot metal doesn't glare
 const ENV_BLUR_SIGMA = 0.02;
 
 function buildDome(): THREE.Mesh {

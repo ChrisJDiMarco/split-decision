@@ -37,6 +37,10 @@ const FLAVOR: Record<KitFlavor, FlavorTuning> = {
 };
 
 /** Padded leather: satin, a light sheen, scuffs to a paler leather instead of metal. */
+/** Shine limits (see the roughness node below). */
+const ROUGHNESS_FLOOR = 0.3;
+const CLEARCOAT_SCALE = 0.35;
+
 const GLOVE_LEATHER = { metal: 0, rough: 0.5, clearcoat: 0.35, clearcoatRough: 0.35 };
 
 function scaleHex(hex: string, k: number): string {
@@ -216,10 +220,12 @@ export function createKitMaterial({ skin, flavor, atlas, gloveColor }: KitMateri
   m.userData.groundUniform = uGround;
   m.colorNode = col;
   m.metalnessNode = clamp(metal, 0.0, 1.0);
-  m.roughnessNode = clamp(rough, 0.03, 1.0);
-  const coat = U.clearcoat.mul(float(1).sub(chip)).mul(float(1).sub(grime.mul(0.8))).mul(float(1).sub(scorch)).mul(float(1).sub(rustAmt));
+  // Chris: the bodies were too shiny and glared under the arena lights. A roughness floor stops
+  // mirror-like highlights and the clearcoat runs at a third, so metal still reads as metal.
+  m.roughnessNode = clamp(rough, ROUGHNESS_FLOOR, 1.0);
+  const coat = U.clearcoat.mul(CLEARCOAT_SCALE).mul(float(1).sub(chip)).mul(float(1).sub(grime.mul(0.8))).mul(float(1).sub(scorch)).mul(float(1).sub(rustAmt));
   m.clearcoatNode = coat;
-  m.clearcoatRoughnessNode = U.ccRough.add(scratch.mul(0.3));
+  m.clearcoatRoughnessNode = U.ccRough.add(scratch.mul(0.3)).max(0.18);
   // Neon runs only on the crisp bevel strips (edge weight 1), not the soft falloff around them.
   const neonLine = smoothstep(0.985, 1.0, surf.x).mul(float(1).sub(chip)).mul(float(1).sub(scorch));
   const heatGlow = heatColor(oHeat).mul(smoothstep(0.35, 1.0, oHeat)).mul(float(0.7).add(gN.mul(0.6))).mul(HEAT_GLOW);
