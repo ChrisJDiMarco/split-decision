@@ -1,0 +1,67 @@
+/* Player mode HUD. Tokens come from src/ui/styles.css and src/ui/broadcast.css. */
+.player-hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--cond); color: var(--ink); }
+.player-hud .corner-stack.ph-me { left: 18px; right: auto; }
+.player-hud .corner-stack.ph-opp { right: 18px; left: auto; }
+.player-hud .ph-chips { display: flex; gap: 6px; }
+.player-hud .ph-move { display: flex; align-items: baseline; gap: 6px; font: 600 10px/1 var(--mono); letter-spacing: 0.08em; color: var(--dim); }
+.player-hud .ph-now { font: 800 20px/1 var(--cond); letter-spacing: 0.08em; color: var(--ink); }
+.player-hud .ph-buffer { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; align-items: center; }
+.player-hud .ph-combo { font: 700 11px/1 var(--mono); color: var(--gold); letter-spacing: 0.04em; }
+.player-hud .ph-queued { color: var(--ink); border-color: var(--corner); }
+.player-hud .ph-empty { font: 600 9px/1 var(--mono); letter-spacing: 0.16em; color: rgba(141, 138, 132, 0.6); }
+.player-hud .ph-state.down { color: var(--hot); }
+
+/* lock-on reticle: four corner brackets around the opponent's chest */
+.ph-reticle { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.15s ease; }
+.ph-reticle.hidden { opacity: 0; }
+.ph-reticle i { position: absolute; width: 14px; height: 14px; border: 2px solid var(--corner); opacity: 0.85; }
+.ph-reticle i:nth-child(1) { left: -46px; top: -56px; border-right: 0; border-bottom: 0; }
+.ph-reticle i:nth-child(2) { left: 32px; top: -56px; border-left: 0; border-bottom: 0; }
+.ph-reticle i:nth-child(3) { left: -46px; top: 42px; border-right: 0; border-top: 0; }
+.ph-reticle i:nth-child(4) { left: 32px; top: 42px; border-left: 0; border-top: 0; }
+
+/* hit marker and hurt flash */
+.ph-marker {
+  position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%) skewX(var(--skew));
+  font: 800 26px/1 var(--cond); letter-spacing: 0.12em; color: var(--ink); opacity: 0;
+  text-shadow: 0 0 18px rgba(255, 176, 32, 0.55);
+}
+.ph-marker.big { color: var(--gold); font-size: 38px; }
+.ph-hurt {
+  position: absolute; inset: 0; opacity: 0;
+  box-shadow: inset 0 0 160px 40px rgba(255, 40, 30, 0.55);
+}
+
+/* click-to-play prompt */
+.ph-prompt {
+  position: absolute; left: 50%; top: 58%; transform: translateX(-50%);
+  font: 600 12px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink); padding: 10px 14px;
+  background: var(--glass); border: 1px solid var(--hair); transition: opacity 0.2s ease;
+}
+.ph-prompt b { color: var(--gold); }
+.ph-prompt.hidden { opacity: 0; }
+
+/* key hints */
+.ph-hints {
+  position: absolute; left: 50%; top: 96px; transform: translateX(-50%); width: min(760px, calc(100vw - 32px));
+  pointer-events: auto; display: none; max-height: calc(100vh - 380px); overflow: auto;
+}
+.ph-hints.open { display: block; }
+.ph-hint-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 18px; }
+.ph-hint-title { font: 700 10px/1 var(--mono); letter-spacing: 0.2em; color: var(--corner); margin-bottom: 6px; }
+.ph-hint { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 24px; font-size: 14px; letter-spacing: 0.04em; }
+.ph-key {
+  font: 600 10px/1 var(--mono); letter-spacing: 0.06em; color: var(--ink); background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--hair-strong); padding: 5px 7px; cursor: pointer; white-space: nowrap;
+}
+.ph-key:hover { border-color: var(--gold); }
+.ph-hint.na > span { opacity: 0.45; }
+.ph-hint.na small { font: 600 9px/1 var(--mono); letter-spacing: 0.08em; }
+.ph-hint.capturing .ph-key { color: #120c00; background: var(--gold); border-color: var(--gold); }
+.ph-hint-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hair); font: 500 11px/1.4 var(--mono); color: var(--dim); }
+.ph-reset { font: 700 10px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink); background: none; border: 1px solid var(--hair-strong); padding: 6px 9px; cursor: pointer; }
+
+@media (max-width: 900px) {
+  .player-hud .corner-stack { width: 250px; }
+  .player-hud .corner-stack.ph-opp .mind { display: none; }
+}
