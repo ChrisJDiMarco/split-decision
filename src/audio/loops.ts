@@ -97,6 +97,7 @@ export class Crowd {
   private bus: GainNode;
   private tone: BiquadFilterNode;
   private roar: GainNode;
+  private ducker: GainNode; // sidechain: huge impacts punch a hole in the crowd bed
   private excitement = CROWD_BASE;
   private retarget = 0;
 
@@ -107,10 +108,11 @@ export class Crowd {
     this.tone = ctx.createBiquadFilter();
     this.tone.type = 'lowpass';
     this.tone.frequency.value = 1200;
-    this.bus.connect(this.tone).connect(e.master);
+    this.ducker = ctx.createGain();
+    this.bus.connect(this.tone).connect(this.ducker).connect(e.master);
     const send = ctx.createGain();
     send.gain.value = 0.6;
-    this.tone.connect(send).connect(e.reverbSend);
+    this.ducker.connect(send).connect(e.reverbSend);
     for (let i = 0; i < CROWD_VOICES; i++) {
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
@@ -135,6 +137,15 @@ export class Crowd {
   /** Raise excitement (0..1 added). A KO is ~1, a big hit ~0.35. */
   swell(amount: number): void {
     this.excitement = Math.min(1, this.excitement + amount);
+  }
+
+  /** Duck the bed by `depth` (0..1) for a beat, so a huge hit lands in a moment of relative quiet. */
+  duck(depth: number, at = this.e.now): void {
+    const g = this.ducker.gain;
+    const floor = 1 - Math.max(0, Math.min(0.85, depth));
+    g.cancelScheduledValues(at);
+    g.setTargetAtTime(floor, at, 0.008); // ~25 ms attack
+    g.setTargetAtTime(1, at + 0.09, 0.28); // then breathe back over ~0.8 s
   }
 
   update(dt: number): void {

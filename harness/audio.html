@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fight Audio Harness</title>
+    <link rel="stylesheet" href="/src/ui/styles.css" />
+    <style>
+      body { overflow: auto; }
+      .au { max-width: 720px; margin: 24px auto; padding: 0 16px; font: 13px/1.45 'JetBrains Mono', ui-monospace, monospace; color: var(--ink); }
+      .au h1 { font: 700 20px/1.2 system-ui, sans-serif; letter-spacing: 0.04em; margin: 0 0 4px; }
+      .au p { color: var(--dim); margin: 0 0 16px; }
+      .au section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+      .au h2 { font: 700 12px/1 system-ui, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin: 0 0 10px; }
+      .au .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+      .au button {
+        padding: 8px 10px; text-align: left; cursor: pointer; font: inherit; color: var(--ink);
+        background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 4px;
+      }
+      .au button:hover { background: rgba(255,255,255,0.12); }
+      .au button.primary { background: rgba(224,69,43,0.35); border-color: rgba(224,69,43,0.7); font-weight: 700; }
+      .au label { display: flex; align-items: center; gap: 10px; margin: 6px 0; color: var(--dim); }
+      .au label input[type=range] { flex: 1; }
+      .au label output { min-width: 64px; color: var(--ink); text-align: right; }
+      .au #status { color: var(--dim); }
+      .au .status-row { margin-top: 8px; }
+      .au #results { white-space: pre-wrap; margin: 8px 0 0; font-size: 12px; }
+      .au .pass { color: #7fd48a; }
+      .au .fail { color: #ff6b5a; }
+    </style>
+  </head>
+  <body>
+    <main class="au" id="app">
+      <h1>FIGHT AUDIO</h1>
+      <p>Audition the impact foley. Plays through your speakers regardless of the in-game SOUND setting; nothing plays until you click.</p>
+    </main>
+    <script type="module" src="/src/harness/audio.ts"></script>
+  </body>
+</html>
