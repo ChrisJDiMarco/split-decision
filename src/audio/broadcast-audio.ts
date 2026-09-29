@@ -1,5 +1,6 @@
 // Maps the fight to sound: events → clangs, thuds, tears and crowd swells; telemetry and
 // poses → servo whine, hydraulic hiss and footfalls. Created on a user gesture.
+import { onSettingsChange, settings } from '../core/settings';
 import type { RobotTelemetry, SimEvent } from '../core/protocol';
 import type { Corner, MaterialId, Vec3 } from '../core/types';
 import { AudioEngine } from './engine';
@@ -39,7 +40,9 @@ export class BroadcastAudio {
   private prevPoses: Float32Array | null = null;
   private lastPoseTime: number | null = null;
   private poseWallS = 0; // wall time since the displayed poses last changed
-  private muted = false;
+  // Follows the SOUND setting (off by default); M toggles it for the session.
+  private muted = !settings().soundOn;
+  readonly unsubscribeSettings = onSettingsChange((next) => this.setMuted(!next.soundOn));
 
   get started(): boolean {
     return this.engine !== null;
@@ -157,7 +160,8 @@ export class BroadcastAudio {
       const torque = topMean(t.joints.map((j) => j.torqueFrac), 4);
       const speed = prev ? limbSpeed(s, t.corner, poses, prev, moveDt) : 0;
       this.whine[t.corner]?.set(t.down ? torque * 0.4 : torque, speed, pan);
-      const leak = t.parts.reduce((sum, p) => sum + (p.leak > LEAK_EPS ? p.leak : 0), 0);
+      // Leak hiss belongs to the oil effects: silent while they are switched off in settings.
+      const leak = settings().oilEffects ? t.parts.reduce((sum, p) => sum + (p.leak > LEAK_EPS ? p.leak : 0), 0) : 0;
       this.hiss[t.corner]?.set(leak, pan);
     }
     this.footfalls(s, poses, moveDt, cut);

@@ -3,7 +3,8 @@ import type { SimEvent } from '../../../core/protocol';
 import { mulberry32 } from '../../../physics/sim-context';
 import { DIRECTOR, Director } from '../director';
 import { CameraShake } from '../shake';
-import { FRAMING, resolveShot, shotPose, type ShotKind, type Subjects } from '../shots';
+import { resolveShot } from '../shot-plan';
+import { FRAMING, shotPose, type ShotKind, type Subjects } from '../shots';
 
 const subjects = (): Subjects => ({ pos: [[-1.2, 0.4, 1], [1.1, -0.3, 1]], headZ: [1.9, 1.9], heading: [0, Math.PI], down: [false, false] });
 const DT = 1 / 60;

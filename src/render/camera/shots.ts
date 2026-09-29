@@ -1,8 +1,15 @@
 // Broadcast shot framing. Pure math in the physics frame (z-up, metres); the camera rig
 // converts to three.js world space. Every shot is a function of the fighters' positions
 // and the time since the cut, so it can be unit-tested without a renderer.
-import { APOTHEM } from '../../core/arena-spec';
+//
+// Camera positions respect the arena (src/core/arena-spec.ts, src/render/arena/lighting.ts):
+// cage-side cameras stand on the apron in the middle of a fence panel, halfway between two
+// posts, shooting through the chain link at chest height; the overhead hangs below the
+// lighting truss and never tilts up far enough to see it. shot-plan.ts checks the sight
+// lines and picks the variant (`slot`) at the cut.
+import { APOTHEM, panels } from '../../core/arena-spec';
 import type { Corner, Vec3 } from '../../core/types';
+import { fitFov } from './sightlines';
 
 export type ShotKind =
   | 'wide' | 'cage_low' | 'ots' | 'follow' | 'overhead'
@@ -15,6 +22,8 @@ export interface Shot {
   anchor: Vec3 | null; // fixed point for debris / replay shots
   focusBody: number | null; // body the debris shot tracks
   angle: number; // base azimuth for orbiting shots, radians
+  /** Camera variant chosen at the cut: the fence panel for cage_low, the hard-cam position for wide. */
+  slot?: number | null;
 }
 
 export interface Subjects {
@@ -31,14 +40,22 @@ export interface CameraPose {
   fov: number;
 }
 
+export const DEFAULT_ASPECT = 16 / 9;
+
 export const FRAMING = {
   HARD_CAM_Y: -9.4,
-  HARD_CAM_Z: 4.1,
-  CAGE_CAM_R: APOTHEM + 0.75, // on the apron, shooting through the fence
-  CAGE_CAM_Z: 0.55,
+  HARD_CAM_Z: 5.0, // high enough to see a centred fighter's feet over the top rail
+  CAGE_CAM_OUT_M: 0.7, // cage-side lens this far outside the fence plane (on the apron)
+  CAGE_CAM_PUSH_M: 0.3, // slow push toward the fence over the shot
+  CAGE_CAM_Z: 1.2, // chest height of a standing fighter (COM ~1.05, head ~1.8)
+  OVERHEAD_Z: 5.7, // below the fixture cans (~6.75 m) and the truss (7.25 m underside)
+  OVERHEAD_BACK_M: 1.9, // horizontal offset toward the hard-cam side, for a slight tilt
   INSIDE_R: APOTHEM - 0.3, // in-cage cameras stay this far inside the fence
   CHEST_Z: 1.0,
 } as const;
+
+/** Hard-cam positions tried in order when a post or the top rail hides a fighter: [x offset, z offset]. */
+export const WIDE_SLOTS: ReadonlyArray<readonly [number, number]> = [[0, 0], [0.9, 0], [-0.9, 0], [0, 1.1], [1.8, 0.6], [-1.8, 0.6]];
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -73,6 +90,26 @@ function rotate2(v: [number, number], a: number): [number, number] {
   return [v[0] * c - v[1] * sn, v[0] * sn + v[1] * c];
 }
 
+/** Torso points a camera must see on fighter `c`: the COM and mid-chest. */
+export function sightPoints(s: Subjects, c: Corner): Vec3[] {
+  const [x, y, z] = s.pos[c];
+  return [[x, y, z], [x, y, (z + Math.max(z, s.headZ[c])) / 2]];
+}
+
+/** Points that must be in frame for fighter `c`: hips to the top of the head. */
+export function framePoints(s: Subjects, c: Corner): Vec3[] {
+  const [x, y, z] = s.pos[c];
+  return [[x, y, Math.max(0.1, z * 0.55)], [x, y, Math.max(z, s.headZ[c]) + 0.12]];
+}
+
+const bothFrame = (s: Subjects) => [...framePoints(s, 0), ...framePoints(s, 1)];
+
+/** Mean chest height of the two fighters (drops when one is down). */
+function chestZ(s: Subjects): number {
+  const z = (c: Corner) => sightPoints(s, c)[1][2];
+  return clamp((z(0) + z(1)) / 2, 0.35, 1.6);
+}
+
 /**
  * Keep an in-cage camera inside the fence without pushing it into the fighters: slide it
  * toward `focus` along the line of sight, and widen the lens so the framing holds.
@@ -101,40 +138,45 @@ export function rayToCircle(o: [number, number], d: [number, number], R: number)
   return [o[0] + d[0] * s, o[1] + d[1] * s];
 }
 
-const DEBRIS_IGNORE_M = 0.9; // the victim lies at the anchor; don't count it as a blocker
-const FIGHTER_CLEARANCE_M = 0.55;
+const PANELS = panels();
 
-/** Ground-plane distance from `b` to the segment a→t is at least the fighter clearance. */
-function clearOf(a: Vec3, t: Vec3, b: Vec3): boolean {
-  const dx = t[0] - a[0];
-  const dy = t[1] - a[1];
-  const len2 = dx * dx + dy * dy || 1;
-  const u = Math.max(0, Math.min(1, ((b[0] - a[0]) * dx + (b[1] - a[1]) * dy) / len2));
-  return Math.hypot(a[0] + dx * u - b[0], a[1] + dy * u - b[1]) >= FIGHTER_CLEARANCE_M;
+const angleGap = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
+/**
+ * Fence panels for a cage-side shot, best first: the one the shot's sight line (from the
+ * fighters' midpoint, perpendicular to their line, turned by `angle`) leaves the cage
+ * through, then its neighbours outward.
+ */
+export function cagePanelOrder(shot: Shot, s: Subjects): number[] {
+  const m = mid(s);
+  const n = rotate2(perp(s, shot.side), shot.angle);
+  const exit = rayToCircle([m[0], m[1]], n, APOTHEM);
+  const az = Math.atan2(exit[1], exit[0]);
+  return PANELS.map((p, i) => ({ i, gap: angleGap(p.normalAngle, az) }))
+    .sort((a, b) => a.gap - b.gap)
+    .map((p) => p.i);
 }
 
-const NEAR_CAMERA_M = 1.6; // a fighter this close to the lens fills the frame
-
-type Framer = (shot: Shot, s: Subjects, t: number) => CameraPose;
+type Framer = (shot: Shot, s: Subjects, t: number, aspect: number) => CameraPose;
 
 const FRAMERS: Record<ShotKind, Framer> = {
-  wide(_shot, s) {
+  wide(shot, s, _t, aspect) {
     const m = mid(s);
     const sep = separation(s);
-    return {
-      pos: [m[0] * 0.35, FRAMING.HARD_CAM_Y, FRAMING.HARD_CAM_Z],
-      target: [m[0] * 0.85, m[1] * 0.85, FRAMING.CHEST_Z * 0.9],
-      fov: clamp(22 + sep * 3.5, 24, 40),
-    };
+    const [dx, dz] = WIDE_SLOTS[shot.slot ?? 0] ?? WIDE_SLOTS[0];
+    const pos: Vec3 = [m[0] * 0.35 + dx, FRAMING.HARD_CAM_Y, FRAMING.HARD_CAM_Z + dz];
+    const target: Vec3 = [m[0] * 0.85, m[1] * 0.85, FRAMING.CHEST_Z * 0.9];
+    return { pos, target, fov: clamp(Math.max(22 + sep * 3.5, fitFov(pos, target, bothFrame(s), aspect)), 24, 48) };
   },
-  cage_low(shot, s, t) {
+  cage_low(shot, s, t, aspect) {
     const m = mid(s);
-    const target: Vec3 = [m[0], m[1], FRAMING.CHEST_Z + 0.1];
-    const push = Math.min(0.5, t * 0.07); // slow push-in toward the action
-    const fov = clamp(30 + separation(s) * 3, 34, 48);
-    const n = rotate2(perp(s, shot.side), shot.angle);
-    const edge = rayToCircle([m[0], m[1]], n, FRAMING.CAGE_CAM_R);
-    return { pos: [edge[0] - n[0] * push, edge[1] - n[1] * push, FRAMING.CAGE_CAM_Z], target, fov };
+    const panel = PANELS[shot.slot ?? cagePanelOrder(shot, s)[0]];
+    const n: [number, number] = [Math.cos(panel.normalAngle), Math.sin(panel.normalAngle)];
+    const out = FRAMING.CAGE_CAM_OUT_M - Math.min(FRAMING.CAGE_CAM_PUSH_M, t * 0.08); // slow push-in
+    const r = APOTHEM + out;
+    const pos: Vec3 = [n[0] * r, n[1] * r, FRAMING.CAGE_CAM_Z];
+    const target: Vec3 = [m[0], m[1], chestZ(s)];
+    return { pos, target, fov: clamp(Math.max(34, fitFov(pos, target, bothFrame(s), aspect)), 30, 64) };
   },
   ots(shot, s) {
     const me = s.pos[shot.subject];
@@ -145,19 +187,21 @@ const FRAMERS: Record<ShotKind, Framer> = {
     const placed = placeInside(target, [me[0] - d[0] * 1.7 + side[0] * 0.6, me[1] - d[1] * 1.7 + side[1] * 0.6, s.headZ[shot.subject] + 0.3], 44);
     return { pos: placed.pos, target, fov: placed.fov };
   },
-  follow(shot, s, t) {
+  follow(shot, s, t, aspect) {
     const me = s.pos[shot.subject];
     const them = s.pos[shot.subject === 0 ? 1 : 0];
     const d = lineDir(s, shot.subject);
-    const n = rotate2(perp(s, shot.side), t * 0.06);
+    const n = rotate2(perp(s, shot.side), shot.angle + t * 0.06);
     const target: Vec3 = [me[0] * 0.7 + them[0] * 0.3, me[1] * 0.7 + them[1] * 0.3, FRAMING.CHEST_Z + 0.05];
     const placed = placeInside(target, [me[0] + n[0] * 4.2 - d[0] * 0.9, me[1] + n[1] * 4.2 - d[1] * 0.9, 1.45], 40);
-    return { pos: placed.pos, target, fov: placed.fov };
+    return { pos: placed.pos, target, fov: clamp(Math.max(placed.fov, fitFov(placed.pos, target, bothFrame(s), aspect)), 30, 62) };
   },
-  overhead(shot, s, t) {
+  overhead(shot, s, t, aspect) {
     const m = mid(s);
-    const off = rotate2([0, -2.2], t * 0.05 + shot.angle); // tilted toward the hard-cam side
-    return { pos: [m[0] + off[0], m[1] + off[1], 8.8], target: [m[0], m[1], 0.4], fov: 42 };
+    const off = rotate2([0, -FRAMING.OVERHEAD_BACK_M], t * 0.05 + shot.angle); // tilted toward the hard-cam side
+    const pos: Vec3 = [m[0] + off[0], m[1] + off[1], FRAMING.OVERHEAD_Z];
+    const target: Vec3 = [m[0], m[1], 0.4];
+    return { pos, target, fov: clamp(Math.max(42, fitFov(pos, target, bothFrame(s), aspect)), 40, 72) };
   },
   debris(shot, s) {
     const tracked = shot.focusBody !== null ? s.bodyPos?.(shot.focusBody) ?? null : null;
@@ -186,43 +230,38 @@ const FRAMERS: Record<ShotKind, Framer> = {
     const a = shot.angle + t * 0.045; // slow crane around the whole cage
     return { pos: [Math.cos(a) * 8.2, Math.sin(a) * 8.2, 3.4 + Math.sin(t * 0.1) * 0.4], target: [0, 0, 0.9], fov: 40 };
   },
-  replay(shot, s, t) {
-    const c = shot.anchor ?? mid(s);
+  replay(shot, s, t, aspect) {
+    const c = replayFocus(shot, s);
     const a = shot.angle + t * 0.2;
     const target: Vec3 = [c[0], c[1], clamp(c[2], 0.7, 1.5)];
     const placed = placeInside(target, [c[0] + Math.cos(a) * 3.8, c[1] + Math.sin(a) * 3.8, 1.1 + 0.2 * Math.sin(t * 0.4)], 34);
-    return { pos: placed.pos, target, fov: placed.fov };
+    const keep = [target, ...framePoints(s, 0), ...framePoints(s, 1)];
+    return { pos: placed.pos, target, fov: clamp(Math.max(placed.fov, fitFov(placed.pos, target, keep, aspect)), 30, 64) };
   },
 };
 
-export function shotPose(shot: Shot, subjects: Subjects, t: number): CameraPose {
-  return FRAMERS[shot.kind](shot, subjects, t);
+/**
+ * What a replay centres on: the impact point when the fighters are still around it (the
+ * money moment), drifting toward them when the lead-in starts elsewhere. With no impact
+ * (a self-inflicted fall) it centres between the fighters, weighted to the shot's subject.
+ */
+export function replayFocus(shot: Shot, s: Subjects): Vec3 {
+  const me = s.pos[shot.subject];
+  const them = s.pos[shot.subject === 0 ? 1 : 0];
+  const pair: Vec3 = [me[0] * 0.65 + them[0] * 0.35, me[1] * 0.65 + them[1] * 0.35, me[2] * 0.65 + them[2] * 0.35];
+  const a = shot.anchor;
+  if (!a) return pair;
+  const away = Math.hypot(a[0] - pair[0], a[1] - pair[1]);
+  const w = clamp((away - 1.2) / 2.5, 0, 0.7); // 0 = the impact point, up to 0.7 toward the fighters
+  return [a[0] + (pair[0] - a[0]) * w, a[1] + (pair[1] - a[1]) * w, a[2] + (pair[2] - a[2]) * w];
+}
+
+export function shotPose(shot: Shot, subjects: Subjects, t: number, aspect = DEFAULT_ASPECT): CameraPose {
+  return FRAMERS[shot.kind](shot, subjects, t, aspect);
 }
 
 /** The shot side that keeps the camera on the hard-cam half of the fighter line (y < 0). */
 export function hardCamSide(s: Subjects): 1 | -1 {
   const n = perp(s, 1);
   return n[1] <= 0 ? 1 : -1;
-}
-
-const RESOLVE_TURNS = [0, Math.PI, Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4];
-const RESOLVED: ReadonlySet<ShotKind> = new Set<ShotKind>(['cage_low', 'debris', 'replay']);
-
-/**
- * Called once at a cut: rotate the shot (via `angle`) to the first orientation whose sight
- * line no fighter blocks and no fighter hugs the lens. Deciding at the cut keeps the camera
- * from swinging mid-shot. Fighters at the shot's anchor (a victim under its own flying
- * head) don't count as blockers.
- */
-export function resolveShot(shot: Shot, s: Subjects): Shot {
-  if (!RESOLVED.has(shot.kind)) return shot;
-  const anchor = shot.anchor;
-  const blockers = anchor ? s.pos.filter((p) => Math.hypot(p[0] - anchor[0], p[1] - anchor[1]) > DEBRIS_IGNORE_M) : s.pos;
-  for (const turn of RESOLVE_TURNS) {
-    const cand = { ...shot, angle: shot.angle + turn };
-    const pose = shotPose(cand, s, 0);
-    const ok = blockers.every((b) => clearOf(pose.pos, pose.target, b) && Math.hypot(pose.pos[0] - b[0], pose.pos[1] - b[1]) > NEAR_CAMERA_M);
-    if (ok) return cand;
-  }
-  return shot;
 }

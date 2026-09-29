@@ -132,8 +132,10 @@ describe('tale of the tape', () => {
     expect(t.massKg).toBeCloseTo(compileRobot(BRUISER, 0, { pos: [0, 0, 1], yaw: 0 }).totalMassKg, 6);
     expect(t.heightM).toBeGreaterThan(1.6);
     expect(t.heightM).toBeLessThan(2.4);
-    expect(t.peakTorqueNm).toBe(650); // hydraulic elbows
-    expect(t.peakJoint).toBe('left elbow');
+    expect(t.peakTorqueNm).toBe(650); // 32 mm hydraulic cylinders: elbows, legs and waist tie
+    const peakJoint = BRUISER.parts.flatMap((p) => p.joints ?? []).find((j) => j.motor === 'hyd.cyl32');
+    expect(peakJoint).toBeDefined();
+    expect(t.peakJoint).toMatch(/elbow|waist|hip|knee|ankle/);
     expect(t.armor).toBe('AR500 armor steel');
     expect(t.hydraulics).toBe('210 BAR');
     expect(taleOfTheTape(STRIKER).hydraulics).toBe('NONE');

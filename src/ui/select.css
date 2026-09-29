@@ -75,3 +75,25 @@
   .sel-center { grid-column: 1 / -1; grid-row: 3; padding-top: 12px; }
   .sel-card { max-height: none; }
 }
+
+/* Settings toggle under the FIGHT button */
+.sel-settings {
+  display: inline-flex; align-items: center; gap: 10px; margin-top: 14px;
+  font: 600 11px/1 'JetBrains Mono', monospace; letter-spacing: 0.12em; color: var(--dim, #8d8a84);
+  cursor: pointer; pointer-events: auto; user-select: none;
+}
+.sel-toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
+.sel-toggle {
+  position: relative; width: 34px; height: 18px; border-radius: 9px;
+  background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: background 0.15s ease;
+}
+.sel-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: #cfcac0; transition: transform 0.15s ease;
+}
+.sel-toggle-input:checked + .sel-toggle { background: #f3c33b; border-color: #f3c33b; }
+.sel-toggle-input:checked + .sel-toggle::after { transform: translateX(16px); background: #111; }
+.sel-toggle-input:focus-visible + .sel-toggle { outline: 2px solid #f3c33b; outline-offset: 2px; }
+
+.sel-settings-row { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }

@@ -13,7 +13,7 @@ import { GyroCore } from './gyro';
 import { footLoads, reachablePelvisYaw, soleRoll } from './loads';
 import { clamp, mulMM, mulMtV, readVec, rot2, rotationError, rotY, rotZ, sub, wrapAngle, yawPitchRoll, type Mat3 } from './math';
 import { jointMap, newBodyCommand, solveBody, type BodyCommand, type JointMap } from './posture';
-import { bodyIds, robotMass, sense, views, type BodyIds, type Sense } from './sense';
+import { bodyIds, GRAVITY, robotMass, sense, views, type BodyIds, type Sense } from './sense';
 import { SkillRunner } from './skills/runner';
 import { opponentView, type OpponentView } from './skills/targets';
 import { neutralPose, type SkillDef, type SkillEnv, type SkillPose } from './skills/types';
@@ -24,6 +24,7 @@ import { Rise } from './rise';
 import { rollKeysFor } from './roll-keys';
 import { UpperBodyStrategy } from './strategies';
 import { TacticRunner } from './tactics';
+import { Walker } from './walk';
 
 export const DEFAULT_TIMING: StepTiming = { shift: 1.2, shiftFraction: 1, swing: 0.3, lift: 0.05 };
 const MASS_REFRESH_S = 0.25;
@@ -35,6 +36,14 @@ const YAW_LEAD_SINGLE_RAD = 0.06;
 const YAW_LEAD_DOUBLE_RAD = 0.25;
 const NO_TORQUE: Vec3 = [0, 0, 0];
 const DOWN_BLEED_S = 0.3; // lying on the canvas, the gyro desaturates this fast (within its torque cap)
+const RISE_OFFSET_TAU_S = 0.04; // unfolding out of the crouch, the pelvis chases the moving COM this fast
+const RISE_SLOW_INSIDE_M = 0.02; // the rise slows once the capture point is this close to the soles' edge...
+const RISE_PAUSE_OUTSIDE_M = 0.03; // ...and all but stops this far outside them
+const RISE_MIN_RATE = 0.1;
+const WALK_SPEED = 0.55; // m/s closing the distance, at aggression 0.5
+const WALK_ASSIST_SHARE = 0.6; // share of the gyro's torque a walk may use to steer the COM
+const WALK_ASSIST_SAT = 0.6; // ...tapering to none as its rotor fills to this
+const SPRINT_FACTOR = 1.15;
 
 export class HumanoidController {
   readonly geo: HumanoidGeometry;
@@ -51,6 +60,7 @@ export class HumanoidController {
   readonly skills: SkillRunner;
   readonly tactics: TacticRunner;
   readonly getUp: GetUp;
+  readonly walker: Walker;
   /** false: the robot just holds its design stance (a training dummy on a gantry). */
   enabled = true;
   mass = 0;
@@ -79,6 +89,8 @@ export class HumanoidController {
     this.joints = jointInfo(r, ctx.model.dof_jntid);
     this.stance = stanceFor(this.geo);
     this.gait = new Gait(this.geo, this.stance);
+    const subtreeMass = ctx.model.body_subtreemass;
+    this.walker = new Walker(this.gait, this.geo, subtreeMass[this.ids.thigh.l] / subtreeMass[r.rootBody]);
     this.gyro = r.design.gyro ? new GyroCore(r.design.gyro) : null;
     this.q = new Float64Array(r.joints.length);
     this.velFF = new VelocityFeedforward(r.joints.length);
@@ -118,12 +130,18 @@ export class HumanoidController {
     this.report();
   }
 
+  /** Still standing up out of the get-up crouch (balance owns the body, the feet stay put). */
+  get rising(): boolean {
+    return this.rise.active;
+  }
+
   /** Standing: has the robot just gone down? Abandons whatever it was doing if so. */
   private checkFall(ctx: SimContext, s: Sense, dt: number): boolean {
     if (!this.getUp.detect(s, dt, this.rise.active)) return false;
     this.rise.active = false;
     this.upperBody.reset();
     this.skills.cancel(this.skillEnv(s), true);
+    this.walker.cancel();
     this.gait.resetAir(this.gait.currentFrame());
     this.goal = null;
     this.gyro?.release(views(ctx).xfrc, this.ids.torso);
@@ -236,12 +254,12 @@ export class HumanoidController {
     this.pose = neutralPose(st);
     this.setGuard();
     const env = this.skillEnv(s);
-    if (this.rise.active) this.rise.apply(this.pose, this.cmd, st, dt);
+    if (this.rise.active) this.rise.apply(this.pose, this.cmd, st, dt, this.riseRate(s));
     else {
       this.tactics.update(ctx, s, env);
       this.skills.update(ctx, env, dt);
     }
-    this.decideSteps(s, env);
+    this.decideSteps(s, env, dt);
     const [wf, wl] = this.pose.weightShift;
     const shift = rot2(wf, wl, this.heading);
     const plan = this.gait.update(dt, s, this.cmd.legs, shift);
@@ -249,10 +267,12 @@ export class HumanoidController {
     // Integral trim while both feet bear weight (in single support the COP has too little room).
     const settled = (this.gait.phase === 'double' || this.gait.phase === 'shift') && this.gait.bothPlanted();
     const support = this.gait.supportPolygon();
-    const [px, py] = this.balance.pelvisTarget(s, plan, dt, settled);
-    this.plannedCop = this.balance.plannedCop(s, plan, support);
+    const [px, py] = this.balance.pelvisTarget(s, plan, dt, settled, this.rise.active ? RISE_OFFSET_TAU_S : undefined);
+    this.plannedCop = this.balance.plannedCop(s, plan, support, this.gyro?.bleeding);
     this.dip += (this.gait.stepDip() - this.dip) * Math.min(1, dt / DIP_TAU_S);
-    const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, bearing + st.pelvisYaw + this.pose.pelvisYaw));
+    // Walking squares the hips up to the way it goes (a bladed pelvis walks crabwise).
+    const blade = this.walker.active ? 0 : st.pelvisYaw;
+    const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, bearing + blade + this.pose.pelvisYaw));
     // Hip and waist strategy: bend toward the fall, hips back so the bend itself does not carry
     // the COM out with it (only its angular momentum acts).
     const bend = this.upperBody.update(s, support, s.heading, this.gyroHealth(), dt);
@@ -264,7 +284,14 @@ export class HumanoidController {
     this.cmd.waistYaw = this.pose.waistYaw;
     this.cmd.waistPitch = this.pose.waistPitch + bend.waist;
     const capRef: P2 = [plan.pos[0] + plan.vel[0] / s.omega0, plan.pos[1] + plan.vel[1] / s.omega0];
-    this.driveGyro(ctx, s, dt, capRef, support, unbent);
+    this.driveGyro(ctx, s, dt, capRef, this.gait.catchSupport(), unbent);
+  }
+
+  /** Rise pacing: full speed with the capture point over the feet, near pause once it wanders off. */
+  private riseRate(s: Sense): number {
+    const out = this.gait.supportDistance([s.capture[0], s.capture[1]]);
+    if (!Number.isFinite(out)) return 1;
+    return clamp(1 - (out + RISE_SLOW_INSIDE_M) / (RISE_SLOW_INSIDE_M + RISE_PAUSE_OUTSIDE_M), RISE_MIN_RATE, 1);
   }
 
   /** 1 = an intact gyro core, 0 = destroyed or absent. */
@@ -277,10 +304,12 @@ export class HumanoidController {
     return s.heading + clamp(wrapAngle(want - s.heading), -lead, lead);
   }
 
-  private decideSteps(s: Sense, env: SkillEnv): void {
+  private decideSteps(s: Sense, env: SkillEnv, dt: number): void {
     const gait = this.gait;
     if (gait.airborne()) return;
-    if (this.rise.stepsAllowed() && captureStep(gait, this.geo, s)) {
+    // A walk plans every step on the capture point itself: its steps are not capture steps.
+    if (!gait.walking && this.rise.stepsAllowed() && captureStep(gait, this.geo, s)) {
+      this.walker.cancel();
       gait.captureSteps++;
       return;
     }
@@ -289,9 +318,16 @@ export class HumanoidController {
       this.skills.cancel(env, true);
       return;
     }
-    adjustSwing(gait, this.geo, s);
+    if (!gait.walking) adjustSwing(gait, this.geo, s);
     // Feet stay planted while a skill runs (kicks borrow a leg through the gait).
-    if (this.skills.active() || this.pose.holdFeet) return;
+    if (this.skills.active() || this.pose.holdFeet) {
+      if (this.walker.active) this.walker.cancel();
+      return;
+    }
+    // Covering ground: walk (the COM keeps travelling) until close, then square up in stance.
+    if (this.walker.active || this.walker.wants(s, this.goal, s.heading - this.stance.pelvisYaw)) {
+      if (this.walker.update(s, this.goal, this.walker.params(this.walkSpeed(), this.gyroAssistM(s)), dt)) return;
+    }
     const cur = gait.bothPlanted() ? gait.currentFrame() : null;
     if (!cur) return;
     const want = this.goal ?? { x: cur.x, y: cur.y, heading: this.heading };
@@ -299,11 +335,33 @@ export class HumanoidController {
     if (side) this.lastStepSide = side;
   }
 
+  /**
+   * How far the gyro core can shift the pressure point for a walk right now: its torque over m·g,
+   * scaled back as its rotor fills (it must keep momentum in hand for a real fall).
+   */
+  private gyroAssistM(s: Sense): number {
+    if (!this.gyro) return 0;
+    const free = clamp(1 - this.gyro.saturation / WALK_ASSIST_SAT, 0, 1);
+    return (WALK_ASSIST_SHARE * this.gyro.spec.maxTorqueNm * this.gyroHealth() * free) / (s.mass * GRAVITY);
+  }
+
+  /** Walking pace: brisker with aggression, faster still for a sprinter's legs. */
+  private walkSpeed(): number {
+    const a = this.r.intent?.aggression ?? 0.5;
+    return WALK_SPEED * (0.8 + 0.4 * a) * (this.r.design.abilities.includes('sprint') ? SPRINT_FACTOR : 1);
+  }
+
   private driveGyro(ctx: SimContext, s: Sense, dt: number, capRef: P2, support: P2[], desiredTorso: Mat3): void {
     if (!this.gyro) return;
     const tilt = rotationError(s.torsoRot, desiredTorso);
     const roll = soleRoll(this.gait, s, footLoads(this.geo, this.gait, s, this.plannedCop));
     const demand = this.balance.gyroDemand(s, capRef, support, tilt, roll);
+    if (this.gait.walking) {
+      // The walk's pressure point beyond the sole: COP shift Δ ⇒ torque m·g·(Δy, −Δx, 0).
+      const mg = s.mass * GRAVITY;
+      demand[0] += mg * this.walker.assist[1];
+      demand[1] -= mg * this.walker.assist[0];
+    }
     this.gyro.update(this.r, s.torsoRot, demand, dt, views(ctx).xfrc, this.ids.torso, true);
   }
 
@@ -312,6 +370,7 @@ export class HumanoidController {
     const run = this.skills.run;
     if (this.r.koReason) this.r.skill = 'out';
     else if (this.getUp.active) this.r.skill = `getup_${this.getUp.phase}`;
+    else if (this.rise.active) this.r.skill = 'getup_rise';
     else this.r.skill = run ? run.def.id : this.gait.phase === 'double' ? 'stance' : 'step';
     this.r.skillPhase = this.skills.progress();
     this.r.windup = this.skills.windup();

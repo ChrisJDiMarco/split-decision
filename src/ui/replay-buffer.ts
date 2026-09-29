@@ -1,5 +1,6 @@
 // Ring buffer of the last few seconds of frames (poses, events, telemetry) on the main
 // thread, with pose interpolation for smooth slow-motion playback.
+import { KO_DOWN_S } from '../physics/damage/constants';
 import type { RobotTelemetry, SimEvent } from '../core/protocol';
 import type { Corner } from '../core/types';
 
@@ -11,11 +12,11 @@ export interface ReplayFrame {
 }
 
 /**
- * A down-count KO fires 10 s after the knockdown (physics KO_DOWN_S) and the replay starts after the
- * KO hold, so the window must reach back past both, plus the replay's lead-in, to still hold the blow.
+ * A down-count KO fires KO_DOWN_S (20 s) after the knockdown and the replay starts after the KO hold,
+ * so the window must reach back past both, plus the replay's lead-in, to still hold the blow.
  */
-export const REPLAY_WINDOW_S = 18;
-const DEFAULT_CAPACITY = 1500; // 18 s at the worker's 60 frames/s, with headroom
+export const REPLAY_WINDOW_S = KO_DOWN_S + 8;
+const DEFAULT_CAPACITY = Math.ceil(REPLAY_WINDOW_S * 60 * 1.15); // worker frames at 60/s, with headroom
 /** A body that moved further than this between two frames teleported (debris un-parking). */
 const TELEPORT_M = 1.0;
 

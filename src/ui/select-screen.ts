@@ -1,5 +1,6 @@
 // Fighter select: two corner cards (design, skin, tale of the tape, fight plan,
 // temperament) around a see-through center that shows the cage, and a FIGHT button.
+import { setSetting, settings } from '../core/settings';
 import type { Corner, FighterSetup, MatchSetup, RobotDesign, SkinId } from '../core/types';
 import { h, setText, toggleClass } from './dom';
 import { DamageSilhouette } from './hud/silhouette';
@@ -48,10 +49,24 @@ export class SelectScreen {
       h('h1', {}, 'SPLIT ', h('em', {}, 'DECISION')),
       h('p', {}, 'ROBOT FIGHT NIGHT · EVERY MOVE PICKED BY JEV'),
     );
-    const center = h('div', 'sel-center', h('div', 'sel-vs', 'VS'), this.fight, h('div', 'sel-note', 'Physics: MuJoCo at 1 kHz · no trained policies · Jev never touches a motor'));
+    const center = h('div', 'sel-center', h('div', 'sel-vs', 'VS'), this.fight, this.buildSettings(), h('div', 'sel-note', 'Physics: MuJoCo at 1 kHz · no trained policies · Jev never touches a motor'));
     this.cards = [0, 1].map((c) => this.buildCard(c as Corner, opts.initial.fighters[c]));
     this.el = h('div', 'select-screen', title, this.cards[0].root, center, this.cards[1].root);
     this.validate();
+  }
+
+  /** Presentation settings. They never touch physics: a hydraulic leak still costs pressure with oil effects off. */
+  private buildSettings(): HTMLElement {
+    const input = h('input', { type: 'checkbox', class: 'sel-toggle-input' }) as HTMLInputElement;
+    input.checked = settings().oilEffects;
+    input.addEventListener('change', () => setSetting('oilEffects', input.checked));
+    const sound = h('input', { type: 'checkbox', class: 'sel-toggle-input' }) as HTMLInputElement;
+    sound.checked = settings().soundOn;
+    sound.addEventListener('change', () => setSetting('soundOn', sound.checked));
+    return h('div', 'sel-settings-row',
+      h('label', 'sel-settings', sound, h('span', 'sel-toggle'), h('span', 'sel-settings-label', 'SOUND')),
+      h('label', 'sel-settings', input, h('span', 'sel-toggle'), h('span', 'sel-settings-label', 'OIL SPILLS & HISS')),
+    );
   }
 
   show(setup?: MatchSetup): void {

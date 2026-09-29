@@ -76,13 +76,14 @@ describe('impacts', () => {
   });
 
   it('a mid hit below the break impulse damages the head and neck but leaves it on', () => {
-    const { ctx, head, events } = hitHead(30, 9);
+    // A p90 fight strike (~40-50 N·s, tools/fight-sim.ts) against a 75 N·s break threshold.
+    const { ctx, head, events } = hitHead(12, 5);
     const hit = ofKind(events, 'impact').find((e) => e.part === 'head')!;
     const neck = ctx.robots[0].joints.find((j) => j.name === 'neck_yaw')!;
-    console.info(`[mid hit] 30 kg @ 9 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s, head hp ${head.part.hp.toFixed(3)}, neck health ${neck.health.toFixed(3)}, slop ${neck.slop.toFixed(4)} rad`);
+    console.info(`[mid hit] 12 kg @ 5 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s, head hp ${head.part.hp.toFixed(3)}, neck health ${neck.health.toFixed(3)}, slop ${neck.slop.toFixed(4)} rad`);
     expect(ofKind(events, 'detach')).toHaveLength(0);
-    expect(head.part.hp).toBeLessThan(0.95);
-    expect(neck.health).toBeLessThan(0.95);
+    expect(head.part.hp).toBeLessThan(0.99); // a p90 strike dents the head a few percent
+    expect(neck.health).toBeLessThan(0.99);
     expect(neck.slop).toBeGreaterThan(0);
   });
 

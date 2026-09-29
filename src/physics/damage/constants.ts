@@ -101,7 +101,10 @@ export const SMOKE_HP = 0.4;
 /** Smoke eases toward its target with this time constant, so it builds and clears. */
 export const SMOKE_TAU_S = 0.6;
 
-/** Knockout: down on the canvas for this long. */
-export const KO_DOWN_S = 10;
+/**
+ * Knockout: down on the canvas for this long. Real humanoid leagues give a fallen robot 20 s to
+ * rise unassisted (EngineAI's URKL, 2026; docs/research/07-china-robot-fights.md).
+ */
+export const KO_DOWN_S = 20;
 /** Battery at or below this is empty. */
 export const KO_BATTERY_EMPTY = 0.001;

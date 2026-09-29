@@ -17,7 +17,7 @@
 import type { Vec3 } from '../../core/types';
 import type { SimContext } from '../sim-context';
 import { SIDES, type HumanoidGeometry, type Side } from './geometry';
-import { minJerk, mulMM, mulMtM, mulMV, mulMtV, rotZ, sub, type Mat3 } from './math';
+import { clamp, minJerk, mulMM, mulMtM, mulMV, mulMtV, rotZ, sub, type Mat3 } from './math';
 import { newBodyCommand, solveBody, type BodyCommand, type JointMap } from './posture';
 import type { RollKey } from './roll-keys';
 import type { Sense } from './sense';
@@ -29,9 +29,9 @@ const DOWN_UPRIGHT = 0.45; // torso up-axis z below this is down
 const DOWN_HEIGHT = 0.55; // pelvis below this fraction of stance height is down
 const RISING_DOWN_HEIGHT = 0.3; // rising out of the crouch (folded by design): only a collapse counts
 const SETTLE_MAX_S = 2.5;
-const STILL_S = 0.2; // lying still this long ends the settle
-const STILL_SPEED = 0.3; // m/s COM
-const STILL_SPIN = 1.0; // rad/s torso
+const STILL_S = 0.12; // lying still this long ends the settle
+const STILL_SPEED = 0.35; // m/s COM
+const STILL_SPIN = 1.2; // rad/s torso
 const MAX_ATTEMPT_S = 12; // a get-up that has not finished by now starts over
 const PRONE_FWD_Z = -0.3; // torso x-axis z below this: chest (mostly) to the canvas
 const FLIPPED_FWD_Z = 0.35; // chest back up: the push-up sequence has rolled the body over
@@ -67,6 +67,12 @@ export interface GetUpTuning {
   sitDur: number; // s
   sitHold: number; // s more allowed for the COM to arrive over the feet
   riseS: number; // s to stand up out of a full crouch
+  /** After a roll, lie out straight and square before pushing up (instead of pushing up from
+   *  wherever the roll left the hips and legs). */
+  flatten?: boolean;
+  /** Let go of the canvas only once readyToRise holds (else step the feet in again); without
+   *  it the rise is tried from wherever the sit got to (a strong body's balance often saves it). */
+  strictRise?: boolean;
 }
 
 /** For a humanoid design without its own entry: the mean of the three below. */
@@ -94,12 +100,21 @@ const TUNING: Readonly<Record<string, GetUpTuning>> = {
     speed: 0.688, rollSpeed: 0.947, brace: 0.657, settleMin: 0.412, handOut: 0.199,
     pikeBack: 0.646, kneelAnkle: 0.641, tuckFwd: 0.124, tuckHeight: 0.236, plantBack: 0.224,
     plantWidth: 0.888, pikeWaist: 0.514, plantWaist: 0.851, sitBack: 1.371, sitDrop: 0.079,
-    sitPitch: 0.344, sitDur: 0.457, sitHold: 0.308, riseS: 2.781,
+    sitPitch: 0.344, sitDur: 0.457, sitHold: 0.308, riseS: 2.781, flatten: true, strictRise: true,
   },
 };
 
+/** Tempo of the whole choreography (× every searched duration): the count is 10 s. */
+const TEMPO = 0.8;
+const SETTLE_TEMPO = 0.6;
+
 export function getUpTuning(designId: string): GetUpTuning {
-  return TUNING[designId] ?? DEFAULT_TUNING;
+  const t = TUNING[designId] ?? DEFAULT_TUNING;
+  return {
+    ...t,
+    speed: t.speed * TEMPO, rollSpeed: t.rollSpeed * TEMPO, sitDur: t.sitDur * TEMPO, sitHold: t.sitHold * TEMPO,
+    brace: t.brace * SETTLE_TEMPO, settleMin: t.settleMin * SETTLE_TEMPO,
+  };
 }
 
 type Group = 'arms' | 'legl' | 'legr';
@@ -121,8 +136,10 @@ interface Phase {
   set(g: GetUp, s: Sense): void;
   /** Ends the phase early; if it never holds, the timeout sends the robot back to settle... */
   until?(g: GetUp, s: Sense): boolean;
-  /** ...unless the phase is lenient: then the sequence goes on regardless. */
+  /** ...unless the phase is lenient: then the sequence goes on regardless... */
   lenient?: boolean;
+  /** ...or it can be repaired: the feet step in again under where the body now is. */
+  restep?: boolean;
 }
 
 /** Landed folded (kneeling, knees tucked): stretch the legs out first so the body lies flat. */
@@ -141,10 +158,28 @@ const PRONE: Phase[] = [
   { name: 'tuck_r', dur: 0.45, hold: 0.05, keep: ['arms', 'legl'], set: (g, s) => { g.mark(s, 'r'); g.tuck(s, 'r'); g.waist(g.tun.plantWaist); } },
   { name: 'plant_r', dur: 0.4, hold: 0.4, keep: ['arms', 'legl'], set: (g, s) => { g.plant('r', s); g.waist(g.tun.plantWaist); } },
   // Hands still down: the hips sink back until the COM is over the feet, so letting go of the
-  // canvas leaves a body balanced on its soles. If it never quite gets there the rise is tried
-  // anyway: balance often saves it, and starting over costs more than the count allows.
-  { name: 'sit', dur: 1, hold: 1, keep: [], lenient: true, set: (g, s) => g.sitBack(s), until: (g, s) => g.overFeet(s) },
+  // canvas leaves a body balanced on its soles. A body that cannot get there (the feet landed
+  // too far behind, or it pitched forward over its hands) steps its feet in again first: rising
+  // from there only falls, and a fall costs far more of the count than two more steps.
+  { name: 'sit', dur: 1, hold: 1, keep: [], restep: true, set: (g, s) => g.sitBack(s), until: (g, s) => (g.tun.strictRise ? g.readyToRise(s) : g.overFeet(s)) },
 ];
+
+/** The feet step in again, the rear one first, under where the COM is now, then sit back. */
+function restep(first: Side): Phase[] {
+  const second: Side = first === 'l' ? 'r' : 'l';
+  const leg = (side: Side): Group => (side === 'l' ? 'legl' : 'legr');
+  const step = (side: Side, other: Side): Phase[] => [
+    { name: `tuck_${side}`, dur: 0.4, hold: 0.05, keep: ['arms', leg(other)], set: (g, s) => { g.mark(s, side); g.tuck(s, side); g.waist(g.tun.plantWaist); } },
+    { name: `plant_${side}`, dur: 0.35, hold: 0.25, keep: ['arms', leg(other)], set: (g, s) => { g.plant(side, s); g.waist(g.tun.plantWaist); } },
+  ];
+  return [...step(first, second), ...step(second, first), { name: 'sit', dur: 1, hold: 1, keep: [], set: (g, s) => g.sitBack(s), until: (g, s) => g.readyToRise(s) }];
+}
+const RESTEP: Record<Side, Phase[]> = { l: restep('l'), r: restep('r') };
+const MAX_RESTEPS = 1;
+const RISE_MIN_UPRIGHT = -0.6; // torso up-axis z: a body hanging head-down off its hands cannot rise
+const SIT_UPRIGHT = -0.3; // sitting back, the chest comes up at least to this torso up-axis z
+const RISE_FOOT_FLAT = 0.9; // sole up-axis z
+const RISE_FOOT_HEIGHT_M = 0.03;
 
 /** Face up or on a side: roll onto the front, over the lower side (keys in roll-keys.ts). */
 function rollPhases(keys: readonly RollKey[]): Phase[] {
@@ -179,6 +214,7 @@ export class GetUp {
   private waistPitch = 0;
   private waistYaw = 0;
   private rollSide: Side = 'r';
+  private resteps = 0;
   private sit: { pelvis: Vec3; rot: Mat3; torsoRot: Mat3; torsoPos: Vec3; hands: Record<Side, Vec3>; shift: Vec3 } | null = null;
 
   constructor(
@@ -239,7 +275,7 @@ export class GetUp {
       if ((this.t > this.tun.settleMin && this.still > STILL_S) || this.t > SETTLE_MAX_S) this.begin(s, qNow);
       return false;
     }
-    if (this.total > MAX_ATTEMPT_S || (this.seq === PRONE && torsoFwdZ(s) > FLIPPED_FWD_Z)) {
+    if (this.total > MAX_ATTEMPT_S || (this.seq !== this.roll && this.seq !== LEGS_OUT && torsoFwdZ(s) > FLIPPED_FWD_Z)) {
       this.enter('settle'); // stalled, or rolled back over: lie still and start again
       return false;
     }
@@ -248,9 +284,11 @@ export class GetUp {
     ph.set(this, s);
     solveBody(this.cmd, this.geo, this.jm, this.qik, { pos: s.pelvisPos, rot: s.pelvisRot, shin: { l: s.feet.l.shinRot, r: s.feet.r.shinRot } });
     this.blend(ph, q, dur);
-    if (ph.until && this.t >= dur && ph.until(this, s)) return this.seq === this.roll ? this.startSequence(PRONE, q) : this.next(q);
+    if (ph.until && this.t >= dur && ph.until(this, s)) return this.seq === this.roll ? this.startSequence(this.tun.flatten ? LEGS_OUT : PRONE, q) : this.next(q);
     if (this.seq === LEGS_OUT && this.t >= ph.dur + ph.hold) return this.choose(s, q);
     if (this.t < dur + hold) return false;
+    if (ph.restep && !this.tun.strictRise) return this.next(q);
+    if (ph.restep && this.resteps < MAX_RESTEPS && s.upright > RISE_MIN_UPRIGHT) return this.restep(s, q);
     if (ph.until && !ph.lenient) {
       this.enter('settle'); // stuck: lie still, try again (the other way next time)
       return false;
@@ -258,10 +296,20 @@ export class GetUp {
     return this.next(q);
   }
 
+  /** Step both feet in again (the one farther behind the COM first) and sit back once more. */
+  private restep(s: Sense, q: Float64Array): false {
+    this.resteps++;
+    this.sit = null;
+    this.comAt.l = this.comAt.r = null;
+    const f = this.frame ?? this.liveFrame(s);
+    const behind = (side: Side) => (s.com[0] - s.feet[side].sole[0]) * f.fx + (s.com[1] - s.feet[side].sole[1]) * f.fy;
+    return this.startSequence(RESTEP[behind('l') >= behind('r') ? 'l' : 'r'], q);
+  }
+
   /** Phase duration and hold for this design. */
   private timesOf(ph: Phase): [number, number] {
     if (ph.name === 'sit') return [this.tun.sitDur, this.tun.sitHold];
-    const k = this.seq === PRONE ? this.tun.speed : this.seq === this.roll ? this.tun.rollSpeed : 1;
+    const k = this.seq === this.roll ? this.tun.rollSpeed : this.seq === LEGS_OUT ? 1 : this.tun.speed;
     return [ph.dur * k, ph.hold * k];
   }
 
@@ -301,6 +349,7 @@ export class GetUp {
   private begin(s: Sense, qNow: Float64Array): void {
     this.attempts++;
     this.total = 0;
+    this.resteps = 0;
     this.frame = null;
     this.sit = null;
     this.comAt.l = this.comAt.r = null;
@@ -460,8 +509,10 @@ export class GetUp {
     if (!this.sit) {
       const c = soleCentre(s);
       const back = Math.max(0, (s.com[0] - c[0]) * f.fx + (s.com[1] - c[1]) * f.fy) * this.tun.sitBack;
-      // Raise the chest: turn the whole upper body about the body's left axis (negative = head up).
-      const up = axisAngle([f.lx, f.ly, 0], -this.tun.sitPitch);
+      // Raise the chest: turn the whole upper body about the body's left axis (negative = head up),
+      // at least far enough that the torso no longer hangs head-down off the hands.
+      const lift = this.tun.strictRise ? Math.asin(clamp(SIT_UPRIGHT, -1, 1)) - Math.asin(clamp(s.upright, -1, 1)) : 0;
+      const up = axisAngle([f.lx, f.ly, 0], -Math.max(this.tun.sitPitch, lift));
       const rot = mulMM(up, s.pelvisRot);
       const pelvis: Vec3 = [s.pelvisPos[0] - f.fx * back, s.pelvisPos[1] - f.fy * back, s.pelvisPos[2] * (1 - this.tun.sitDrop)];
       const rel = mulMtV(s.pelvisRot, sub(s.torsoPos, s.pelvisPos));
@@ -490,6 +541,18 @@ export class GetUp {
       arm.pole = mulMtV(sit.torsoRot, [-f.fx * 0.6 + f.lx * sg * 0.5, -f.fy * 0.6 + f.ly * sg * 0.5, 0.6]);
     }
     this.waist(this.start[this.jm.waistPitch], null);
+  }
+
+  /**
+   * Time to let go of the canvas: the COM is over flat soles and heading nowhere, and the torso
+   * is not hanging head-down off the hands (the rise could not unfold it in balance).
+   */
+  readyToRise(s: Sense): boolean {
+    for (const side of SIDES) {
+      const f = s.feet[side];
+      if (f.flat < RISE_FOOT_FLAT || f.height > RISE_FOOT_HEIGHT_M) return false;
+    }
+    return s.upright > RISE_MIN_UPRIGHT && this.overFeet(s);
   }
 
   /** The COM, and where it is heading (the capture point), are inside the soles with a margin. */

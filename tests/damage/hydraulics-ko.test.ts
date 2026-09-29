@@ -1,3 +1,4 @@
+import { KO_DOWN_S } from '../../src/physics/damage/constants';
 import { describe, expect, it } from 'vitest';
 import { damageState, damageSystem } from '../../src/physics/damage';
 import { makeLimp } from '../../src/physics/damage/wear';
@@ -104,7 +105,8 @@ describe('knockouts', () => {
     const down = makeRig();
     down.released = true;
     down.robots[0].down = true;
-    step(down, 9900);
+    const countSteps = Math.round(KO_DOWN_S / down.dt);
+    step(down, countSteps - 100);
     expect(ofKind(drain(down), 'ko')).toHaveLength(0);
     step(down, 300);
     expect(ofKind(drain(down), 'ko')).toEqual([{ kind: 'ko', corner: 0, reason: 'down' }]);

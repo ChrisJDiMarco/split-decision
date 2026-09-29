@@ -442,6 +442,7 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
       if (replayPlayer) tickReplay(dt);
       const frame = displayFrame();
       const subjects = buildSubjects(world, frame?.telemetry ?? null, frame?.poses ?? null);
+      director.aspect = stage.camera.aspect; // shots fit both fighters to the real frame
       const out = director.update(dt, subjects);
       rig.apply(rig.free ? null : out, dt, shake.update(dt));
       audio.onFrame(frame?.poses ?? null, frame?.telemetry ?? null, dt, frame?.time);

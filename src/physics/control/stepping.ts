@@ -81,7 +81,10 @@ export function planStep(gait: Gait, geo: HumanoidGeometry, want: StanceFrame, t
   if (!best) return null;
   const travel = Math.hypot(best.target.x - gait.feet[best.side].place.x, best.target.y - gait.feet[best.side].place.y);
   const swing = Math.max(timing.swing, SWING_BASE_S + SWING_PER_M * travel);
-  return gait.step(best.side, best.target, { ...timing, swing }) ? best.side : null;
+  // Travelling, the body walks (lifts off on a capturable step); settling into place it shifts
+  // its weight over the stance foot first.
+  const dynamic = Math.hypot(want.x - cur.x, want.y - cur.y) > FINE_APPROACH * geo.legLength;
+  return gait.step(best.side, best.target, { ...timing, swing, dynamic }) ? best.side : null;
 }
 
 /** Longest step toward `to`: full length forward, shorter backward and sideways (a swing

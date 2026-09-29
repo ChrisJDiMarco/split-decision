@@ -6,6 +6,7 @@ import * as THREE from 'three/webgpu';
 import type { PartTelemetry, RobotTelemetry, WorldMeta } from '../../core/protocol';
 import { clamp, range, toWorld, toWorldAt, type Rng } from './coords';
 import { leakJetSpeed, smokeDarkness, smokeRate } from './scaling';
+import { settings } from '../../core/settings';
 
 /** Visual oil particles per litre leaked (each particle ≈ 1 mL at the default radius). */
 export const PARTICLES_PER_LITRE = 1000;
@@ -84,7 +85,7 @@ export class TelemetryEmitters {
         if (part.smoke <= 0.02 && part.leak <= 0) continue;
         const vent = this.vent(robot.corner, part, dt);
         this.emitSmoke(vent, part, dt);
-        if (part.leak > 0 && oilBudget > 0) oilBudget -= this.emitOil(vent, part, robot, dt, oilBudget);
+        if (part.leak > 0 && oilBudget > 0 && settings().oilEffects) oilBudget -= this.emitOil(vent, part, robot, dt, oilBudget);
       }
     }
   }

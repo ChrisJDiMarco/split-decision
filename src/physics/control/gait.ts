@@ -27,6 +27,7 @@ export interface FootState {
   lift: number;
   startZ: number; // sole height at the swing start (a leg handed back by a kick is still up)
   lifted: boolean;
+  lead: number; // s the commanded swing runs ahead of the clock (a heavy leg lags its servo)
 }
 
 export interface StanceFrame {
@@ -40,6 +41,9 @@ export interface StepTiming {
   shiftFraction: number; // how far the COM goes toward the stance sole, 0..1
   swing: number; // s in the air
   lift: number; // swing apex, m
+  /** Lift off as soon as the planned landing captures the body (walking), not only once the
+   *  capture point is over the stance sole (a quasi-static weight shift). */
+  dynamic?: boolean;
 }
 
 export interface ComRef {
@@ -54,6 +58,9 @@ const LATE_LAND_EXTRA_S = 0.12;
 const MIN_SHIFT_S = 0.05;
 const LIFT_MAX_COM_SPEED = 0.35; // m/s: single support starts from a fairly settled COM
 const LIFT_DEPTH = 0.3; // capture point this far into the stance sole (× its half-width) before lift-off
+const DYNAMIC_MAX_COM_SPEED = 0.9; // m/s: a walking step lifts off a body already on the move...
+const DYNAMIC_LAND_MARGIN = 0.03; // m: ...when its capture point at touchdown lands this far inside the new support
+const DYNAMIC_LIFT_LAG_S = 0.05; // the capture point keeps diverging while the foot comes off the canvas
 const MIN_FOOT_SEPARATION = 0.2; // fraction of leg length, sole centre to sole centre
 const MAX_FOOT_SEPARATION = 0.6; // fraction of leg length, default reach from the stance sole
 const MIN_LATERAL_GAP = 0.08; // fraction of leg length: feet never cross
@@ -67,6 +74,11 @@ const DIP_PER_METRE = 0.3; // pelvis dip per metre of step: a lower hip reaches 
 const MAX_DIP_FRACTION = 0.09;
 const SWING_TRAVEL_START = 0.12; // fraction of the swing spent lifting before the foot travels
 const SWING_TRAVEL_END = 0.88;
+const WALK_TRACK_TAU_S = 0.15; // walking, the COM plan is pulled toward the measured body this fast
+const WALK_SWING_LEAD_S = 0.06; // a walking swing is commanded this far ahead (the leg's servo lag)
+const WALK_TRAVEL_START = 0.04;
+const WALK_CATCH_AHEAD = 0.35; // × leg length past a walking landing that the next step still catches
+const WALK_TRAVEL_END = 0.94;
 
 /**
  * COM reference that moves like the robot can: the capture point ξ converges exponentially to
@@ -104,6 +116,14 @@ class DcmReference {
   remaining(): number {
     return Math.hypot(this.xi[0] - this.goal[0], this.xi[1] - this.goal[1]);
   }
+
+  /** Pull the plan a fraction `a` of the way toward the measured state (COM and capture point). */
+  blend(c: P2, xi: P2, a: number): void {
+    for (let i = 0; i < 2; i++) {
+      this.c[i] += (c[i] - this.c[i]) * a;
+      this.xi[i] += (xi[i] - this.xi[i]) * a;
+    }
+  }
 }
 
 export class Gait {
@@ -119,7 +139,21 @@ export class Gait {
   shiftGain = 1.4;
   /** Planted-ankle blend between posture stiffness (1) and sole-flat compliance (0). */
   plantedAnkleStiffness = 0.7;
+  /**
+   * Walking: a run of dynamic steps. The COM does not stop over each foot: through each step it
+   * travels as an inverted pendulum over a centre of pressure `walkCop` held on the stance sole
+   * (the walk planner picks it so the capture point ends the step where the next foot lands).
+   */
+  walking = false;
+  walkCop: P2 = [0, 0];
+  /** Seconds in double support since the last touchdown. */
+  doubleTime = 0;
+  /** Walking: the foot that swings next (the other one just landed). */
+  walkNext: Side | null = null;
+  /** A capture-point goal held in double support in place of the feet's midpoint (a walk's launch). */
+  private held: { goal: P2; gain: number } | null = null;
   private shiftMax = 0.5;
+  private dynamicStep = false;
   private skillSide: Side | null = null;
   private skillReady = false;
   private readonly dcm = new DcmReference();
@@ -127,7 +161,7 @@ export class Gait {
   readonly ref: ComRef = { pos: [0, 0], vel: [0, 0], acc: [0, 0] };
 
   constructor(private readonly geo: HumanoidGeometry, private readonly stance: StanceParams) {
-    const foot = (): FootState => ({ phase: 'air', place: { x: 0, y: 0, yaw: 0 }, target: { x: 0, y: 0, yaw: 0 }, t: 0, dur: 0.3, lift: 0.05, startZ: 0, lifted: false });
+    const foot = (): FootState => ({ phase: 'air', place: { x: 0, y: 0, yaw: 0 }, target: { x: 0, y: 0, yaw: 0 }, t: 0, dur: 0.3, lift: 0.05, startZ: 0, lifted: false, lead: 0 });
     this.feet = { l: foot(), r: foot() };
   }
 
@@ -175,6 +209,35 @@ export class Gait {
     return pts.length >= 3 ? convexHull(pts) : pts;
   }
 
+  /**
+   * The support the body is heading for: the planted feet plus, mid-step, the sole about to
+   * land. A walking step leaves the capture point outside the stance sole on purpose (the landing
+   * catches it); only a capture point outside this is a fall.
+   */
+  catchSupport(): P2[] {
+    const side = this.swingSide;
+    if (this.walking && this.phase === 'double' && this.walkNext) {
+      // Between walking steps: the next step (already planned) catches what runs on past the soles.
+      const lead = other(this.walkNext);
+      const f = this.feet[lead].place, b = this.feet[this.walkNext].place;
+      const dx = f.x - b.x, dy = f.y - b.y, n = Math.hypot(dx, dy) || 1;
+      const k = WALK_CATCH_AHEAD * this.geo.legLength;
+      return convexHull([...this.supportPolygon(), ...footCorners(this.geo, lead, { x: f.x + (dx / n) * k, y: f.y + (dy / n) * k, yaw: f.yaw })]);
+    }
+    if (this.phase !== 'single' || !side || this.feet[side].phase !== 'swing') return this.supportPolygon();
+    const stance = other(side);
+    const st = this.feet[stance].place, tg = this.feet[side].target;
+    const pts = [...footCorners(this.geo, stance, st), ...footCorners(this.geo, side, tg)];
+    if (this.walking) {
+      // A walk lands short of the capture point on purpose (that keeps it going): the next
+      // step catches what runs on past the landing sole.
+      const dx = tg.x - st.x, dy = tg.y - st.y, n = Math.hypot(dx, dy) || 1;
+      const k = WALK_CATCH_AHEAD * this.geo.legLength;
+      pts.push(...footCorners(this.geo, side, { x: tg.x + (dx / n) * k, y: tg.y + (dy / n) * k, yaw: tg.yaw }));
+    }
+    return convexHull(pts);
+  }
+
   /** Signed distance of a point from the (shrunk) support polygon: < 0 inside. */
   supportDistance(p: P2, shrink = 0): number {
     const poly = this.supportPolygon(shrink);
@@ -207,6 +270,8 @@ export class Gait {
     this.skillSide = null;
     this.skillReady = false;
     this.anchored = false;
+    this.walking = false;
+    this.held = null;
   }
 
   /** Plant both feet exactly where they are (after a get-up) and centre the COM between them. */
@@ -216,6 +281,8 @@ export class Gait {
     this.swingSide = null;
     this.skillSide = null;
     this.skillReady = false;
+    this.walking = false;
+    this.held = null;
     this.anchor(s);
     this.setGoal(this.doubleCenter([0, 0]), this.settleGain);
   }
@@ -223,12 +290,69 @@ export class Gait {
   /** Start a step with `side` toward `target` (already constrained by the caller). */
   step(side: Side, target: FootPlace, timing: StepTiming): boolean {
     if (this.phase !== 'double' || !this.bothPlanted()) return false;
+    this.walking = false;
+    this.held = null;
     const f = this.feet[side];
     f.target = target;
     f.lift = timing.lift;
     f.dur = timing.swing;
+    this.dynamicStep = !!timing.dynamic;
     this.beginShift(other(side), timing.shift, timing.shiftFraction);
     return true;
+  }
+
+  /**
+   * Walking step: `side` swings now, with no weight shift first (the COM is already travelling
+   * across); through the swing the COM plan is the inverted pendulum over `cop` on the stance sole.
+   */
+  walkStep(side: Side, target: FootPlace, swing: number, lift: number, cop: P2): boolean {
+    if (this.phase !== 'double' || !this.bothPlanted()) return false;
+    const f = this.feet[side];
+    f.target = target;
+    f.lift = lift;
+    f.dur = swing;
+    f.t = 0;
+    f.startZ = 0;
+    f.lifted = false;
+    f.lead = WALK_SWING_LEAD_S;
+    f.phase = 'swing';
+    this.phase = 'single';
+    this.swingSide = side;
+    this.walking = true;
+    this.held = null;
+    this.dynamicStep = false;
+    this.walkCop = [cop[0], cop[1]];
+    this.setGoal(cop, -1);
+    return true;
+  }
+
+  /** Re-aim the walking swing at a new landing (already constrained by the caller). */
+  retargetSwing(target: FootPlace): void {
+    const side = this.swingSide;
+    if (!side || this.phase !== 'single' || this.feet[side].phase !== 'swing') return;
+    this.feet[side].target = target;
+  }
+
+  /** Walking: the pendulum swings over `cop` (the stance sole's, or under both in double support). */
+  steer(cop: P2): void {
+    if (!this.walking || (this.phase !== 'double' && this.phase !== 'single')) return;
+    this.walkCop = [cop[0], cop[1]];
+    this.setGoal(cop, -1);
+  }
+
+  /** The walk is over: the COM settles between the planted feet. */
+  stopWalk(): void {
+    if (!this.walking && !this.held) return;
+    this.walking = false;
+    this.held = null;
+    if (this.phase === 'double') this.setGoal(this.doubleCenter([0, 0]), this.settleGain);
+  }
+
+  /** Double support: steer the capture point to `goal` (gain × ω) instead of the feet's midpoint. */
+  launch(goal: P2, gain: number): void {
+    if (this.phase !== 'double' || !this.bothPlanted()) return;
+    this.held = { goal: [goal[0], goal[1]], gain };
+    this.setGoal(goal, gain);
   }
 
   /** Ask for a leg (kick). Returns true once the weight is on the other foot and the leg is free. */
@@ -236,8 +360,11 @@ export class Gait {
     if (this.skillSide === side && this.skillReady) return true;
     if (this.skillSide === side) return false;
     if (this.phase !== 'double' || !this.bothPlanted()) return false;
+    this.walking = false;
+    this.held = null;
     this.skillSide = side;
     this.skillReady = false;
+    this.dynamicStep = false;
     this.beginShift(other(side), maxShift, 1);
     return false;
   }
@@ -336,7 +463,14 @@ export class Gait {
     this.trackSlip(s);
     if (this.phase === 'shift') this.advanceShift(dt, s);
     if (this.phase === 'single') this.advanceSwing(dt, s);
-    if (this.phase === 'double') this.setGoal(this.doubleCenter(shiftVec), this.settleGain);
+    this.doubleTime = this.phase === 'double' ? this.doubleTime + dt : 0;
+    // Walking, the plan keeps the pendulum going over the sole just landed on (the planner starts
+    // the next step or ends the walk); standing, the COM settles between the feet.
+    if (this.phase === 'double' && !this.walking) {
+      if (this.held) this.setGoal(this.held.goal, this.held.gain);
+      else this.setGoal(this.doubleCenter(shiftVec), this.settleGain);
+    }
+    if (this.walking) this.dcm.blend([s.com[0], s.com[1]], [s.capture[0], s.capture[1]], Math.min(1, dt / WALK_TRACK_TAU_S));
     this.reanchorIfLost(s);
     this.dcm.step(dt, s.omega0, this.ref);
     for (const side of SIDES) this.writeLeg(side, legs[side]);
@@ -391,6 +525,7 @@ export class Gait {
     f.t = 0;
     f.startZ = 0;
     f.lifted = false;
+    f.lead = 0;
   }
 
   private beginShift(stance: Side, maxShift: number, fraction: number): void {
@@ -418,9 +553,10 @@ export class Gait {
     const side = this.swingSide!;
     const stance = other(side);
     const immediate = this.shiftMax <= 0.01;
-    const settledCom = Math.hypot(s.comVel[0], s.comVel[1]) < LIFT_MAX_COM_SPEED;
-    const overSole = this.shiftT >= MIN_SHIFT_S && settledCom && this.insideFoot(stance, [s.capture[0], s.capture[1]], LIFT_DEPTH * this.geo.legs[stance].footHalfWidth);
-    if (!immediate && !overSole) {
+    const comSpeed = Math.hypot(s.comVel[0], s.comVel[1]);
+    const overSole = this.shiftT >= MIN_SHIFT_S && comSpeed < LIFT_MAX_COM_SPEED && this.insideFoot(stance, [s.capture[0], s.capture[1]], LIFT_DEPTH * this.geo.legs[stance].footHalfWidth);
+    const walking = this.dynamicStep && this.skillSide !== side && this.shiftT >= MIN_SHIFT_S && comSpeed < DYNAMIC_MAX_COM_SPEED && this.landingCaptures(side, s);
+    if (!immediate && !overSole && !walking) {
       if (this.shiftT >= this.shiftMax) this.abortShift();
       return;
     }
@@ -435,6 +571,23 @@ export class Gait {
     f.phase = 'swing';
     f.t = 0;
     this.phase = 'single';
+  }
+
+  /**
+   * Walking: single support need not be statically balanced, only capturable. Pivoting on the
+   * stance sole, the capture point diverges from it as ξ(T) = p + (ξ₀ − p)·e^{ω₀T}; if at touchdown
+   * it lies inside the support the landing creates, the foot may go now.
+   */
+  private landingCaptures(side: Side, s: Sense): boolean {
+    const stance = other(side);
+    const sole = footCorners(this.geo, stance, this.feet[stance].place, 0);
+    const cap: P2 = [s.capture[0], s.capture[1]];
+    const { d, closest } = polygonDistance(sole, cap);
+    const pivot = d > 0 ? closest : cap;
+    const k = Math.exp(s.omega0 * (this.feet[side].dur + DYNAMIC_LIFT_LAG_S));
+    const pred: P2 = [pivot[0] + (cap[0] - pivot[0]) * k, pivot[1] + (cap[1] - pivot[1]) * k];
+    const hull = convexHull([...sole, ...footCorners(this.geo, side, this.feet[side].target, DYNAMIC_LAND_MARGIN)]);
+    return polygonDistance(hull, pred).d <= 0;
   }
 
   /** Abandon a weight shift (the capture point ran away: a capture step is needed instead). */
@@ -468,12 +621,27 @@ export class Gait {
     const h = s.feet[side].height;
     if (h > LIFTED_HEIGHT) f.lifted = true;
     const touching = h < TOUCHDOWN_HEIGHT;
-    if ((u > 0.8 && touching && f.lifted) || (u >= 1 && touching) || u >= 1 + LATE_LAND_EXTRA_S / f.dur) {
+    // A walking foot touching early is a heavy leg lagging its path: it would land short of the COM.
+    const early = this.walking ? 0.92 : 0.8;
+    if ((u > early && touching && f.lifted) || (u >= 1 && touching) || u >= 1 + LATE_LAND_EXTRA_S / f.dur) {
       this.plant(side, s);
       this.phase = 'double';
       this.swingSide = null;
       this.stepsTaken++;
+      if (this.walking) {
+        // The weight rolls onto the sole just landed: the pendulum now swings over it.
+        this.walkCop = this.soleCop(side);
+        this.walkNext = other(side);
+        this.setGoal(this.walkCop, -1);
+      }
     }
+  }
+
+  /** A point on a planted sole a little ahead of its centre (where a walking step rolls over it). */
+  soleCop(side: Side, fwd = 0.2): P2 {
+    const p = this.feet[side].place;
+    const a = fwd * this.geo.legs[side].footHalfLength;
+    return [p.x + Math.cos(p.yaw) * a, p.y + Math.sin(p.yaw) * a];
   }
 
   private doubleCenter(shiftVec: P2): P2 {
@@ -487,9 +655,13 @@ export class Gait {
     let place = f.place;
     let z = 0;
     if (f.phase === 'swing') {
-      const u = clamp(f.t / f.dur, 0, 1);
-      // Lift first, travel, then set down: the sole clears the canvas before it moves.
-      const k = minJerk((u - SWING_TRAVEL_START) / (SWING_TRAVEL_END - SWING_TRAVEL_START));
+      const u = clamp((f.t + f.lead) / f.dur, 0, 1);
+      // Lift first, travel, then set down: the sole clears the canvas before it moves. A walking
+      // swing travels over nearly all of it (a heavy leg needs every moment), led by its servo lag,
+      // while the lift keeps the real clock so the sole stays up until the foot has arrived.
+      const walkSwing = f.lead > 0;
+      const t0 = walkSwing ? WALK_TRAVEL_START : SWING_TRAVEL_START, t1 = walkSwing ? WALK_TRAVEL_END : SWING_TRAVEL_END;
+      const k = minJerk((u - t0) / (t1 - t0));
       place = {
         x: f.place.x + (f.target.x - f.place.x) * k,
         y: f.place.y + (f.target.y - f.place.y) * k,
@@ -497,7 +669,8 @@ export class Gait {
       };
       const late = f.t > f.dur ? Math.min(1, (f.t - f.dur) / LATE_LAND_EXTRA_S) : 0;
       const descend = f.startZ * (1 - minJerk(u / SWING_TRAVEL_END));
-      z = descend + f.lift * Math.sin(Math.PI * u) - 0.02 * late;
+      const uz = walkSwing ? clamp(f.t / f.dur, 0, 1) : u;
+      z = descend + f.lift * Math.sin(Math.PI * uz) - 0.02 * late;
     }
     this.footCommand(side, place, z, leg);
     leg.measured = f.phase === 'swing';

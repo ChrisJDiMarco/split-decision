@@ -32,6 +32,7 @@ export const DEFAULT_GAINS: BalanceGains = {
 };
 
 const OFFSET_TAU_S = 0.3;
+const NO_TORQUE: Vec3 = [0, 0, 0];
 const MAX_BIAS_M = 0.08;
 const MAX_SHIFT_M = 0.25;
 const COP_MARGIN = 0.015; // m kept inside the support polygon for the planned COP
@@ -56,12 +57,16 @@ export class Balance {
     this.bias[1] = 0;
   }
 
-  /** Horizontal pelvis target that drives the COM along the plan. */
-  pelvisTarget(s: Sense, plan: ComPlan, dt: number, integrate: boolean): P2 {
+  /**
+   * Horizontal pelvis target that drives the COM along the plan. `offsetTau`: how quickly the
+   * pelvis-to-COM offset is re-learned (short while the posture itself is changing fast, as when
+   * a crouched body unfolds: the COM moves relative to the pelvis and must be chased at once).
+   */
+  pelvisTarget(s: Sense, plan: ComPlan, dt: number, integrate: boolean, offsetTau = OFFSET_TAU_S): P2 {
     const g = this.gains;
     const off: P2 = [s.pelvisPos[0] - s.com[0], s.pelvisPos[1] - s.com[1]];
     if (!this.offset) this.offset = off;
-    const a = Math.min(1, dt / OFFSET_TAU_S);
+    const a = Math.min(1, dt / offsetTau);
     this.offset[0] += (off[0] - this.offset[0]) * a;
     this.offset[1] += (off[1] - this.offset[1]) * a;
     const ex = s.com[0] - plan.pos[0], ey = s.com[1] - plan.pos[1];
@@ -75,10 +80,12 @@ export class Balance {
   }
 
   /** Centre of pressure the gravity feed-forward should plan for: under the COM, shifted to
-   *  produce the planned acceleration, inside the support polygon. */
-  plannedCop(s: Sense, plan: ComPlan, support: P2[]): P2 {
+   *  produce the planned acceleration and to carry the gyro core's desaturation torque (a couple
+   *  τ is held by the ground only with the COP off the COM by τ/(m·g)), inside the support. */
+  plannedCop(s: Sense, plan: ComPlan, support: P2[], gyroTorque: Vec3 = NO_TORQUE): P2 {
     const w2 = s.omega0 * s.omega0;
-    const want: P2 = [s.com[0] - plan.acc[0] / w2, s.com[1] - plan.acc[1] / w2];
+    const mg = s.mass * GRAVITY;
+    const want: P2 = [s.com[0] - plan.acc[0] / w2 + gyroTorque[1] / mg, s.com[1] - plan.acc[1] / w2 - gyroTorque[0] / mg];
     return support.length >= 3 ? clampToPolygon(shrink(support, COP_MARGIN), want) : want;
   }
 

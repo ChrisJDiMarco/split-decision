@@ -1,3 +1,4 @@
+import { onSettingsChange, settings } from '../core/settings';
 // WebAudio graph shared by every procedural sound: master bus with a limiter-ish
 // compressor, an arena reverb (procedural impulse response), a noise buffer and a
 // voice budget so a flurry of hits can't pile up hundreds of nodes.
@@ -25,8 +26,11 @@ export class AudioEngine {
     comp.attack.value = 0.003;
     comp.release.value = 0.25;
     this.master = this.ctx.createGain();
-    this.master.gain.value = MASTER_GAIN;
+    // Live audio follows the SOUND setting (off by default); offline test renders always play.
+    this.muted = !ctx && !settings().soundOn;
+    this.master.gain.value = this.muted ? 0 : MASTER_GAIN;
     this.master.connect(comp).connect(this.ctx.destination);
+    if (!ctx) onSettingsChange((next) => this.setMuted(!next.soundOn));
 
     const reverb = this.ctx.createConvolver();
     reverb.buffer = this.impulse(REVERB_S);

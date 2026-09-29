@@ -47,10 +47,13 @@ export class Rise {
     return !this.active || this.t / this.dur >= STEP_FREE_AT;
   }
 
-  /** Eases the posture toward the stance; the feet stay put until it is done. */
-  apply(pose: SkillPose, cmd: BodyCommand, stance: StanceParams, dt: number): void {
+  /**
+   * Eases the posture toward the stance; the feet stay put until it is done. `rate` < 1 slows
+   * the unfolding while balance brings a wandering COM back over the feet.
+   */
+  apply(pose: SkillPose, cmd: BodyCommand, stance: StanceParams, dt: number, rate = 1): void {
     if (!this.active) return;
-    this.t += dt;
+    this.t += dt * rate;
     const k = this.progress();
     pose.pelvisDrop = this.drop0 * (1 - k);
     pose.waistPitch = lerp(this.waist0, stance.waistPitch, k);
