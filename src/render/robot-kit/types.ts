@@ -1,6 +1,7 @@
 // Robot kit: shared types. The kit turns a RobotDesign into detailed hard-surface meshes
 // that follow the physics body poses (see src/render/robot-view.ts for the contract).
 import type * as THREE from 'three/webgpu';
+import type { GazeMode } from '../../core/protocol';
 import type { PartDef, RobotDesign, SkinId } from '../../core/types';
 import type { KitObjState } from './geom/part-builder';
 import type { JointChain } from './rig/joints';
@@ -56,12 +57,95 @@ export interface HoseLinkage {
 
 export type Linkage = PistonLinkage | HoseLinkage;
 
+/**
+ * A moving optic inside a head (see recipes/optics.ts). Offsets are in the head's part frame
+ * (+x face forward, +y the robot's left, +z up); the gaze drives yawN / pitchN in -1..1.
+ *   pupil   a glowing iris that slides inside its lens: rest + travel·(yawN·u + pitchN·v)
+ *   slider  a hotspot that runs along a light bar or visor slit: rest + clamp(yawN·a.y + pitchN·a.z)·halfLen·a
+ *   beacon  a tip light that pulses with aggression and burns steady on lock-on
+ */
+export interface EyeElement {
+  kind: 'pupil' | 'slider' | 'beacon';
+  part: string;
+  object: THREE.Object3D;
+  obj: KitObjState; // the element's own glow state (brighter than the static rings)
+  rest: THREE.Vector3;
+  u: THREE.Vector3; // pupil: lateral unit in the lens plane; slider: run direction (unit)
+  v: THREE.Vector3; // pupil: vertical unit in the lens plane
+  travel: number; // pupil: max offset (m); slider: half the run (m)
+  gain: number; // brightness relative to the head's base eye level
+  path?: THREE.Vector3[]; // slider on a curved bar: runs along this polyline instead (t from the same drive)
+}
+
+/**
+ * One finger joint of a dexterous hand the kit draws itself (a palm with no phalanx bodies).
+ * The pivot turns about `axis` by the grip (open → fist), blended toward `brace` by the spread.
+ */
+export interface FingerJoint {
+  part: string; // the palm part that carries the hand
+  side: 1 | -1;
+  pivot: THREE.Object3D;
+  axis: THREE.Vector3; // flexion axis in the pivot's parent frame
+  pose: { open: number; fist: number; brace: number }; // flexion (rad)
+}
+
 /** Things that animate inside a part (rotor spin, eye flicker, glow). */
 export interface KitAnimated {
   /** Spinning parts; each object rests at its parent's origin (a pivot group places it). */
   rotors: Array<{ object: THREE.Object3D; axis: THREE.Vector3; speed: number }>;
   /** Rams that fire with an ability (piston fists): slide along `dir` by `travel` at full stroke. */
   rams: Array<{ object: THREE.Object3D; part: string; dir: THREE.Vector3; travel: number; skill: string; stroke: number }>;
+  /** Moving optics (pupils, scanner hotspots, beacons) the gaze and mood drive. */
+  eyes: EyeElement[];
+  /** Kit-drawn dexterous finger pivots, driven by the hand pose. */
+  fingers: FingerJoint[];
+}
+
+export type { GazeMode };
+
+/** Where a robot is looking, in physics space (same contract as RobotTelemetry.gaze). */
+export interface GazeInput {
+  point: [number, number, number];
+  mode: GazeMode;
+}
+
+/** A hand pose: grip 0 open .. 1 closed fist, spread 0..1 fingers splayed to brace. */
+export interface HandPose {
+  grip: number;
+  spread: number;
+}
+
+/**
+ * Optics state. Everything smooths toward targets each frame (see eyes.ts). `override` lets a
+ * harness force a gaze or a mood without physics; telemetry wins where it carries the field.
+ */
+export interface EyeState {
+  seed: number;
+  yaw: number; // current eye look in the head frame, radians (left +)
+  pitch: number; // radians (up +)
+  targetYaw: number;
+  targetPitch: number;
+  nextSaccade: number; // view time of the next voluntary saccade
+  scanPhase: number;
+  mode: GazeMode;
+  level: number; // smoothed base brightness from aggression / confidence
+  flare: number; // 0..1 lock-on envelope
+  flash: number; // 0..1 hit flash envelope
+  power: number; // 0..1: 0 = dark (KO, flat battery)
+  tint: number; // 0..1 hot red when badly hurt
+  lastFlashAt: number;
+  override: {
+    gaze?: GazeInput | null;
+    flare?: boolean;
+    hurt?: number; // 0..1 forces the damage look
+    ko?: boolean;
+    battery?: number;
+  };
+}
+
+export interface HandState {
+  pose: { l: HandPose; r: HandPose }; // current (smoothed)
+  override: { l?: HandPose | null; r?: HandPose | null };
 }
 
 export interface PartVisualState {
@@ -105,6 +189,8 @@ export interface RobotKitView {
   jointHeat: Map<string, number>;
   gyroSaturation: number; // smoothed 0..1
   gyroHealth: number;
+  eyes: EyeState;
+  hands: HandState;
   time: number;
   triangles: number;
   dispose(): void;

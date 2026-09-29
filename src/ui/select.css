@@ -48,6 +48,15 @@
 .sel-skin:hover { transform: translateY(-1px); }
 .sel-skin.on { outline-color: var(--ink); }
 .sel-skin:focus-visible, .sel-design:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.sel-hands { display: flex; flex-wrap: wrap; gap: 5px; }
+.sel-hand {
+  cursor: pointer; border: 1px solid var(--hair-strong); background: transparent; color: var(--dim); padding: 5px 8px;
+  font: 800 12px/1 var(--cond); letter-spacing: 0.1em; transition: all 0.12s ease;
+}
+.sel-hand:hover:not(:disabled) { color: var(--ink); border-color: rgba(255, 255, 255, 0.35); }
+.sel-hand.on { color: var(--ink); border-color: var(--corner); box-shadow: inset 0 -2px 0 var(--corner); }
+.sel-hand:disabled { cursor: default; opacity: 0.45; }
+.sel-hand:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .sel-tape { display: grid; gap: 4px; }
 .sel-row { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 4px; border-bottom: 1px solid var(--hair); }
 .sel-row span { font: 600 10px/1.4 var(--mono); letter-spacing: 0.12em; color: var(--dim); }

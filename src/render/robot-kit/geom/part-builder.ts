@@ -16,10 +16,12 @@ export interface KitObjState {
   glow: number; // eye / LED intensity multiplier
   core: number; // gyro core glow 0..1+
   seed: number; // per-part variation 0..1
+  flash: number; // optics: 0..1 mix toward white (hit flash, lock-on core)
+  tint: number; // optics: 0..1 mix toward hot red (badly hurt)
 }
 
 export function newObjState(seed: number): KitObjState {
-  return { heat: 0, wear: 0, glow: 1, core: 0.3, seed };
+  return { heat: 0, wear: 0, glow: 1, core: 0.3, seed, flash: 0, tint: 0 };
 }
 
 export interface BuiltFrame {

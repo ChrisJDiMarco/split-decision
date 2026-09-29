@@ -2,11 +2,13 @@
 // helmet with twin optics), head.dome (Goliath's riveted dome with a big single optic) and
 // head.visor (a generic helmet with a wide visor band). The neck turret stator lives in the
 // head's joint frame on the torso, so it stays behind as the socket when the head is knocked off.
+// Pupils and visor hotspots are separate moving optics (optics.ts) the gaze drives (eyes.ts).
 import * as THREE from 'three/webgpu';
 import { box, collar, cylinder, drum, lathe, polyPrism, shell } from '../geom/prims';
 import { alongZ } from '../geom/xf';
 import type { RecipeContext } from './context';
 import { block, grille, V, type Vec } from './mech';
+import { pupil, slider } from './optics';
 import { facePlate } from './torso';
 
 interface HeadBox {
@@ -32,22 +34,31 @@ function neck(ctx: RecipeContext, b: HeadBox): void {
   ctx.own.add('mech', collar(b.neckR * 0.4, b.neckR * 0.95, 0.002, 0.02, 32), undefined, { cavity: 0.3 });
 }
 
-function eye(ctx: RecipeContext, center: Vec, dir: Vec, r: number): void {
+/** Round optic: bezel, black glass, a dim iris ring and a pupil that follows the gaze. */
+function eye(ctx: RecipeContext, center: Vec, dir: Vec, r: number, gain = 1): void {
   const fb = ctx.own;
-  fb.add('mech', collar(r * 0.95, r * 1.35, -0.012, 0.004, 24), alongZ(center, dir), { edgeMin: 0.2 });
-  fb.add('lens', cylinder(r, -0.012, -0.002, 24), alongZ(center, dir));
-  fb.add('glow', cylinder(r * 0.55, -0.004, 0.0015, 20), alongZ(center, dir));
+  const d = dir.clone().normalize();
+  fb.add('mech', collar(r * 0.95, r * 1.35, -0.012, 0.004, 24), alongZ(center, d), { edgeMin: 0.2 });
+  fb.add('lens', cylinder(r, -0.012, -0.002, 24), alongZ(center, d));
+  fb.add('glow', collar(r * 0.66, r * 0.84, -0.003, 0.0012, 24), alongZ(center, d));
+  pupil(ctx, center.clone().addScaledVector(d, -0.002), d, r * 0.84, { size: 0.5, gain });
 }
 
 const LENS_DEPTH_M = 0.02;
 const GLOW_DEPTH_M = 0.006;
 const GLOW_PROUD_M = 0.0015; // how far the optic strip stands in front of the lens
 
-/** Dark lens band at x = `x` (its centre) with a glowing strip on its front face. */
+/**
+ * Dark lens band at x = `x` (its centre) with a dim glowing strip on its front face and a bright
+ * hotspot that sweeps along the strip with the gaze.
+ */
 function visorBand(ctx: RecipeContext, x: number, z: number, lensW: number, lensH: number, glowW: number, glowH: number): void {
   ctx.own.add('lens', box(LENS_DEPTH_M, lensW, lensH, { bevel: 0.003, round: true, cell: 1 }), new THREE.Matrix4().makeTranslation(x, 0, z));
   const front = x + LENS_DEPTH_M / 2;
   ctx.own.add('glow', box(GLOW_DEPTH_M, glowW, glowH, { bevel: 0.002, cell: 1 }), new THREE.Matrix4().makeTranslation(front - GLOW_DEPTH_M / 2 + GLOW_PROUD_M, 0, z));
+  const face = front + GLOW_PROUD_M;
+  const half = glowW * 0.48;
+  slider(ctx, V(face, -half, z), V(face, half, z), V(1, 0, 0), { length: glowW * 0.2, width: glowH * 1.35, depth: 0.004 });
 }
 
 function antenna(ctx: RecipeContext, base: Vec, len: number): void {
@@ -116,7 +127,7 @@ export function headDome(ctx: RecipeContext): void {
   fb.add('lens', shell(R * 0.98, R * 1.03, -1.0, 1.0, z(0.44), z(0.62), { arcSegs: 18 }), new THREE.Matrix4().makeScale(hx / R, 1, 1));
   fb.add('paint', collar(R * 0.98, R * 1.08, z(0.62), z(0.69), 44), new THREE.Matrix4().makeScale(hx / R, 1, 1), { accent: ctx.style.accents.has('head.brow'), edgeMin: 0.1 });
   eye(ctx, V(hx * 1.02, -hy * 0.22, z(0.53)), V(1, -0.2, 0), h * 0.085);
-  eye(ctx, V(hx * 0.98, hy * 0.36, z(0.54)), V(1, 0.35, 0), h * 0.04);
+  eye(ctx, V(hx * 0.98, hy * 0.36, z(0.54)), V(1, 0.35, 0), h * 0.04, 0.8);
   fb.add('mech', collar(R * 0.78, R * 1.03, z(0.0), z(0.06), 40), undefined, { cavity: 0.3 });
   const rivets = 16;
   for (let i = 0; i < rivets; i++) {

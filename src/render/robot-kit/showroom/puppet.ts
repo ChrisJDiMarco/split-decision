@@ -1,8 +1,12 @@
 // A physics-free robot for the showroom: poses bodies with forward kinematics (stance plus an
 // idle guard motion), feeds the kit fake telemetry, and throws knocked-off parts with a tiny
-// ballistic sim so the damage path can be exercised without MuJoCo.
+// ballistic sim so the damage path can be exercised without MuJoCo. It can also play the head
+// and hands the way the physics will: the neck snaps toward a gaze target like the gaze system
+// (saccade, then the servo catches up), and phalanx joints of a dexterous loadout take a hand pose.
 import * as THREE from 'three/webgpu';
 import type { JointTelemetry, PartTelemetry, RobotTelemetry } from '../../../core/protocol';
+import { derivedHands, handPoseAngles } from '../hands';
+import type { HandPose } from '../types';
 import type { PartDef, RobotDesign, SkinId } from '../../../core/types';
 import { motor } from '../../../robots/catalog';
 import { buildRobotKitView } from '../build';
@@ -13,6 +17,9 @@ import type { RobotKitView } from '../types';
 const GRAVITY = 9.81;
 const RESTITUTION = 0.32;
 const GROUND_FRICTION = 0.72;
+const NECK_SNAP_RAD = 0.14; // the gaze target moved this far: the head snaps to it
+const NECK_RATE = 9; // 1/s: neck servo catch-up
+const NECK_LIMIT = 1.3;
 
 interface Toy {
   group: THREE.Group;
@@ -53,6 +60,14 @@ export class ShowroomRobot {
   pump = true;
   /** Hold the plain stance (no idle sway): turntable comparisons against concept art. */
   still = false;
+  /** Gaze target in this robot's root frame (physics axes); null = idle sway. */
+  gazeTarget: THREE.Vector3 | null = null;
+  /** Hand pose for phalanx joints and kit-drawn fingers; 'auto' follows the demo telemetry. */
+  hand: HandPose | 'auto' = 'auto';
+  /** Extra telemetry for demos (skill, windup, intent, battery, down, damage). */
+  demo: Partial<RobotTelemetry> = {};
+  private neckYaw = 0;
+  private neckTarget = 0;
 
   constructor(readonly design: RobotDesign, skin: SkinId, parent: THREE.Object3D, offset: THREE.Vector3, yaw = 0, phase = 0, corner: 0 | 1 = 0) {
     this.root.position.copy(offset);
@@ -96,9 +111,26 @@ export class ShowroomRobot {
   update(dt: number, animate: boolean): void {
     if (animate) this.t += dt;
     const q = this.still ? { ...this.design.stance } : idleAngles(this.design, this.t, this.pump);
+    this.aimNeck(q, dt);
+    const pose = this.hand === 'auto' ? derivedHands(this.telemetry()) : this.hand;
+    Object.assign(q, handPoseAngles(this.design, 'l', pose), handPoseAngles(this.design, 'r', pose));
+    this.view.hands.override = this.hand === 'auto' ? {} : { l: this.hand, r: this.hand };
     const poses = forwardKinematics(this.design, q, new THREE.Vector3(0, 0, this.design.rootHeight - this.groundZ), new THREE.Quaternion());
     applyBodyPoses(poses, this.byPart);
     for (const [id, toy] of this.toys) this.stepToy(id, toy, dt);
+  }
+
+  /** Turn the neck toward the gaze target: hold, snap when it moves off, servo catches up. */
+  private aimNeck(q: Record<string, number>, dt: number): void {
+    if (!this.gazeTarget || !('neck_yaw' in q)) return;
+    const head = this.byPart.get('head');
+    const torso = this.byPart.get('torso');
+    if (!head || !torso) return;
+    const torsoYaw = new THREE.Euler().setFromQuaternion(torso.quaternion, 'ZYX').z;
+    const want = THREE.MathUtils.clamp(Math.atan2(this.gazeTarget.y - head.position.y, this.gazeTarget.x - head.position.x) - torsoYaw, -NECK_LIMIT, NECK_LIMIT);
+    if (Math.abs(want - this.neckTarget) > NECK_SNAP_RAD) this.neckTarget = want;
+    this.neckYaw += (this.neckTarget - this.neckYaw) * (1 - Math.exp(-NECK_RATE * dt));
+    q.neck_yaw = this.neckYaw;
   }
 
   private stepToy(_id: string, toy: Toy, dt: number): void {
@@ -131,6 +163,7 @@ export class ShowroomRobot {
       corner: this.view.corner, upright: 1, balance: 1, down: false, comWorld: [0, 0, 1], heading: 0, velocity: [0, 0, 0],
       battery: 1, gyroHealth: 1, gyroSaturation: this.gyroLoad, hydraulicPressure: {}, skill: 'idle', skillPhase: 0, windup: 0,
       parts, joints, damageTotal: 0, intent: null,
+      ...this.demo,
     };
   }
 

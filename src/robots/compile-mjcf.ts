@@ -23,6 +23,15 @@ export interface CompiledJoint {
   hydraulicCircuit?: string;
 }
 
+/** A fixed tendon and the drive on it (the grip of a dexterous hand). */
+export interface CompiledTendon {
+  id: string; // design-level id, e.g. 'grip_l'
+  mjName: string;
+  actuator: string; // actuator name in the model
+  motor: string;
+  joints: string[]; // prefixed passive joint names
+}
+
 export interface CompiledPart {
   id: string;
   body: string; // attached body name
@@ -38,11 +47,14 @@ export interface CompiledRobot {
   design: RobotDesign;
   bodyXml: string; // robot tree, goes inside <worldbody>
   debrisXml: string; // parked detachable copies, go inside <worldbody>
-  actuatorXml: string;
+  actuatorXml: string; // joint servos, then tendon drives
+  /** Fixed tendons, go inside <tendon> (empty when the design has none). */
+  tendonXml: string;
   equalityXml: string; // gantry + parking welds
   sensorXml: string;
   parts: CompiledPart[];
-  joints: CompiledJoint[];
+  joints: CompiledJoint[]; // servo joints only (passive tendon joints are in `tendons`)
+  tendons: CompiledTendon[];
   totalMassKg: number;
   gantryWeld: string;
   parkingWelds: Record<string, string>; // part id → weld name
@@ -89,14 +101,18 @@ export function geomMass(g: GeomDef): number {
 }
 
 function partMotorMass(p: PartDef): number {
-  return (p.joints ?? []).reduce((sum, j) => sum + motor(j.motor).massKg, 0);
+  // A passive (tendon-driven) joint has no motor of its own: its drive is weighed with the design.
+  return (p.joints ?? []).reduce((sum, j) => sum + (j.passive ? 0 : motor(j.motor).massKg), 0);
 }
+
+/** Smallest geom mass MuJoCo gets (a finger phalanx is ~20 g; every older geom is far above this). */
+const MIN_GEOM_MASS_KG = 0.005;
 
 function geomXml(name: string, g: GeomDef, mass: number, contype: number, conaffinity: number, offset?: { pos: Vec3; quat: Quat }): string {
   const s = g.shape;
   const mat = MATERIALS[g.material];
   const condim = g.role === 'foot' || g.role === 'wheel' ? 4 : 3;
-  const common = `mass="${f(Math.max(mass, 0.05))}" friction="${f(mat.friction)} 0.005 0.0001" condim="${condim}" contype="${contype}" conaffinity="${conaffinity}" solref="0.004 1" solimp="0.92 0.97 0.002"`;
+  const common = `mass="${f(Math.max(mass, MIN_GEOM_MASS_KG))}" friction="${f(mat.friction)} 0.005 0.0001" condim="${condim}" contype="${contype}" conaffinity="${conaffinity}" solref="0.004 1" solimp="0.92 0.97 0.002"`;
   const tx = (p: Vec3): Vec3 => (offset ? addV(offset.pos, rotate(offset.quat, p)) : p);
   const quatAttr = (q?: Quat) => {
     const qq = offset ? (q ? mulQ(offset.quat, q) : offset.quat) : q;
@@ -188,6 +204,11 @@ export function compileRobot(design: RobotDesign, corner: Corner, placement: Pla
     });
     const jointXmls = (p.joints ?? []).map((j) => {
       const mjName = `${prefix}${j.name}`;
+      if (j.passive) {
+        // Tendon-driven: no servo; a return spring holds it at springRef when the tendon is slack.
+        const ref = j.passive.springRefDeg !== undefined ? ` springref="${f(j.passive.springRefDeg)}"` : '';
+        return `<joint name="${mjName}" type="${j.type}" axis="${v3(j.axis)}" range="${f(j.rangeDeg[0])} ${f(j.rangeDeg[1])}" limited="true" armature="${f(j.armature ?? 0.02)}" damping="${f(j.damping ?? 0.5)}" frictionloss="${f(j.frictionloss ?? 0.1)}" stiffness="${f(j.passive.stiffness)}"${ref}/>`;
+      }
       const spec = motor(j.motor);
       const torque = spec.stallTorqueNm * (j.gear ?? 1);
       joints.push({ name: j.name, mjName, part: p.id, motor: j.motor, kp: j.kp, kd: j.kd, hydraulicCircuit: j.hydraulicCircuit });
@@ -253,6 +274,22 @@ export function compileRobot(design: RobotDesign, corner: Corner, placement: Pla
     void byId;
   }
 
+  // Tendon drives go after every joint servo, so the servo actuator ids never move.
+  const tendons: CompiledTendon[] = [];
+  const tendonXml: string[] = [];
+  for (const t of design.tendons ?? []) {
+    const mjName = `${prefix}${t.id}`;
+    const spec = motor(t.motor);
+    const lo = t.pullOnly ? 0 : -spec.stallTorqueNm;
+    tendonXml.push([
+      `<fixed name="${mjName}">`,
+      ...t.joints.map((j) => `  <joint joint="${prefix}${j.joint}" coef="${f(j.coef)}"/>`),
+      `</fixed>`,
+    ].join('\n    '));
+    actuators.push(`<position name="${mjName}_m" tendon="${mjName}" kp="${f(t.kp)}" kv="${f(t.kd)}" forcelimited="true" forcerange="${f(lo)} ${f(spec.stallTorqueNm)}" ctrllimited="true" ctrlrange="${f(t.lengthRange[0])} ${f(t.lengthRange[1])}"/>`);
+    tendons.push({ id: t.id, mjName, actuator: `${mjName}_m`, motor: t.motor, joints: t.joints.map((j) => `${prefix}${j.joint}`) });
+  }
+
   const gantryWeld = `${prefix}gantry`;
   const equalities = [
     `<weld name="${gantryWeld}" body1="${prefix}${root.id}" solref="0.02 1"/>`,
@@ -266,10 +303,12 @@ export function compileRobot(design: RobotDesign, corner: Corner, placement: Pla
     bodyXml,
     debrisXml: debrisXml.join('\n'),
     actuatorXml: actuators.join('\n    '),
+    tendonXml: tendonXml.join('\n    '),
     equalityXml: equalities.join('\n    '),
     sensorXml: sensors.join('\n    '),
     parts: compiledParts,
     joints,
+    tendons,
     totalMassKg: totalMass,
     gantryWeld,
     parkingWelds,
@@ -284,6 +323,10 @@ function validate(design: RobotDesign): void {
     if (i === 0 && p.parent) throw new Error(`${design.id}: parts[0] must be the root`);
     if (i > 0 && (!p.parent || !ids.has(p.parent))) throw new Error(`${design.id}: part '${p.id}' has unknown or later parent '${p.parent}'`);
     if (p.geoms.length === 0) throw new Error(`${design.id}: part '${p.id}' has no geoms`);
+  }
+  const passive = new Set(design.parts.flatMap((p) => (p.joints ?? []).filter((j) => j.passive).map((j) => j.name)));
+  for (const t of design.tendons ?? []) {
+    for (const j of t.joints) if (!passive.has(j.joint)) throw new Error(`${design.id}: tendon '${t.id}' routes over '${j.joint}', which is not a passive joint`);
   }
   // A detached part becomes one rigid body, so its descendants must be rigid.
   for (const p of design.parts) {

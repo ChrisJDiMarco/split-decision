@@ -5,8 +5,11 @@ import * as THREE from 'three/webgpu';
 import type { WorldMeta } from '../../core/protocol';
 import type { PartDef, RobotDesign, SkinId } from '../../core/types';
 import { design as designById } from '../../robots/designs';
+import { applyLoadout } from '../../robots/loadout';
 import { FrameBuilder, newObjState, type BuiltFrame } from './geom/part-builder';
 import { hashString, rng } from './geom/xf';
+import { newEyeState } from './eyes';
+import { newHandState } from './hands';
 import { designLook } from './look';
 import { createRobotMaterials } from './materials';
 import { partDims, styleFor, type LinkageRequest, type RecipeContext } from './recipes/context';
@@ -23,6 +26,15 @@ export interface PartMeta {
 }
 
 registerHumanoidRecipes();
+
+/**
+ * The recipe a part draws with. A 'knuckle' hands loadout fits bare fists behind AR500 plates;
+ * the physics reuses the bare-fist kit ids, so the kit shows the plates itself.
+ */
+function kitId(design: RobotDesign, part: PartDef): string {
+  if (design.loadout?.hands === 'knuckle' && part.tags.includes('fist')) return 'fist.plate';
+  return part.visual.kit;
+}
 
 function sideOf(part: PartDef): 1 | -1 | 0 {
   if (part.tags.includes('left')) return 1;
@@ -79,9 +91,10 @@ function buildPart(
     part, design, style: styleFor(design), dims: partDims(part), parentDims: parentDef ? partDims(parentDef) : null,
     params: part.visual.params ?? {}, side: sideOf(part), frames, own: frames[nJ], mats: env.mats,
     linkages: env.linkages, rotors: env.animated.rotors, rams: env.animated.rams,
+    eyes: env.animated.eyes, fingers: env.animated.fingers,
     rand: rng(partSeed), look: designLook(design),
   };
-  resolveRecipe(part.visual.kit)(ctx);
+  resolveRecipe(kitId(design, part))(ctx);
   if (part.smokePoint) frames[nJ].anchor('vent', new THREE.Vector3(...part.smokePoint));
 
   const attached = new THREE.Group();
@@ -146,12 +159,12 @@ function buildDebris(view: RobotKitView, kit: KitPart, meta: PartMeta, parent: T
 export function buildRobotKitView(design: RobotDesign, skin: SkinId, corner: 0 | 1, parts: PartMeta[], parent: THREE.Object3D, bodyGroups: Map<number, THREE.Group>): RobotKitView {
   const seed = hashString(`${design.id}:${corner}:${skin}`);
   const robotMats = createRobotMaterials(skin, design, seed);
-  const animated: KitAnimated = { rotors: [], rams: [] };
+  const animated: KitAnimated = { rotors: [], rams: [], eyes: [], fingers: [] };
   const linkReqs: LinkageRequest[] = [];
   const metaById = new Map(parts.map((p) => [p.id, p]));
   const view: RobotKitView = {
     corner, design, skin, parts: new Map(), linkages: [], animated, materials: robotMats.mats,
-    jointHeat: new Map(), gyroSaturation: 0, gyroHealth: 1, time: 0, triangles: 0,
+    jointHeat: new Map(), gyroSaturation: 0, gyroHealth: 1, eyes: newEyeState(seed), hands: newHandState(), time: 0, triangles: 0,
     dispose: () => undefined,
   };
   const prefix = corner === 0 ? 'r0_' : 'r1_';
@@ -192,9 +205,12 @@ function disposeView(view: RobotKitView, disposeMats: () => void): void {
   disposeMats();
 }
 
-/** Contract-compatible replacement for render/robot-view.ts buildRobotViews. */
+/**
+ * Contract-compatible replacement for render/robot-view.ts buildRobotViews. Each robot is built
+ * from its design with the same loadout the physics compiled (WorldMeta.robots[i].loadout).
+ */
 export function buildRobotKitViews(meta: WorldMeta, physicsRoot: THREE.Group, skins: [SkinId, SkinId]): { views: RobotKitView[]; bodyGroups: Map<number, THREE.Group> } {
   const bodyGroups = new Map<number, THREE.Group>();
-  const views = meta.robots.map((r) => buildRobotKitView(designById(r.design), skins[r.corner], r.corner, r.parts, physicsRoot, bodyGroups));
+  const views = meta.robots.map((r) => buildRobotKitView(applyLoadout(designById(r.design), r.loadout), skins[r.corner], r.corner, r.parts, physicsRoot, bodyGroups));
   return { views, bodyGroups };
 }

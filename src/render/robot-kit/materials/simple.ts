@@ -7,6 +7,8 @@ import {
 import { heatColor, objectValue, srgb } from './tsl-util';
 
 const EYE_INTENSITY = 4.2;
+const FLASH_WHITE = 0.8; // how far a full flash moves the optic colour toward white
+const HURT_RED = '#ff2a12'; // badly damaged optics run hot red
 const CORE_BASE = 0.45;
 const CORE_GAIN = 3.4;
 
@@ -24,7 +26,7 @@ export function chromeMaterial(): THREE.MeshPhysicalNodeMaterial {
   const film = mx_noise_float(positionLocal.mul(vec3(40, 40, 6))).mul(0.5).add(0.5);
   m.colorNode = color(0xe6eaee);
   m.metalnessNode = float(1);
-  m.roughnessNode = mix(float(0.05), float(0.16), film);
+  m.roughnessNode = mix(float(0.28), float(0.38), film); // satin chrome: no hot glints
   m.emissiveNode = heatColor(oHeat).mul(smoothstep(0.35, 1.0, oHeat)).mul(2.2);
   chromeMat = m;
   return m;
@@ -69,17 +71,25 @@ export function wireMaterial(): THREE.MeshStandardNodeMaterial {
   return m;
 }
 
-/** Emissive optics in the design's eye colour; `glow` per object drives flicker and power-down. */
+/**
+ * Emissive optics in the design's eye colour. Per object: `glow` drives brightness (mood,
+ * flicker, power-down; eyes.ts caps it so optics never glare), `tint` runs the colour hot red
+ * when the robot is badly hurt, `flash` whitens it on a hit or a lock-on.
+ */
 export function glowMaterial(hex: string, gain = 1): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
   m.name = `kit-glow-${hex}`;
   const eye = srgb(hex);
   const oGlow = objectValue('glow', 1);
+  const oTint = objectValue('tint', 0);
+  const oFlash = objectValue('flash', 0);
   const shimmer = mx_noise_float(positionLocal.mul(120).add(vec3(0, 0, time.mul(3)))).mul(0.08).add(1);
-  m.colorNode = color(eye).mul(0.15);
+  const hue = mix(color(eye), color(srgb(HURT_RED)), oTint);
+  const lit = mix(hue, vec3(1.0, 0.97, 0.92), oFlash.mul(FLASH_WHITE));
+  m.colorNode = hue.mul(0.15);
   m.roughnessNode = float(0.25);
   m.metalnessNode = float(0);
-  m.emissiveNode = color(eye).mul(oGlow).mul(shimmer).mul(EYE_INTENSITY * gain);
+  m.emissiveNode = lit.mul(oGlow).mul(shimmer).mul(EYE_INTENSITY * gain);
   return m;
 }
 

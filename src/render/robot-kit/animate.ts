@@ -1,18 +1,19 @@
 // Per-frame kit animation: joint frames follow the body poses, pistons and hoses track their
-// two bodies, the gyro rotor spins and its core glows with saturation, damaged optics flicker
-// and die after a knockout, torn wires spark. Telemetry (if given) drives part and joint state.
+// two bodies, the gyro rotor spins and its core glows with saturation, the optics look, flare,
+// flash, flicker and die (eyes.ts), dexterous fingers take the hand pose (hands.ts), torn wires
+// spark. Telemetry (if given) drives part and joint state.
 import * as THREE from 'three/webgpu';
 import type { RobotTelemetry } from '../../core/protocol';
 import { motor } from '../../robots/catalog';
 import { setPartState } from './damage';
+import { updateEyes } from './eyes';
+import { updateHands } from './hands';
 import { jointAngles, poseFrames } from './rig/joints';
 import { updateLinkage } from './rig/linkages';
 import type { KitPart, RigFrame, RobotKitView } from './types';
 
 const GLOW_START_C = 55; // motors below this temperature do not glow
 const SAT_RATE = 6; // 1/s smoothing of gyro saturation
-const EYE_FLICKER_HP = 0.5; // optics start to flicker below this head hp
-const EYE_DEATH_S = 2.6; // seconds for a severed head's optics to die
 const SPARK_RATE_HZ = 22;
 const CORE_IDLE = 0.15;
 const ROTOR_WOBBLE = 0.08;
@@ -108,22 +109,6 @@ function updateRig(view: RobotKitView, kit: KitPart): void {
   poseFrames(kit.frames, kit.chain, angles);
 }
 
-function updateEyes(view: RobotKitView, kit: KitPart): void {
-  if (!kit.def.tags.includes('head') && !kit.def.tags.includes('sensor')) return;
-  const t = view.time;
-  if (kit.state.attached) {
-    const hp = kit.state.hp;
-    const dropout = hp < EYE_FLICKER_HP && flick(t, 16, kit.obj.seed) < (EYE_FLICKER_HP - hp) * 1.6 ? 0.08 : 1;
-    kit.obj.glow = dropout * (0.75 + 0.25 * Math.min(1, hp * 2));
-    return;
-  }
-  if (!kit.debrisObj) return;
-  const since = t - kit.detachedAt;
-  const fade = Math.max(0, 1 - since / EYE_DEATH_S);
-  const stutter = flick(t, 11, kit.obj.seed + 3) < 0.35 ? 0.1 : 1;
-  kit.debrisObj.glow = fade * fade * stutter;
-}
-
 function updateSparks(view: RobotKitView, kit: KitPart): void {
   if (!kit.stumpObj) return;
   const since = view.time - kit.detachedAt;
@@ -212,9 +197,11 @@ export function updateRobotKit(views: readonly RobotKitView[], telemetry: readon
     if (tel) syncTelemetry(view, tel, dt);
     for (const kit of view.parts.values()) {
       updateRig(view, kit);
-      updateEyes(view, kit);
       updateSparks(view, kit);
     }
+    const opp = views.find((v) => v.corner !== view.corner);
+    updateEyes(view, tel, opp, opp ? telemetry?.find((t) => t.corner === opp.corner) : undefined, dt);
+    updateHands(view, tel, dt);
     for (const l of view.linkages) {
       const parent = view.parts.get(l.parent);
       const child = view.parts.get(l.child);

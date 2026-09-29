@@ -13,8 +13,8 @@ export interface TestRobot {
   design: RobotDesign;
 }
 
-export function buildTestRobot(designId: string, skin: SkinId = 'factory', corner: 0 | 1 = 0): TestRobot {
-  const d = design(designId);
+export function buildTestRobot(designOrId: string | RobotDesign, skin: SkinId = 'factory', corner: 0 | 1 = 0): TestRobot {
+  const d = typeof designOrId === 'string' ? design(designOrId) : designOrId;
   const root = new THREE.Group();
   const bodyGroups = new Map<number, THREE.Group>();
   let next = 1;
@@ -30,9 +30,13 @@ export function buildTestRobot(designId: string, skin: SkinId = 'factory', corne
   return { view, root, byPart, debrisGroups, design: d };
 }
 
-/** Pose the robot's body groups with FK at the given joint angles (defaults to the stance). */
-export function poseRobot(r: TestRobot, q: Record<string, number> = r.design.stance): void {
-  const poses = forwardKinematics(r.design, q, new THREE.Vector3(0, 0, r.design.rootHeight), new THREE.Quaternion());
+/**
+ * Pose the robot's body groups with FK at the given joint angles (defaults to the stance), with
+ * the root at `at` (x, y) turned by `yaw` about +z.
+ */
+export function poseRobot(r: TestRobot, q: Record<string, number> = r.design.stance, at: [number, number] = [0, 0], yaw = 0): void {
+  const rootQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), yaw);
+  const poses = forwardKinematics(r.design, q, new THREE.Vector3(at[0], at[1], r.design.rootHeight), rootQ);
   for (const [id, pose] of poses) {
     const g = r.byPart.get(id);
     if (!g) continue;

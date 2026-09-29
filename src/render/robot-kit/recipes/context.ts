@@ -105,6 +105,8 @@ export interface RecipeContext {
   linkages: LinkageRequest[];
   rotors: Array<{ object: THREE.Object3D; axis: THREE.Vector3; speed: number }>;
   rams: KitAnimated['rams'];
+  eyes: KitAnimated['eyes'];
+  fingers: KitAnimated['fingers'];
   rand: () => number;
   look: DesignLook;
 }

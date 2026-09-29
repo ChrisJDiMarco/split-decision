@@ -5,7 +5,10 @@
 //               open-face padded headgear (crown, side wrap, cheek pads, brow roll, ear rings).
 //   head.wedge  SAVATE: forward-raked aubergine wedge, one vertical mint light bar, cheek sensors.
 //   head.hammer HAYMAKER: low wide flat-topped hammerhead, brow ledge, far-set red lenses, chin bar.
-//   head.lozenge PYLON: slim upright lozenge canted forward, one big violet lens, two small, antenna.
+//   head.lozenge PYLON: slim upright lozenge canted forward, one big violet lens, two small, antenna
+//               with a violet tip beacon.
+// Every optic's bright part (pupils, the bar hotspot, the beacon) is a moving object (optics.ts)
+// that eyes.ts drives from the gaze and the fighter's state.
 import * as THREE from 'three/webgpu';
 import type { FrameBuilder } from '../../geom/part-builder';
 import { collar, cylinder, lathe, shell, tube } from '../../geom/prims';
@@ -13,6 +16,7 @@ import { alongZ } from '../../geom/xf';
 import type { MatSlot } from '../../types';
 import type { RecipeContext } from '../context';
 import { block, grille, slab, V, type Vec } from '../mech';
+import { beacon, barSlider, pupil } from '../optics';
 import { band, joint } from './kit';
 import { body, capsuleT, keys, loft, type Ring } from './shapes';
 
@@ -36,12 +40,18 @@ function neck(ctx: RecipeContext, b: HeadBox, postR: number, postTop: number, sl
   ctx.own.add(slot, cylinder(postR, -0.004, b.base + postTop, 24, postR * 0.2), undefined, { cavity: 0.4 });
 }
 
-/** Round optic: bezel ring, black glass, glowing iris; `dir` is the look direction. */
-function optic(fb: FrameBuilder, center: Vec, dir: Vec, r: number, bezel: MatSlot = 'mech', iris = 0.62, rim = 1.34): void {
-  const m = alongZ(center, dir.clone().normalize());
+/**
+ * Round optic: bezel ring, black glass, a dim iris ring and a bright pupil that moves across the
+ * glass toward the gaze (optics.ts); `dir` is the look direction.
+ */
+function optic(ctx: RecipeContext, center: Vec, dir: Vec, r: number, bezel: MatSlot = 'mech', iris = 0.62, rim = 1.34, gain = 1): void {
+  const fb = ctx.own;
+  const d = dir.clone().normalize();
+  const m = alongZ(center, d);
   fb.add(bezel, collar(r * 0.98, r * rim, -0.01, 0.003, 28), m, { edgeMin: 0.25 });
   fb.add('lens', cylinder(r, -0.01, 0.0005, 28, r * 0.08), m);
-  fb.add('glow', lathe([[0, -0.001, 1], [r * iris, -0.001, 1], [r * iris * 0.9, 0.0016, 0], [0, 0.0024, 0]], 24), m);
+  fb.add('glow', collar(r * iris * 0.76, r * iris, -0.001, 0.0016, 24), m);
+  pupil(ctx, center.clone().addScaledVector(d, 0.0005), d, r * 0.9, { size: Math.min(0.5, iris * 0.66), gain });
 }
 
 /** x of a superellipse section's surface at lateral offset y (the front face of a loft ring). */
@@ -73,7 +83,7 @@ export function headTrio(ctx: RecipeContext): void {
     const ring = core(tOf(zf));
     const y = yf * ring.ry;
     const x = frontX(ring, y, P);
-    optic(fb, V(x - 0.002, y, z(zf)), V(1, yf * 0.35, 0.02), lr, 'mech', 0.7);
+    optic(ctx, V(x - 0.002, y, z(zf)), V(1, yf * 0.35, 0.02), lr, 'mech', 0.7);
   }
   // Short louvered chin vent.
   const chin = core(tOf(0.18));
@@ -178,11 +188,13 @@ export function headWedge(ctx: RecipeContext): void {
   for (const r of rings.slice(1, 7)) bar.push(V(frontX(r, 0, P) + 0.0005, 0, r.z));
   fb.add('lens', tube(bar, h * 0.018, 8, 6), undefined, {});
   fb.add('glow', tube(bar.map((p) => p.clone().add(V(h * 0.012, 0, 0))), h * 0.008, 8, 6));
+  // A brighter hotspot rides the bar: it tracks the gaze up and down and sweeps it when scanning.
+  barSlider(ctx, bar.map((p) => p.clone().add(V(h * 0.02, 0, 0))), h * 0.0135, { along: 3, gain: 1.25 });
   // Cheek sensors in brushed-aluminium bezels, low on each side.
   for (const s of [-1, 1]) {
     const r = rings[2];
     const c = V(r.ox ?? 0, s * r.ry * 0.98, r.z + h * 0.02);
-    optic(fb, c, V(0.15, s, 0), h * 0.045, 'frame', 0.3);
+    optic(ctx, c, V(0.15, s, 0), h * 0.045, 'frame', 0.3, 1.34, 0.7);
   }
   // A shallow seam where the face shell meets the crown.
   const seam: Vec[] = [];
@@ -213,7 +225,7 @@ export function headHammer(ctx: RecipeContext): void {
   // Wings: the slab's outer ends drop a little lower, carrying the lenses.
   for (const s of [-1, 1]) slabBox(ctx, fb, 'paint', V(hx * 0.36, s * hy * 1.02, z(0.45)), [hx * 0.86, hy * 0.46, h * 0.12]);
   // Two small red-orange lenses at the far outer corners, under the ledge.
-  for (const s of [-1, 1]) optic(fb, V(hx * 0.8, s * hy * 1.04, z(0.45)), V(1, s * 0.15, -0.05), h * 0.042, 'mech', 0.6);
+  for (const s of [-1, 1]) optic(ctx, V(hx * 0.8, s * hy * 1.04, z(0.45)), V(1, s * 0.15, -0.05), h * 0.042, 'mech', 0.6);
   // Button-head bolts on the hammer and down the face.
   const rb = ctx.style.boltSize;
   for (const x of [-0.55, 0.65]) for (const y of [-1.0, -0.35, 0.35, 1.0]) fb.bolt(V(hx * x, hy * y, z(0.6) + h * 0.12), V(0, 0, 1), rb, 'rivet');
@@ -264,7 +276,7 @@ export function headLozenge(ctx: RecipeContext): void {
     const dz = 0.02;
     const slope = (frontX(at(zf + dz), at(zf + dz).ry * yk, P) - frontX(at(zf - dz), at(zf - dz).ry * yk, P)) / (2 * dz * h);
     const n = V(1, (yk * 1.1 * sec.rx) / sec.ry, -slope).normalize();
-    optic(fb, V(frontX(sec, y, P), y, z(zf)).addScaledVector(n, 0.0015), n, r, 'frame', iris, 1.14);
+    optic(ctx, V(frontX(sec, y, P), y, z(zf)).addScaledVector(n, 0.0015), n, r, 'frame', iris, 1.14);
   };
   const big = at(0.64);
   seat(0.64, -0.3, big.ry * 0.34, 0.8);
@@ -273,7 +285,10 @@ export function headLozenge(ctx: RecipeContext): void {
   const top = at(0.86);
   const baseP = V((top.ox ?? 0) - top.rx * 0.45, top.ry * 0.62, z(0.86));
   fb.add('mech', cylinder(h * 0.035, -0.004, h * 0.05, 14), alongZ(baseP, V(-0.2, 0.25, 1)));
-  fb.add('chrome', cylinder(h * 0.009, h * 0.03, h * 0.32, 8, 0.001), alongZ(baseP, V(-0.22, 0.25, 1)));
+  const mast = V(-0.22, 0.25, 1).normalize();
+  fb.add('chrome', cylinder(h * 0.009, h * 0.03, h * 0.32, 8, 0.001), alongZ(baseP, mast));
+  // Violet tip light: pulses with aggression, burns steady on a lock-on.
+  beacon(ctx, baseP.clone().addScaledVector(mast, h * 0.32 + h * 0.012), h * 0.017, 0.9);
   // A fine parting line around the face.
   const seam: Vec[] = [];
   const ringZ = 0.42;

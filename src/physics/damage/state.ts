@@ -139,6 +139,13 @@ function limbKey(tags: PartTag[]): string | null {
   return side ? `${kind}_${side}` : null;
 }
 
+/** The part that takes a geom's damage: a finger's nearest non-finger ancestor, else the part itself. */
+function handOwner(info: PartInfo, parts: Map<string, PartInfo>): PartInfo {
+  let p: PartInfo | undefined = info;
+  while (p && p.def.tags.includes('finger') && p.def.parent) p = parts.get(p.def.parent);
+  return p ?? info;
+}
+
 function buildRobotDamage(robot: RobotRuntime, geoms: Array<GeomInfo | null>): RobotDamage {
   const { design } = robot;
   const defs = new Map(design.parts.map((p) => [p.id, p]));
@@ -174,11 +181,13 @@ function buildRobotDamage(robot: RobotRuntime, geoms: Array<GeomInfo | null>): R
         stack.push(...(children.get(c.id) ?? []));
       }
     }
-    // Geom lookup: attached geoms, then the parked debris twin's merged geoms.
+    // Geom lookup: attached geoms, then the parked debris twin's merged geoms. A finger phalanx
+    // counts as its palm (the fist part): hits on it damage the hand, not a part of its own.
     const def = defs.get(info.def.id)!;
+    const owner = handOwner(info, parts);
     info.part.geoms.forEach((gid, i) => {
       const g = def.geoms[i];
-      geoms[gid] = { kind: GEOM_KIND.ROBOT, body: info.part.body, corner: robot.corner, part: info, surface: surfaceOf(g), role: g.role };
+      geoms[gid] = { kind: GEOM_KIND.ROBOT, body: info.part.body, corner: robot.corner, part: owner, surface: surfaceOf(g), role: g.role };
     });
     if (info.part.debrisBody !== null) {
       const merged = mergedGeoms(def, children);

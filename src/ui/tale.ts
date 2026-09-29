@@ -3,6 +3,7 @@
 import type { AbilityId, MaterialId, RobotDesign } from '../core/types';
 import { MATERIALS, motor } from '../robots/catalog';
 import { compileRobot } from '../robots/compile-mjcf';
+import { handsLabel } from '../robots/loadout';
 import { verticalExtent } from './kinematics';
 import { jointName } from './names';
 
@@ -19,7 +20,8 @@ export interface Tale {
   frame: string;
   gyro: string; // '420 N·m' or 'NONE'
   hydraulics: string; // '210 BAR' or 'NONE'
-  dof: number;
+  dof: number; // actuated joints (a dexterous hand's ten tendon joints share one drive)
+  hands: string; // 'GLOVES', 'KNUCKLE PLATES', 'DEXTEROUS · 5 FINGERS'
   abilities: AbilityId[];
 }
 
@@ -39,8 +41,10 @@ function dominantMaterial(design: RobotDesign, roles: string[]): MaterialId | nu
   return best;
 }
 
+/** Pass the loaded design (applyLoadout) to get the tape of that loadout. */
 export function taleOfTheTape(design: RobotDesign): Tale {
-  const hit = cache.get(design.id);
+  const key = design.loadout ? `${design.id}:${design.loadout.hands}` : design.id;
+  const hit = cache.get(key);
   if (hit) return hit;
   const compiled = compileRobot(design, 0, { pos: [0, 0, design.rootHeight], yaw: 0 });
   const [lo, hi] = verticalExtent(design);
@@ -49,6 +53,7 @@ export function taleOfTheTape(design: RobotDesign): Tale {
   let dof = 0;
   for (const p of design.parts) {
     for (const j of p.joints ?? []) {
+      if (j.passive) continue;
       dof++;
       const t = motor(j.motor).stallTorqueNm * (j.gear ?? 1);
       if (t > peakTorqueNm) { peakTorqueNm = t; peakJoint = jointName(j.name); }
@@ -70,9 +75,10 @@ export function taleOfTheTape(design: RobotDesign): Tale {
     frame: frameId ? MATERIALS[frameId].name : '—',
     gyro: design.gyro ? `${Math.round(design.gyro.maxTorqueNm)} N·m` : 'NONE',
     hydraulics: hyd ? `${hyd.pressureBar} BAR` : 'NONE',
-    dof,
+    dof: dof + (design.tendons?.length ?? 0),
+    hands: handsLabel(design),
     abilities: design.abilities,
   };
-  cache.set(design.id, tale);
+  cache.set(key, tale);
   return tale;
 }

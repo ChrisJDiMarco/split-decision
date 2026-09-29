@@ -76,7 +76,8 @@ export type PartTag =
   | 'thigh' | 'shin' | 'foot'
   | 'chassis' | 'wheel' | 'leg' | 'jaw' | 'spinner'
   | 'gyro' | 'hydraulic' | 'armor' | 'sensor'
-  | 'left' | 'right' | 'front' | 'rear';
+  | 'left' | 'right' | 'front' | 'rear'
+  | 'finger'; // a phalanx of a dexterous hand: rides on the fist (palm) part for damage
 
 export interface JointDef {
   name: string; // unique within the robot, e.g. 'knee_l'
@@ -91,6 +92,27 @@ export interface JointDef {
   damping?: number; // passive viscous damping
   frictionloss?: number; // dry friction (N·m)
   hydraulicCircuit?: string; // joints powered by a hydraulic circuit lose torque with pressure
+  /**
+   * A passive joint with no servo of its own, moved through a tendon (RobotDesign.tendons) against a
+   * return spring: the underactuated finger joints of a dexterous hand. `motor` then names the drive
+   * that pulls the tendon (its mass is counted once, on the tendon, not per joint).
+   */
+  passive?: { stiffness: number; springRefDeg?: number };
+}
+
+/**
+ * A fixed tendon: length = Σ coef·q over its joints, pulled by one position actuator (a grip drive).
+ * Force at the tendon is in the drive's output units (N·m at the spool); each joint feels coef × it.
+ */
+export interface TendonDef {
+  id: string; // unique within the robot, e.g. 'grip_l'
+  joints: Array<{ joint: string; coef: number }>;
+  motor: string; // MotorSpec id of the drive
+  kp: number; // N·m per rad of tendon length error
+  kd: number;
+  /** Tendons only pull: the drive's force range is [pullOnly ? 0 : −stall, stall]. */
+  pullOnly?: boolean;
+  lengthRange: [number, number]; // actuator ctrl range, rad of tendon length
 }
 
 export interface BreakSpec {
@@ -159,6 +181,24 @@ export interface RobotDesign {
   gloves?: { color: string };
   weightClass?: WeightClass;
   era?: Era;
+  /** Tendon-driven mechanisms (the grip of a dexterous hand). */
+  tendons?: TendonDef[];
+  /** Set by applyLoadout on a design built from a non-stock loadout (src/robots/loadout.ts). */
+  loadout?: Loadout;
+}
+
+// ---------------------------------------------------------------- loadouts (docs/design/loadouts-and-workshop.md)
+
+/**
+ * Hands slot. 'stock' is whatever the design was built with; 'glove' padded boxing gloves; 'knuckle'
+ * bare fists behind AR500 knuckle plates; 'dexterous' a tendon-driven five-finger hand.
+ */
+export type HandsOption = 'stock' | 'glove' | 'knuckle' | 'dexterous';
+
+/** A design plus its slot choices. Later slots (head, arms, legs, armour, weapons) add fields here. */
+export interface Loadout {
+  design: string; // RobotDesign id this loadout is for
+  hands: HandsOption;
 }
 
 export interface DesignPalette {
@@ -185,7 +225,19 @@ export interface FighterSetup {
   skin: SkinId;
   plan: string; // builder's natural-language fight plan (<= 150 words)
   temperament: number; // 0.3 disciplined .. 1.8 wild (sampling temperature)
+  /** Slot choices; omitted (or all 'stock') fights the design as built. */
+  loadout?: Loadout;
+  /** Who fights this corner: a Jev brain (default) or a human player (src/player). */
+  controller?: FighterController;
+  /**
+   * This corner's own reaction delay (s), overriding MatchSetup.reactionDelayS. A player corner uses
+   * PLAYER_REACTION_DELAY_S (src/player/config.ts) so the controls feel responsive; a future 'fair
+   * mode' leaves it unset so the human feels Jev's delay too.
+   */
+  reactionDelayS?: number;
 }
+
+export type FighterController = 'jev' | 'player';
 
 export interface MatchSetup {
   fighters: [FighterSetup, FighterSetup];

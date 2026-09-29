@@ -3,7 +3,7 @@
 // updateRobotKit, impact events (physics space) → applyImpact (scene space).
 import * as THREE from 'three/webgpu';
 import type { MainToWorker, SimEvent, WorkerToMain } from '../../../core/protocol';
-import type { MatchSetup, SkinId } from '../../../core/types';
+import type { Loadout, MatchSetup, SkinId } from '../../../core/types';
 import { applyPoses } from '../../robot-view';
 import { applyImpact } from '../damage';
 import { buildRobotKitViews } from '../build';
@@ -35,11 +35,11 @@ function handleEvent(e: SimEvent, views: RobotKitView[], physicsRoot: THREE.Grou
   return 1;
 }
 
-export function startPhysicsShow(physicsRoot: THREE.Group, designs: [string, string], skins: [SkinId, SkinId]): PhysicsShow {
+export function startPhysicsShow(physicsRoot: THREE.Group, designs: [string, string], skins: [SkinId, SkinId], loadouts: [Loadout?, Loadout?] = []): PhysicsShow {
   const setup: MatchSetup = {
     fighters: [
-      { design: designs[0], skin: skins[0], plan: 'Showroom sparring.', temperament: 1 },
-      { design: designs[1], skin: skins[1], plan: 'Showroom sparring.', temperament: 1 },
+      { design: designs[0], skin: skins[0], plan: 'Showroom sparring.', temperament: 1, ...(loadouts[0] ? { loadout: loadouts[0] } : {}) },
+      { design: designs[1], skin: skins[1], plan: 'Showroom sparring.', temperament: 1, ...(loadouts[1] ? { loadout: loadouts[1] } : {}) },
     ],
     seed: 11,
     timestep: 0.001,

@@ -39,6 +39,7 @@ function meta(c: SimContext): WorldMeta {
       corner: r.corner,
       design: r.design.id,
       prefix: r.compiled.prefix,
+      ...(r.setup.loadout ? { loadout: r.setup.loadout } : {}),
       parts: [...r.parts.values()].map((p) => ({ id: p.id, body: p.body, debrisBody: p.debrisBody })),
     })),
     props: [],
@@ -180,7 +181,7 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
         break;
       case 'intent': {
         if (!ctx || !setup) return;
-        const delayTicks = Math.round(setup.reactionDelayS / ctx.dt);
+        const delayTicks = Math.round((setup.fighters[msg.corner].reactionDelayS ?? setup.reactionDelayS) / ctx.dt);
         const r = ctx.robots[msg.corner];
         r.pendingIntents.push({ applyAtTick: Math.max(ctx.tick, msg.issuedAtTick + delayTicks), intent: msg.intent });
         break;

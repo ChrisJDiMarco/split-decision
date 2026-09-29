@@ -3,6 +3,7 @@ import { ARENA, panels, postPositions } from '../core/arena-spec';
 import type { MatchSetup } from '../core/types';
 import { COLLIDE, compileRobot, type CompiledRobot } from '../robots/compile-mjcf';
 import { design } from '../robots/designs';
+import { applyLoadout } from '../robots/loadout';
 
 export interface CompiledWorld {
   xml: string;
@@ -30,11 +31,18 @@ function cageXml(): string {
 }
 
 export function compileWorld(setup: MatchSetup): CompiledWorld {
-  const d0 = design(setup.fighters[0].design);
-  const d1 = design(setup.fighters[1].design);
+  // Loadouts are applied before compile; a stock (or absent) loadout is the design as built.
+  const d0 = applyLoadout(design(setup.fighters[0].design), setup.fighters[0].loadout);
+  const d1 = applyLoadout(design(setup.fighters[1].design), setup.fighters[1].loadout);
   const r0 = compileRobot(d0, 0, { pos: [-ARENA.SPAWN_OFFSET_M, 0, d0.rootHeight + 0.02], yaw: 0 });
   const r1 = compileRobot(d1, 1, { pos: [ARENA.SPAWN_OFFSET_M, 0, d1.rootHeight + 0.02], yaw: Math.PI });
   const worldAff = COLLIDE.R0 | COLLIDE.R1 | COLLIDE.DEBRIS;
+  // Only worlds with tendon-driven hands get a <tendon> block, so stock worlds keep their exact MJCF.
+  const tendons = [r0.tendonXml, r1.tendonXml].filter(Boolean);
+  const tendonBlock = tendons.length ? `
+  <tendon>
+    ${tendons.join('\n    ')}
+  </tendon>` : '';
   const xml = `<mujoco model="split-decision">
   <compiler angle="degree" autolimits="true"/>
   <option timestep="${f(setup.timestep)}" integrator="implicitfast" cone="elliptic" solver="Newton" iterations="30" ls_iterations="10">
@@ -52,7 +60,7 @@ ${r1.debrisXml}
   <equality>
     ${r0.equalityXml}
     ${r1.equalityXml}
-  </equality>
+  </equality>${tendonBlock}
   <actuator>
     ${r0.actuatorXml}
     ${r1.actuatorXml}

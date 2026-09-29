@@ -5,6 +5,7 @@
 import { armFore, armUpper } from './arm';
 import type { KitRecipe } from './context';
 import { fistBlock, fistPiston, fistSpiked } from './fist';
+import { fistPlate, handDigit, handPalm } from './hands';
 import { headDome, headSlit, headTwin, headVisor } from './head';
 import { legFoot, legShin, legThigh } from './leg';
 import { modernArmFore, modernArmUpper, modernFoot, modernShin, modernThigh, pelvisModern, registerModernRecipes } from './modern';
@@ -32,6 +33,9 @@ export function registerHumanoidRecipes(): void {
   registerKitRecipe('fist.block', fistBlock);
   registerKitRecipe('fist.spiked', fistSpiked);
   registerKitRecipe('fist.piston', fistPiston);
+  registerKitRecipe('fist.plate', fistPlate);
+  registerKitRecipe('hand.palm', handPalm);
+  registerKitRecipe('hand.digit', handDigit);
   registerKitRecipe('leg.thigh', byEra(legThigh, modernThigh));
   registerKitRecipe('leg.shin', byEra(legShin, modernShin));
   registerKitRecipe('leg.foot', byEra(legFoot, modernFoot));

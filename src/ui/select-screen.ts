@@ -1,7 +1,8 @@
 // Fighter select: two corner cards (design, skin, tale of the tape, fight plan,
 // temperament) around a see-through center that shows the cage, and a FIGHT button.
 import { setSetting, settings } from '../core/settings';
-import type { Corner, FighterSetup, MatchSetup, RobotDesign, SkinId } from '../core/types';
+import type { Corner, FighterSetup, HandsOption, MatchSetup, RobotDesign, SkinId } from '../core/types';
+import { applyLoadout, HANDS_LABEL, HANDS_OPTIONS, stockHands } from '../robots/loadout';
 import { h, setText, toggleClass } from './dom';
 import { DamageSilhouette } from './hud/silhouette';
 import { CORNER_NAMES, portraitUrl, SKIN_ORDER, SKIN_SWATCHES, swatchFor } from './skins';
@@ -46,7 +47,7 @@ export class SelectScreen {
     this.fight = h('button', { class: 'btn primary fight-btn', type: 'button' }, 'FIGHT');
     this.fight.addEventListener('click', () => this.submit());
     const title = h('div', 'sel-title',
-      h('h1', {}, 'SPLIT ', h('em', {}, 'DECISION')),
+      h('h1', {}, 'JEV ', h('em', {}, 'KUNE DO')),
       h('p', {}, 'ROBOT FIGHT NIGHT · EVERY MOVE PICKED BY JEV'),
     );
     const center = h('div', 'sel-center', h('div', 'sel-vs', 'VS'), this.fight, this.buildSettings(), h('div', 'sel-note', 'Physics: MuJoCo at 1 kHz · no trained policies · Jev never touches a motor'));
@@ -112,6 +113,8 @@ export class SelectScreen {
     const designRow = h('div', 'sel-designs');
     const skinRow = h('div', 'sel-skins');
     const skinName = h('span', 'sel-skin-name');
+    const handsRow = h('div', 'sel-hands');
+    const handsName = h('span', 'sel-skin-name');
     const tape = h('div', 'sel-tape');
     const abilities = h('div', 'sel-abilities');
     const plan = h('textarea', { class: 'sel-plan', rows: 4, spellcheck: 'false', 'aria-label': `${CORNER_NAMES[corner]} fight plan` });
@@ -124,7 +127,9 @@ export class SelectScreen {
       b.addEventListener('click', () => {
         const prev = byId.get(card.setup.design);
         const planWasDefault = !prev || card.setup.plan.trim() === defaultPlan(prev).trim();
-        card.setup = { ...card.setup, design: d.id, skin: d.defaultSkin, plan: planWasDefault ? defaultPlan(d) : card.setup.plan };
+        // The hands choice carries over to the new design (it is re-fitted to that design's fists).
+        const hands = card.setup.loadout?.hands ?? 'stock';
+        card.setup = { ...card.setup, design: d.id, skin: d.defaultSkin, plan: planWasDefault ? defaultPlan(d) : card.setup.plan, loadout: { design: d.id, hands } };
         card.render();
         this.validate();
       });
@@ -140,6 +145,17 @@ export class SelectScreen {
       skinRow.append(b);
       return { id, b };
     });
+    // Hands loadout (docs/design/loadouts-and-workshop.md). The option the design already wears is
+    // its stock hands, so it is shown as taken by STOCK.
+    const handsButtons = HANDS_OPTIONS.map((opt) => {
+      const b = h('button', { class: 'sel-hand', type: 'button', 'aria-label': `${HANDS_LABEL[opt]} hands` }, HANDS_LABEL[opt]) as HTMLButtonElement;
+      b.addEventListener('click', () => {
+        card.setup = { ...card.setup, loadout: { design: card.setup.design, hands: opt } };
+        card.render();
+      });
+      handsRow.append(b);
+      return { opt, b };
+    });
     plan.addEventListener('input', () => {
       card.setup = { ...card.setup, plan: plan.value };
       this.renderWords(words, plan.value);
@@ -152,7 +168,16 @@ export class SelectScreen {
 
     card.render = () => {
       const d = byId.get(card.setup.design) ?? designs[0];
-      const t = taleOfTheTape(d);
+      const hands: HandsOption = card.setup.loadout?.design === d.id ? card.setup.loadout.hands : 'stock';
+      const t = taleOfTheTape(applyLoadout(d, { design: d.id, hands }));
+      const stock = stockHands(d);
+      for (const { opt, b } of handsButtons) {
+        const isStock = opt === stock;
+        toggleClass(b, 'on', opt === hands || (hands === 'stock' && isStock) || (opt === 'stock' && hands === stock));
+        b.disabled = isStock; // same as STOCK on this design
+        b.title = isStock ? `${d.name}'s stock hands` : opt === 'stock' ? `As built: ${HANDS_LABEL[stock].toLowerCase()}` : '';
+      }
+      setText(handsName, hands === 'stock' || hands === stock ? `STOCK · ${HANDS_LABEL[stock]}` : HANDS_LABEL[hands]);
       const url = portraitUrl(d.id);
       portrait.style.backgroundImage = url ? `url("${url}")` : '';
       portrait.replaceChildren(...(url ? [] : [new DamageSilhouette(d).el]));
@@ -175,6 +200,7 @@ export class SelectScreen {
         ['FRAME', t.frame],
         ['GYRO', t.gyro],
         ['HYDRAULICS', t.hydraulics],
+        ['HANDS', t.hands],
       ].map(([k, v]) => h('div', 'sel-row', h('span', {}, k), h('b', {}, v))));
       abilities.replaceChildren(...t.abilities.map((a) => h('span', 'chip', a.replace(/_/g, ' ').toUpperCase())));
       if (plan.value !== card.setup.plan) plan.value = card.setup.plan;
@@ -188,6 +214,7 @@ export class SelectScreen {
       h('div', 'sel-hero', portrait, h('div', 'sel-hero-text', h('div', 'sel-hero-top', kind), name, tagline)),
       designRow,
       h('div', 'sel-label', 'SKIN ', skinName), skinRow,
+      h('div', 'sel-label', 'HANDS ', handsName), handsRow,
       h('div', 'sel-label', 'TALE OF THE TAPE'), tape, abilities,
       h('div', 'sel-label', 'FIGHT PLAN ', words), plan,
       h('div', 'sel-label', 'TEMPERAMENT ', tempValue), temp,

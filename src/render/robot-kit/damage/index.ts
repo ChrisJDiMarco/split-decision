@@ -6,6 +6,7 @@ import * as THREE from 'three/webgpu';
 import type { Vec3 } from '../../../core/types';
 import { MATERIALS } from '../../../robots/catalog';
 import type { KitPart, PartVisualState, RobotKitView } from '../types';
+import { noteHit } from '../eyes';
 import { buildStump } from './stump';
 
 const MIN_VISIBLE_J = 0.5; // below this an impact leaves no mark (skips a buffer upload)
@@ -137,6 +138,7 @@ function partMeshes(kit: KitPart): THREE.Object3D[] {
 export function applyImpact(view: RobotKitView, partId: string, worldPoint: Vec3 | THREE.Vector3, normal: Vec3 | THREE.Vector3, energyJ: number): void {
   const kit = view.parts.get(partId);
   if (!kit || !(energyJ >= MIN_VISIBLE_J)) return;
+  noteHit(view, partId, energyJ);
   const soft = softness(kit);
   const e10 = energyJ / 10;
   const depth = energyJ < MIN_DENT_J ? 0 : Math.min(MAX_DEPTH_M, DEPTH_K * Math.sqrt(e10) * soft);

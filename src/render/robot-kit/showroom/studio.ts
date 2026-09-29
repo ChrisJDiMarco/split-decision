@@ -137,7 +137,7 @@ export async function createStudio(canvas: HTMLCanvasElement, forceWebGL = false
   controls.target.set(0, 1.0, 0);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.495;
-  controls.minDistance = 0.6;
+  controls.minDistance = 0.3;
   controls.maxDistance = 25;
 
   const turntable = new THREE.Group();

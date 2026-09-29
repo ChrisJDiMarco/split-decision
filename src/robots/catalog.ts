@@ -170,6 +170,16 @@ export const MOTORS: Record<string, MotorSpec> = {
     heatCapacityJPerK: 180, thermalResistanceKPerW: 1.8, maxTempC: 110, copperLossAtStallW: 160,
     source: 'RobStride 02: 17 N·m peak, 405 g',
   },
+  // Grip drive of the dexterous hand (src/robots/hands.ts): one motor in the palm reels a flexor
+  // tendon routed over all ten finger joints, like the single-actuator underactuated hands
+  // (Dollar & Howe's SDM Hand: one actuator, four fingers, eight joints; the Yale OpenHand
+  // Model T). Numbers are the drive module itself at its output; the spool ratio lives on the tendon.
+  'grip.ak60': {
+    id: 'grip.ak60', name: 'CubeMars AK60-6 V1.1 KV80 grip drive (6:1)', kind: 'electric',
+    stallTorqueNm: 9, noLoadSpeedRadS: (320 * 2 * Math.PI) / 60, massKg: 0.368,
+    heatCapacityJPerK: 125, thermalResistanceKPerW: 2.2, maxTempC: 100, copperLossAtStallW: 180,
+    source: 'cubemars.com/product/ak60-6-v1-1-kv80-robotic-actuator.html: 3/9 N·m, 320 rpm, 368 g, 6:1; single-actuator tendon hand after Dollar & Howe, "The Highly Adaptive SDM Hand" (IJRR 2010)',
+  },
   'drive.wheel': {
     id: 'drive.wheel', name: 'Hub drive motor (RobStride 04 direct)', kind: 'electric',
     stallTorqueNm: 120, noLoadSpeedRadS: 30, massKg: 1.6,
