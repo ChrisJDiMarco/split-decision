@@ -20,6 +20,7 @@
 // usage:
 //   npx tsx tools/fight-metrics.ts [--seconds 120] [--seeds 1,2,3] [--designs bruiser,striker,goliath]
 //                                  [--jobs 3] [--out file.json]      every ordered matchup, in parallel
+//   npx tsx tools/fight-metrics.ts --pairs savate:haymaker,firecracker:pylon [--seconds 90] [--seeds 1,2]
 //   npx tsx tools/fight-metrics.ts --fight <red> <blue> <seconds> <seed> [--json] [--log]
 import loadMujoco from '@mujoco/mujoco';
 import { spawn } from 'node:child_process';
@@ -518,7 +519,10 @@ async function main(): Promise<void> {
   const designs = arg('designs', 'bruiser,striker,goliath').split(',');
   const jobs = Math.max(1, Number(arg('jobs', '3')));
   const queue: Array<[string, string, number]> = [];
-  for (const red of designs) for (const blue of designs) if (red !== blue) for (const seed of seeds) queue.push([red, blue, seed]);
+  // --pairs savate:haymaker,firecracker:pylon runs just those matchups (red:blue), else every ordered pair.
+  const pairs = arg('pairs', '').split(',').filter(Boolean).map((p) => p.split(':') as [string, string]);
+  if (pairs.length) for (const [red, blue] of pairs) for (const seed of seeds) queue.push([red, blue, seed]);
+  else for (const red of designs) for (const blue of designs) if (red !== blue) for (const seed of seeds) queue.push([red, blue, seed]);
   const results: FightReport[] = [];
   const t0 = now();
   const worker = async () => {

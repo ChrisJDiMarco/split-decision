@@ -65,6 +65,8 @@ export function parseLibrary(json: LibraryJson): MotionLibrary {
       impact: mj.impact === null ? null : mj.impact / f,
       reach: mj.reach === null ? null : mj.reach / f,
       target: mj.target, peakSpeed: mj.peakSpeed, travel: mj.travel, maxSpeed: mj.maxSpeed, switchesStance: mj.switchesStance ?? false,
+      flight: mj.flight ? { takeoff: mj.flight[0] / f, land: mj.flight[1] / f, height: mj.flight[2] } : null,
+      spin: mj.spin ?? 0,
       quality: mj.quality, source: mj.source,
       q, root, contacts, mirror,
     };

@@ -15,13 +15,14 @@ import { pathToFileURL } from 'node:url';
 import type { RobotDesign } from '../../src/core/types';
 import { DESIGNS } from '../../src/robots/designs';
 import { CLIPS } from '../../src/robots/motions/clips';
-import { mirrorTrack, type HumanTrack } from '../../src/robots/motions/human';
+import { CONTACT } from '../../src/robots/motions/contacts';
+import { leapTrack, mirrorTrack, spinTrack, type HumanTrack } from '../../src/robots/motions/human';
 import { jointSpeedLimits, mirrorMap } from '../../src/robots/motions/library';
 import { buildMove, type BuiltMove } from '../../src/robots/motions/moves';
 import { retarget, type Retargeted } from '../../src/robots/motions/retarget';
 import { robotModel } from '../../src/robots/motions/robot-model';
 import { segmentClip, type Segment } from '../../src/robots/motions/segment';
-import { LIBRARY_FORMAT, MOVE_LABELS, type LibraryJson, type MoveLabel } from '../../src/robots/motions/types';
+import { ANGLE_LABELS, FLASHY_LABELS, LIBRARY_FORMAT, MOVE_LABELS, type LibraryJson, type MoveLabel } from '../../src/robots/motions/types';
 import { LIBRARY_FPS, loadTrack, ROOT } from './load';
 
 /** Moves kept per label and design. */
@@ -33,6 +34,9 @@ export const CAPS: Record<MoveLabel, number> = {
   walk_forward: 3, walk_back: 2,
   getup_face_down: 5, getup_back: 4, getup_side: 4,
   victory: 3,
+  tornado_kick: 4, spinning_back_kick: 2, jump_kick: 2, jumping_knee: 2, superman_punch: 3, spinning_backfist: 4,
+  feint_left: 2, feint_right: 2, pivot_left: 3, pivot_right: 3, switch_stance: 3,
+  kipup_source: 6,
 };
 
 /** A human joint never turns faster than this at 1×: anything above is an IK branch flip. */
@@ -61,8 +65,75 @@ const FACING_LABELS = new Set<MoveLabel>([
 /** Labels where both sides are worth keeping (lead and rear hooks, left and right blocks...). */
 const TWO_SIDED = new Set<MoveLabel>(['hook', 'uppercut', 'overhand', 'block', 'front_kick', 'low_kick', 'head_kick', 'side_kick']);
 
+const FLASHY = new Set<MoveLabel>(FLASHY_LABELS);
+const ANGLES = new Set<MoveLabel>(ANGLE_LABELS);
+const deg = (x: number) => ((x * 180) / Math.PI).toFixed(0);
+/**
+ * Flashy strikes are allowed a flight phase, contorted legs and more joint-frames on a limit,
+ * and may start bladed (up to 60° off square, a set-up turn), but not sink into the mat, not
+ * start turned away and not look away from the target when they land (100°: a spinning back
+ * kick spots it over the shoulder).
+ */
+const FLASHY_GATE = {
+  footReach: 0.3, footPath: 0.3, fistReach: 0.08, fistPath: 0.15, kneeReach: 0.2, kneePath: 0.25,
+  feet: 0.12, limits: 0.25, startLook: (60 * Math.PI) / 180, impactLook: (100 * Math.PI) / 180, jointSpeed: 45,
+  /** A spinning kick's foot travels a 2-3 m arc: where the hip yaw saturates at the chamber it
+   * swings wide of the actor's path, and still lands on the target (the reach gate holds that). */
+  spinFootPath: 0.55,
+  /** A jump starts on the mat and winds up for at least this long (s) ... */
+  minWindup: 0.15,
+  /** ... and a flashy strike carries the fighter toward the target, not this far away from it (m). */
+  maxRetreat: 0.3,
+  /** Feints and pivots may end in the crouch they burst from (m of pelvis height). */
+  angleLevel: 0.16,
+};
+const SPIN_KICKS = new Set<MoveLabel>(['tornado_kick', 'spinning_back_kick']);
+/** Angle footwork: start squared up; how far round it may end (a pivot turns by design). */
+const ANGLE_END_LOOK: Partial<Record<MoveLabel, number>> = {
+  feint_left: (70 * Math.PI) / 180, feint_right: (70 * Math.PI) / 180, switch_stance: (45 * Math.PI) / 180,
+  pivot_left: (140 * Math.PI) / 180, pivot_right: (140 * Math.PI) / 180,
+};
+
+/** Gates for the flashy, angle and kip-up source moves (null: use the standard gates). */
+function passesFlashy(seg: Segment, b: BuiltMove): string | null {
+  const m = b.metrics;
+  if (m.sink > MAX_SINK) return `sinks ${(m.sink * 100).toFixed(0)} cm into the mat`;
+  let peak = 0;
+  m.jointPeak.forEach((v) => { peak = Math.max(peak, v); });
+  if (peak > FLASHY_GATE.jointSpeed) return `a joint jumps at ${peak.toFixed(0)} rad/s (IK branch flip)`;
+  if (m.limitRate > FLASHY_GATE.limits) return `${(m.limitRate * 100).toFixed(0)}% of joint-frames on a limit`;
+  // A jump or spin starts and ends on the mat (footwork may bounce: boxers are on their toes).
+  const onFeet = (c: number) => (c & (CONTACT.FOOT_L | CONTACT.FOOT_R)) !== 0;
+  if (FLASHY.has(seg.label) && !onFeet(b.contacts[0])) return 'starts in the air';
+  if (!ANGLES.has(seg.label) && !onFeet(b.contacts[b.contacts.length - 1])) return 'ends in the air';
+  if (seg.label === 'kipup_source') {
+    if (m.footErr > 0.12 || m.fistErr > 0.15) return `limbs off target (feet ${(m.footErr * 100).toFixed(0)} cm, hands ${(m.fistErr * 100).toFixed(0)} cm)`;
+    return null;
+  }
+  if (m.lookAway[0] > FLASHY_GATE.startLook) return `starts looking ${deg(m.lookAway[0])}° away from the opponent`;
+  if (ANGLES.has(seg.label)) {
+    if (m.footErr > 0.08) return `feet off target by ${(m.footErr * 100).toFixed(1)} cm`;
+    const end = ANGLE_END_LOOK[seg.label] ?? MAX_LOOK_AWAY;
+    if (m.lookAway[1] > end) return `ends looking ${deg(m.lookAway[1])}° away from the opponent`;
+    if (Math.abs(b.json.travel[2]) > FLASHY_GATE.angleLevel) return `pelvis ends ${(b.json.travel[2] * 100).toFixed(0)} cm from where it started`;
+    return null;
+  }
+  if (m.footErr > FLASHY_GATE.feet) return `feet off target by ${(m.footErr * 100).toFixed(1)} cm`;
+  if (b.json.flight && b.json.flight[0] < FLASHY_GATE.minWindup * LIBRARY_FPS) return 'leaves the mat before it has wound up';
+  if (b.json.travel[0] < -FLASHY_GATE.maxRetreat) return `travels ${(-b.json.travel[0] * 100).toFixed(0)} cm away from its target`;
+  const kind = seg.striker?.slice(0, 4);
+  const [reach, path] = kind === 'fist' ? [FLASHY_GATE.fistReach, FLASHY_GATE.fistPath] : kind === 'shin' ? [FLASHY_GATE.kneeReach, FLASHY_GATE.kneePath]
+    : [FLASHY_GATE.footReach, SPIN_KICKS.has(seg.label) ? FLASHY_GATE.spinFootPath : FLASHY_GATE.footPath];
+  if (m.strikerErr > reach) return `striker misses its target by ${(m.strikerErr * 100).toFixed(0)} cm`;
+  if (m.strikerPathErr > path) return `striker strays ${(m.strikerPathErr * 100).toFixed(0)} cm off the actor's path mid-strike`;
+  if (m.lookAtImpact > FLASHY_GATE.impactLook) return `looks ${deg(m.lookAtImpact)}° away from the target when it lands`;
+  if (b.json.target && b.json.target[0] < 0.2) return `lands only ${(b.json.target[0] * 100).toFixed(0)} cm in front`;
+  return null;
+}
+
 /** Quality gates per family: IK error of the striker at full reach, share of joints on a limit. */
 function passes(seg: Segment, b: BuiltMove): string | null {
+  if (FLASHY.has(seg.label) || ANGLES.has(seg.label) || seg.label === 'kipup_source') return passesFlashy(seg, b);
   const m = b.metrics;
   const fist = seg.striker?.startsWith('fist');
   const foot = seg.striker?.startsWith('foot');
@@ -178,7 +249,9 @@ export function buildDesign(design: RobotDesign, sources: Map<string, SourceSegm
   /** Derived moves re-aim one strike, so they get their own (short) retarget. */
   const retargetAdjusted = (seg: Segment): Retargeted => {
     const src = sources.get(seg.clip)!.track;
-    const track = seg.mirrored ? mirrorTrack(src) : src;
+    const turned = seg.turn ? spinTrack(src, seg.turn.from, seg.turn.to, seg.turn.angle, seg.turn.support) : src;
+    const lifted = seg.leap ? leapTrack(turned, seg.leap.from, seg.leap.to) : turned;
+    const track = seg.mirrored ? mirrorTrack(lifted) : lifted;
     return retarget(track, model, { from: Math.max(0, seg.start - ADJUST_MARGIN), to: seg.end + ADJUST_MARGIN, adjust: seg.adjust ? [seg.adjust] : [] });
   };
   const byLabel = new Map<MoveLabel, Segment[]>();
@@ -192,7 +265,7 @@ export function buildDesign(design: RobotDesign, sources: Map<string, SourceSegm
     const pool = diversify(label, byLabel.get(label) ?? [], (x) => x.score).slice(0, Math.max(POOL_MIN, cap * POOL_FACTOR));
     const ok: Array<{ clip: string; side: string | null; seg: Segment; b: BuiltMove; score: number }> = [];
     for (const seg of pool) {
-      const r = seg.adjust ? retargetAdjusted(seg) : retargeted(seg.clip, seg.mirrored);
+      const r = seg.adjust || seg.leap || seg.turn ? retargetAdjusted(seg) : retargeted(seg.clip, seg.mirrored);
       const b = buildMove(seg, r, limits);
       const why = passes(seg, b);
       if (why) report.rejected.push({ id: seg.id, why });

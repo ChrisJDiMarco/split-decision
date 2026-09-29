@@ -79,6 +79,8 @@ const WALK_SWING_LEAD_S = 0.06; // a walking swing is commanded this far ahead (
 const WALK_TRAVEL_START = 0.04;
 const WALK_CATCH_AHEAD = 0.35; // × leg length past a walking landing that the next step still catches
 const WALK_TRAVEL_END = 0.94;
+/** Clip-timed swing tuning (exported so tools can sweep it). */
+export const DRIVE_SWING = { leadS: 0.07 }; // a clip-timed swing is commanded this far ahead (servo lag)
 
 /**
  * COM reference that moves like the robot can: the capture point ξ converges exponentially to
@@ -152,6 +154,11 @@ export class Gait {
   walkNext: Side | null = null;
   /** A capture-point goal held in double support in place of the feet's midpoint (a walk's launch). */
   private held: { goal: P2; gain: number } | null = null;
+  /**
+   * Mocap footwork: the COM reference comes from the clip (mocap/footwork.ts) instead of the
+   * capture-point plan, and its steps lift when the clip lifts them. Null: the gait plans.
+   */
+  external: ComRef | null = null;
   private shiftMax = 0.5;
   private dynamicStep = false;
   private skillSide: Side | null = null;
@@ -326,6 +333,29 @@ export class Gait {
     return true;
   }
 
+  /**
+   * Clip-timed step: `side` lifts now (no weight shift first: the clip's COM reference already
+   * carries the body onto the stance foot) and lands on `target` after `swing` seconds.
+   */
+  driveStep(side: Side, target: FootPlace, swing: number, lift: number): boolean {
+    if (this.phase !== 'double' || !this.bothPlanted()) return false;
+    const f = this.feet[side];
+    f.target = target;
+    f.lift = lift;
+    f.dur = swing;
+    f.t = 0;
+    f.startZ = 0;
+    f.lifted = false;
+    f.lead = DRIVE_SWING.leadS;
+    f.phase = 'swing';
+    this.phase = 'single';
+    this.swingSide = side;
+    this.walking = false;
+    this.held = null;
+    this.dynamicStep = false;
+    return true;
+  }
+
   /** Re-aim the walking swing at a new landing (already constrained by the caller). */
   retargetSwing(target: FootPlace): void {
     const side = this.swingSide;
@@ -471,10 +501,17 @@ export class Gait {
       else this.setGoal(this.doubleCenter(shiftVec), this.settleGain);
     }
     if (this.walking) this.dcm.blend([s.com[0], s.com[1]], [s.capture[0], s.capture[1]], Math.min(1, dt / WALK_TRACK_TAU_S));
-    this.reanchorIfLost(s);
-    this.dcm.step(dt, s.omega0, this.ref);
+    const ext = this.external;
+    if (ext) {
+      // The clip leads: the capture-point plan just follows the body so it can take over smoothly.
+      this.dcm.reset([s.com[0], s.com[1]], [s.comVel[0], s.comVel[1]], s.omega0);
+      this.setGoal(this.doubleCenter([0, 0]), this.settleGain);
+    } else {
+      this.reanchorIfLost(s);
+      this.dcm.step(dt, s.omega0, this.ref);
+    }
     for (const side of SIDES) this.writeLeg(side, legs[side]);
-    return this.ref;
+    return ext ?? this.ref;
   }
 
   private landAirFeet(s: Sense): void {
@@ -579,14 +616,23 @@ export class Gait {
    * it lies inside the support the landing creates, the foot may go now.
    */
   private landingCaptures(side: Side, s: Sense): boolean {
+    return this.captures(side, this.feet[side].target, this.feet[side].dur, s);
+  }
+
+  /**
+   * Would lifting `side` now and landing it on `target` after `swing` seconds catch the body? The
+   * capture point diverges from the stance sole while the foot is up; it must end inside the
+   * support the landing makes (stance sole ∪ landing sole).
+   */
+  captures(side: Side, target: FootPlace, swing: number, s: Sense): boolean {
     const stance = other(side);
     const sole = footCorners(this.geo, stance, this.feet[stance].place, 0);
     const cap: P2 = [s.capture[0], s.capture[1]];
     const { d, closest } = polygonDistance(sole, cap);
     const pivot = d > 0 ? closest : cap;
-    const k = Math.exp(s.omega0 * (this.feet[side].dur + DYNAMIC_LIFT_LAG_S));
+    const k = Math.exp(s.omega0 * (swing + DYNAMIC_LIFT_LAG_S));
     const pred: P2 = [pivot[0] + (cap[0] - pivot[0]) * k, pivot[1] + (cap[1] - pivot[1]) * k];
-    const hull = convexHull([...sole, ...footCorners(this.geo, side, this.feet[side].target, DYNAMIC_LAND_MARGIN)]);
+    const hull = convexHull([...sole, ...footCorners(this.geo, side, target, DYNAMIC_LAND_MARGIN)]);
     return polygonDistance(hull, pred).d <= 0;
   }
 
@@ -622,7 +668,7 @@ export class Gait {
     if (h > LIFTED_HEIGHT) f.lifted = true;
     const touching = h < TOUCHDOWN_HEIGHT;
     // A walking foot touching early is a heavy leg lagging its path: it would land short of the COM.
-    const early = this.walking ? 0.92 : 0.8;
+    const early = this.walking || this.external ? 0.92 : 0.8;
     if ((u > early && touching && f.lifted) || (u >= 1 && touching) || u >= 1 + LATE_LAND_EXTRA_S / f.dur) {
       this.plant(side, s);
       this.phase = 'double';

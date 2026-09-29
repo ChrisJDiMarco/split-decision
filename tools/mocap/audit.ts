@@ -13,11 +13,12 @@ import { pathToFileURL } from 'node:url';
 import type { Vec3 } from '../../src/core/types';
 import { DESIGNS } from '../../src/robots/designs';
 import { CONTACT, runs } from '../../src/robots/motions/contacts';
-import { fr, mirrorTrack, pt, type HumanTrack, type PointId, type Side } from '../../src/robots/motions/human';
+import { fr, leapTrack, mirrorTrack, pt, spinTrack, type HumanTrack, type PointId, type Side } from '../../src/robots/motions/human';
 import { parseLibrary } from '../../src/robots/motions/library';
 import { col, dot, matFromQuat, mulMM, mulMV, norm, rotZ, sub, type Mat3 } from '../../src/robots/motions/math';
 import { bodyLowestZ, bodyPoint, fk, newFrames, robotModel, type RobotModel } from '../../src/robots/motions/robot-model';
-import type { LibraryJson, Move, MoveLabel } from '../../src/robots/motions/types';
+import { ARC_LABELS } from '../../src/robots/motions/moves';
+import { FLASHY_LABELS, type LibraryJson, type Move, type MoveLabel } from '../../src/robots/motions/types';
 import { loadTrack, ROOT } from './load';
 
 const DEG = 180 / Math.PI;
@@ -37,8 +38,12 @@ export const AUDIT = {
   stanceCm: 3, // orthodox: the left (lead) foot at least this far ahead at the start of a fighting move
 } as const;
 
-/** Mirrors ARC_LABELS in moves.ts: these strikes' target is taken at impact, the rest at reach. */
-const ARCS = new Set<MoveLabel>(['hook', 'overhand', 'low_kick', 'head_kick']);
+/** These strikes' target is taken at impact, the rest at reach (moves.ts). */
+const ARCS = ARC_LABELS as ReadonlySet<string>;
+const FLASHY = new Set<MoveLabel>(FLASHY_LABELS);
+/** Flashy strikes are judged where they land: head within this of the target line (a spinning
+ * back kick spots the target over its shoulder). */
+const FLASHY_HEADING_DEG = 100;
 
 const FIGHTING = new Set<MoveLabel>(['jab', 'cross', 'hook', 'uppercut', 'overhand', 'block', 'guard_idle']);
 
@@ -82,7 +87,11 @@ const yawDiffDeg = (a: number, b: number): number => {
 
 export function auditMove(model: RobotModel, move: Move, track: HumanTrack): MoveAudit {
   const nj = model.joints.length;
-  const src = move.source.mirrored ? mirrorTrack(track) : track;
+  // Derived moves are compared with the edited actor they were retargeted from (build-library).
+  const S0 = move.source;
+  const turned = S0.turn ? spinTrack(track, S0.turn.from, S0.turn.to, S0.turn.angle, S0.turn.support) : track;
+  const lifted = S0.leap ? leapTrack(turned, S0.leap.from, S0.leap.to) : turned;
+  const src = move.source.mirrored ? mirrorTrack(lifted) : lifted;
   const Rinv = rotZ(-move.source.align.yaw);
   const H = (id: PointId, i: number): Vec3 => mulMV(Rinv, pt(src, id, move.source.start + i));
   const HR = (id: 'pelvis' | 'chest' | 'footL' | 'footR', i: number): Mat3 => mulMM(Rinv, fr(src, id, move.source.start + i));
@@ -105,6 +114,8 @@ export function auditMove(model: RobotModel, move: Move, track: HumanTrack): Mov
   let heading = 0;
   let endStance = 0; // head heading off the move frame's +x (toward the opponent) where the strike starts
   const stanceFrame = Math.min(move.frames - 1, Math.round(move.phases.strike * move.fps)); // the lead at the strike
+  // Flashy strikes turn away on purpose between the start and the landing: judge the heading there.
+  const headingFrame = FLASHY.has(move.label) && move.impact !== null ? Math.min(move.frames - 1, Math.round(move.impact * move.fps)) : stanceFrame;
   for (let i = 0; i < move.frames; i++) {
     pose(i);
     for (const s of ['l', 'r'] as const) {
@@ -130,10 +141,8 @@ export function auditMove(model: RobotModel, move: Move, track: HumanTrack): Mov
     torso.push(Math.max(angle(col(Rt, 0), col(Ht, 0)), angle(col(Rt, 2), col(Ht, 2))));
     for (let b = 0; b < model.bodies.length; b++) sink = Math.max(sink, -bodyLowestZ(model, f, b));
     if (i === move.frames - 1) endStance = f.pos[model.legs.l.bodies[2]][0] - f.pos[model.legs.r.bodies[2]][0];
-    if (i === stanceFrame) {
-      stance = f.pos[model.legs.l.bodies[2]][0] - f.pos[model.legs.r.bodies[2]][0];
-      heading = yawDiffDeg(yawOf(col(f.rot[model.head], 0)), 0);
-    }
+    if (i === stanceFrame) stance = f.pos[model.legs.l.bodies[2]][0] - f.pos[model.legs.r.bodies[2]][0];
+    if (i === headingFrame) heading = yawDiffDeg(yawOf(col(f.rot[model.head], 0)), 0);
   }
   // Planted feet: drift of the ball of the foot within each contact run, and height off the floor.
   let slide = 0, float = 0;
@@ -165,8 +174,9 @@ export function auditMove(model: RobotModel, move: Move, track: HumanTrack): Mov
     travel: move.travel, strikeFwd, flags: [],
   };
   const flag = (c: boolean, msg: string) => c && a.flags.push(msg);
-  // A derived low kick deliberately lowers the source roundhouse: its kicking leg differs by design.
-  const derivedLeg = move.label === 'low_kick' && move.id.endsWith('L') && move.striker ? move.striker.slice(-1) : null;
+  // A derived low kick deliberately lowers the source roundhouse, a jumping knee folds the source
+  // kick: the striking leg differs from the actor's by design.
+  const derivedLeg = ((move.label === 'low_kick' && move.id.endsWith('L')) || move.label === 'jumping_knee') && move.striker ? move.striker.slice(-1) : null;
   for (const [k, v] of Object.entries(segDeg)) {
     if (derivedLeg && (k === `thigh_${derivedLeg}` || k === `shin_${derivedLeg}`)) continue;
     flag(v > AUDIT.segmentDeg, `${k} off the actor by ${v.toFixed(0)}° (p95)`);
@@ -178,7 +188,7 @@ export function auditMove(model: RobotModel, move: Move, track: HumanTrack): Mov
   flag(a.floatCm > AUDIT.floatCm, `planted foot floats ${a.floatCm.toFixed(1)} cm`);
   flag(a.sinkCm > AUDIT.sinkCm, `sinks ${a.sinkCm.toFixed(1)} cm into the floor`);
   flag(move.label === 'guard_idle' && Math.hypot(move.travel[0], move.travel[1]) * 100 > AUDIT.guardDriftCm, `guard drifts ${(Math.hypot(move.travel[0], move.travel[1]) * 100).toFixed(0)} cm`);
-  flag((FIGHTING.has(move.label) || move.striker !== null) && heading > AUDIT.headingDeg, `looks ${heading.toFixed(0)}° away from the opponent at the strike`);
+  flag((FIGHTING.has(move.label) || move.striker !== null) && heading > (FLASHY.has(move.label) ? FLASHY_HEADING_DEG : AUDIT.headingDeg), `looks ${heading.toFixed(0)}° away from the opponent at the strike`);
   flag(FIGHTING.has(move.label) && a.stanceCm < AUDIT.stanceCm, `not orthodox at the strike (left foot ${a.stanceCm.toFixed(0)} cm ahead)`);
   flag(strikeFwd !== null && strikeFwd < 0.1, `striker only ${((strikeFwd ?? 0) * 100).toFixed(0)} cm in front of the pelvis where it lands`);
   const tr = move.travel;

@@ -9,7 +9,11 @@ export type MoveLabel =
   | 'shuffle_forward' | 'shuffle_back' | 'shuffle_left' | 'shuffle_right'
   | 'walk_forward' | 'walk_back'
   | 'getup_face_down' | 'getup_back' | 'getup_side'
-  | 'victory';
+  | 'victory'
+  // Flashy and opportunistic moves (docs/design/fighter-intelligence.md): attempted, not guaranteed.
+  | 'tornado_kick' | 'spinning_back_kick' | 'jump_kick' | 'jumping_knee' | 'superman_punch' | 'spinning_backfist'
+  | 'feint_left' | 'feint_right' | 'pivot_left' | 'pivot_right' | 'switch_stance'
+  | 'kipup_source';
 
 export const MOVE_LABELS: readonly MoveLabel[] = [
   'jab', 'cross', 'hook', 'uppercut', 'overhand',
@@ -19,7 +23,18 @@ export const MOVE_LABELS: readonly MoveLabel[] = [
   'walk_forward', 'walk_back',
   'getup_face_down', 'getup_back', 'getup_side',
   'victory',
+  'tornado_kick', 'spinning_back_kick', 'jump_kick', 'jumping_knee', 'superman_punch', 'spinning_backfist',
+  'feint_left', 'feint_right', 'pivot_left', 'pivot_right', 'switch_stance',
+  'kipup_source',
 ];
+
+/** Strikes that leave the ground or spin: attempted, may fail (they carry flight and spin data). */
+export const FLASHY_LABELS: readonly MoveLabel[] = [
+  'tornado_kick', 'spinning_back_kick', 'jump_kick', 'jumping_knee', 'superman_punch', 'spinning_backfist',
+];
+
+/** Deceptive and angle-changing footwork. */
+export const ANGLE_LABELS: readonly MoveLabel[] = ['feint_left', 'feint_right', 'pivot_left', 'pivot_right', 'switch_stance'];
 
 export type LimbSide = 'l' | 'r';
 export type StrikeHeight = 'low' | 'mid' | 'high';
@@ -40,6 +55,21 @@ export interface MoveSource {
   lift: number; // m the actor was raised so a flat foot puts the robot's sole on the floor
   /** Source track world → move frame: rotate by −yaw after subtracting (x, y) (metres, scaled). */
   align: { yaw: number; x: number; y: number };
+  /** Derived moves: the source track was edited before the retarget (human.ts spinTrack, then
+   * leapTrack, then the mirror). Track frames; sides and angles are the unmirrored source's. */
+  turn?: { from: number; to: number; angle: number; support: LimbSide };
+  leap?: { from: number; to: number };
+}
+
+/**
+ * The airborne part of a move: the longest run of frames where nothing touches the mat (no foot,
+ * hand, knee, hips or chest contact). Seconds at 1×, like the phases.
+ */
+export interface MoveFlight {
+  takeoff: number; // first frame with nothing on the mat
+  land: number; // first frame something is back on the mat
+  /** Highest pelvis rise over its height at take-off (m). */
+  height: number;
 }
 
 export interface MoveQuality {
@@ -76,6 +106,12 @@ export interface Move {
   /** Starts with one foot leading and ends with the other (a kick that lands forward): after it
    * the fighter stands southpaw, so its next orthodox move plays mirrored. */
   switchesStance: boolean;
+  /** Airborne phase (both feet and everything else off the mat), or null when always supported. */
+  flight: MoveFlight | null;
+  /** Pelvis heading change from the first to the last frame about the vertical (rad, + = turning
+   * left / counter-clockwise seen from above). Spinning moves are stored turning clockwise (< 0),
+   * the orthodox direction; mirrored they spin the other way. */
+  spin: number;
   quality: MoveQuality;
   source: MoveSource;
   q: Float32Array; // frames × joints
@@ -144,6 +180,8 @@ export interface MoveJson {
   travel: Vec3;
   maxSpeed: number;
   switchesStance?: boolean; // absent in older libraries: false
+  flight?: [number, number, number] | null; // frames: take-off, landing; pelvis rise (m). Absent: null
+  spin?: number; // rad, absent: 0
   quality: MoveQuality;
   source: MoveSource;
   q: string; // base64 int16 LE, frames × joints, × QUANT.angle

@@ -64,6 +64,70 @@ export interface HumanoidSpec {
 }
 
 const DEG = Math.PI / 180;
+
+/**
+ * Joint ranges in degrees. Roll and yaw ranges are given for the LEFT side; the right side is the
+ * mirror image (right = [−hi, −lo]), so a mirrored (southpaw) move stays inside the right side's
+ * range exactly when the orthodox one stays inside the left's.
+ */
+interface JointRanges {
+  waistYaw: [number, number];
+  waistPitch: [number, number]; // + folds forward
+  neckYaw: [number, number];
+  shoulderPitch: [number, number]; // − swings the arm forward and up, + back
+  shoulderRoll: [number, number]; // left: + abducts (out to the side), − crosses the chest
+  shoulderYaw: [number, number];
+  elbow: [number, number];
+  hipYaw: [number, number]; // left: + turns the foot out (external rotation)
+  hipRoll: [number, number]; // left: + abducts (legs apart), − crosses the other leg
+  hipPitch: [number, number]; // − lifts the knee forward
+  knee: [number, number];
+  anklePitch: [number, number]; // + points the toes (plantarflexion), − pulls them up
+  ankleRoll: [number, number];
+}
+
+/** The iron-age heavyweights keep the ranges they were built with (their compiled MJCF is frozen). */
+const IRON_RANGES: JointRanges = {
+  waistYaw: [-70, 70], waistPitch: [-25, 50], neckYaw: [-80, 80],
+  shoulderPitch: [-170, 50], shoulderRoll: [-15, 100], shoulderYaw: [-80, 80], elbow: [-150, 0],
+  hipYaw: [-40, 40], hipRoll: [-20, 45], hipPitch: [-135, 35], knee: [0, 150],
+  anklePitch: [-60, 45], ankleRoll: [-30, 30],
+};
+
+/**
+ * The modern electric designs (2026-09-29, for the mocap tracking controller). Widened where the
+ * retargeted CMU moves sat on a limit (share of joint-frames on the limit in the built savate and
+ * firecracker libraries before the change), and only as far as a QDD/planetary joint with a hollow
+ * shaft can plausibly turn (Unitree G1: hip yaw ±157°, hip roll −30…170°, waist yaw ±150°):
+ *   waist yaw     ±70 → ±90      spinning back kicks and backfists wind the chest past 70°
+ *   waist pitch   −25…50 → −35…80    get-ups sat on the 50° fold on 21-25% of frames (sitting up
+ *                                  off the back, chest over the knees); −35 arches a kip-up
+ *   shoulder pitch −170…50 → −180…70   pushing off the mat behind the body hit +50 on 4-8%
+ *   shoulder roll −15…100 → −35…130    arms reaching across the chest (side get-ups, hook
+ *                                  follow-through) hit the 15° adduction limit on 7%; 130° lifts
+ *                                  the arms overhead for handsprings and the victory
+ *   shoulder yaw  ±80 → ±95       hit on 3-4% of get-up frames
+ *   hip yaw       ±40 → −45…70    external rotation was on its limit on 14-26% of kick frames
+ *                                  (the chamber, the stance foot's pivot) and 14-27% of get-up
+ *                                  frames (frog-legged knee-outs); internal rotation stays human
+ *   hip roll      −20…45 → −35…70     a leg crossing over in a side roll hit the 20° adduction
+ *                                  limit on 6-13%; the actor's splits and frog positions need
+ *                                  abduction past 45°
+ *   hip pitch     −135 → −145     knees to the chest in a get-up tuck (4-5% on the limit)
+ *   ankle pitch   45 → 60 (toes)  kneeling on pointed feet (5-8% on the limit)
+ *   ankle roll    ±30 → ±40       rolled feet in side get-ups and a kick's pivot (8-12% / 3-8%)
+ * Knee, elbow and neck ranges were never the limit and are unchanged.
+ */
+const MODERN_RANGES: JointRanges = {
+  waistYaw: [-90, 90], waistPitch: [-35, 80], neckYaw: [-80, 80],
+  shoulderPitch: [-180, 70], shoulderRoll: [-35, 130], shoulderYaw: [-95, 95], elbow: [-150, 0],
+  hipYaw: [-45, 70], hipRoll: [-35, 70], hipPitch: [-145, 35], knee: [0, 150],
+  anklePitch: [-60, 60], ankleRoll: [-40, 40],
+};
+
+/** Range for side `tag` of a roll or yaw joint given for the left side. */
+const mirrored = (tag: 'l' | 'r', [lo, hi]: [number, number]): [number, number] => (tag === 'l' ? [lo, hi] : [-hi, -lo]);
+
 /** Position servos reach stall torque at this error (~4°): stiff enough to swing a heavy leg
  *  precisely; kv damping scales with kp and is integrated implicitly by MuJoCo. */
 const SERVO_FULL_TORQUE_ERROR_RAD = 0.07;
@@ -74,7 +138,7 @@ function hinge(name: string, axis: Vec3, rangeDeg: [number, number], motorId: st
   const spec = motor(motorId);
   const kp = spec.stallTorqueNm / fullTorqueErrorRad;
   return {
-    name, type: 'hinge', axis, rangeDeg, motor: motorId,
+    name, type: 'hinge', axis, rangeDeg: [rangeDeg[0], rangeDeg[1]], motor: motorId,
     kp, kd: kp * 0.045,
     armature: 0.02 + spec.massKg * 0.01,
     damping: 0.5,
@@ -113,6 +177,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
   const k = spec.scale;
   const b = spec.bulk;
   const P = proportionsOf(spec);
+  const R = spec.era === 'modern' ? MODERN_RANGES : IRON_RANGES;
   // Multiplying by an exact 1 is exact in IEEE arithmetic, so designs without proportions compile
   // to the same numbers as before (tests/roster/iron-age.test.ts holds that to the byte).
   const L = {
@@ -160,9 +225,9 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
   parts.push({
     id: 'torso', parent: 'pelvis', pos: [0, 0, L.pelvisHalf[2]], tags: torsoTags, hp: 1400,
     joints: [
-      hinge('waist_yaw', [0, 0, 1], [-70, 70], spec.motors.waist, onLegCircuit(spec.motors.waist)),
+      hinge('waist_yaw', [0, 0, 1], R.waistYaw, spec.motors.waist, onLegCircuit(spec.motors.waist)),
       // Deep forward fold: getting up off the canvas needs knees to chest and a torso over the feet.
-      hinge('waist_pitch', [0, 1, 0], [-25, 50], spec.motors.waist, onLegCircuit(spec.motors.waist)),
+      hinge('waist_pitch', [0, 1, 0], R.waistPitch, spec.motors.waist, onLegCircuit(spec.motors.waist)),
     ],
     geoms: [
       weigh({ shape: { type: 'box', halfSize: L.torsoHalf }, pos: [0, 0, L.torsoCenterZ], material: spec.armor, role: 'armor' }, shell?.armorMm ?? 0, shell?.torsoFillKgM3 ?? 0),
@@ -173,7 +238,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
 
   parts.push({
     id: 'head', parent: 'torso', pos: [0, 0, L.neckZ], tags: ['head', 'sensor'], hp: 300,
-    joints: [hinge('neck_yaw', [0, 0, 1], [-80, 80], spec.motors.neck)],
+    joints: [hinge('neck_yaw', [0, 0, 1], R.neckYaw, spec.motors.neck)],
     geoms: [weigh({ shape: { type: 'box', halfSize: L.headHalf }, pos: [0, 0, L.headHalf[2]], material: spec.armor, role: 'sensor' }, shell?.headMm ?? 0, shell?.fillKgM3 ?? 0)],
     visual: { kit: look?.head ?? `head.${spec.head}` },
     detachable: { impulseNs: spec.headBreakImpulseNs, damage: 150 },
@@ -185,16 +250,16 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     parts.push({
       id: `upperarm_${tag}`, parent: 'torso', pos: [0, s * L.shoulderY, L.shoulderZ], tags: ['upperarm', t], hp: 500,
       joints: [
-        hinge(`shoulder_pitch_${tag}`, [0, 1, 0], [-170, 50], spec.motors.arm),
-        hinge(`shoulder_roll_${tag}`, [1, 0, 0], tag === 'l' ? [-15, 100] : [-100, 15], spec.motors.arm),
-        hinge(`shoulder_yaw_${tag}`, [0, 0, 1], [-80, 80], spec.motors.arm),
+        hinge(`shoulder_pitch_${tag}`, [0, 1, 0], R.shoulderPitch, spec.motors.arm),
+        hinge(`shoulder_roll_${tag}`, [1, 0, 0], mirrored(tag, R.shoulderRoll), spec.motors.arm),
+        hinge(`shoulder_yaw_${tag}`, [0, 0, 1], mirrored(tag, R.shoulderYaw), spec.motors.arm),
       ],
       geoms: [weigh({ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -L.upperArm], radius: L.armR * 1.15 }, material: spec.frame, role: 'structure' }, shell?.frameMm ?? 0, shell?.fillKgM3 ?? 0)],
       visual: { kit: 'arm.upper', params: { hydraulic: spec.hydraulicArms } },
     });
     parts.push({
       id: `forearm_${tag}`, parent: `upperarm_${tag}`, pos: [0, 0, -L.upperArm], tags: ['forearm', t, ...(spec.hydraulicArms ? ['hydraulic' as PartTag] : [])], hp: 450,
-      joints: [hinge(`elbow_${tag}`, [0, 1, 0], [-150, 0], spec.hydraulicArms ? 'hyd.cyl32' : spec.motors.elbow,
+      joints: [hinge(`elbow_${tag}`, [0, 1, 0], R.elbow, spec.hydraulicArms ? 'hyd.cyl32' : spec.motors.elbow,
         spec.hydraulicArms ? { hydraulicCircuit: 'arms' } : {})],
       geoms: [weigh({ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -L.foreArm], radius: L.armR * 1.25 }, material: spec.armor, role: 'armor' }, shell?.armorMm ?? 0, shell?.fillKgM3 ?? 0)],
       visual: { kit: 'arm.fore', params: { hydraulic: spec.hydraulicArms } },
@@ -210,9 +275,9 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     parts.push({
       id: `thigh_${tag}`, parent: 'pelvis', pos: [0, s * L.hipY, -L.pelvisHalf[2]], tags: ['thigh', t, ...legTags], hp: 700,
       joints: [
-        hinge(`hip_yaw_${tag}`, [0, 0, 1], [-40, 40], spec.motors.leg, onLegCircuit(spec.motors.leg)),
-        hinge(`hip_roll_${tag}`, [1, 0, 0], tag === 'l' ? [-20, 45] : [-45, 20], spec.motors.leg, onLegCircuit(spec.motors.leg)),
-        hinge(`hip_pitch_${tag}`, [0, 1, 0], [-135, 35], spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_yaw_${tag}`, [0, 0, 1], mirrored(tag, R.hipYaw), spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_roll_${tag}`, [1, 0, 0], mirrored(tag, R.hipRoll), spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_pitch_${tag}`, [0, 1, 0], R.hipPitch, spec.motors.leg, onLegCircuit(spec.motors.leg)),
       ],
       geoms: [weigh({ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -L.thigh], radius: L.legR * 1.15 }, material: spec.frame, role: 'structure' }, shell?.frameMm ?? 0, shell?.fillKgM3 ?? 0)],
       visual: { kit: 'leg.thigh' },
@@ -220,7 +285,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     });
     parts.push({
       id: `shin_${tag}`, parent: `thigh_${tag}`, pos: [0, 0, -L.thigh], tags: ['shin', t, ...legTags], hp: 650,
-      joints: [hinge(`knee_${tag}`, [0, 1, 0], [0, 150], spec.motors.knee, onLegCircuit(spec.motors.knee))],
+      joints: [hinge(`knee_${tag}`, [0, 1, 0], R.knee, spec.motors.knee, onLegCircuit(spec.motors.knee))],
       // The capsule stops one radius short of the ankle so its end cap never reaches below the
       // sole: a heavy biped must stand on its feet, not on its ankle balls.
       geoms: [weigh({ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -(L.shin - L.legR)], radius: L.legR }, material: spec.armor, role: 'armor' }, shell?.armorMm ?? 0, shell?.fillKgM3 ?? 0)],
@@ -230,8 +295,8 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     parts.push({
       id: `foot_${tag}`, parent: `shin_${tag}`, pos: [0, 0, -L.shin], tags: ['foot', t], hp: 600,
       joints: [
-        hinge(`ankle_pitch_${tag}`, [0, 1, 0], [-60, 45], spec.motors.leg, onLegCircuit(spec.motors.leg), ANKLE_FULL_TORQUE_ERROR_RAD),
-        hinge(`ankle_roll_${tag}`, [1, 0, 0], [-30, 30], spec.motors.leg, onLegCircuit(spec.motors.leg), ANKLE_FULL_TORQUE_ERROR_RAD),
+        hinge(`ankle_pitch_${tag}`, [0, 1, 0], R.anklePitch, spec.motors.leg, onLegCircuit(spec.motors.leg), ANKLE_FULL_TORQUE_ERROR_RAD),
+        hinge(`ankle_roll_${tag}`, [1, 0, 0], mirrored(tag, R.ankleRoll), spec.motors.leg, onLegCircuit(spec.motors.leg), ANKLE_FULL_TORQUE_ERROR_RAD),
       ],
       geoms: [solid({ shape: { type: 'box', halfSize: L.footHalf }, pos: [L.footHalf[0] * 0.35, 0, -L.footHalf[2] - 0.02 * k], material: 'rubber', role: 'foot' }, shell?.footFill ?? 0)],
       visual: { kit: look?.foot ?? 'leg.foot' },

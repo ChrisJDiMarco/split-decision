@@ -5,7 +5,9 @@ import type { Vec3 } from '../../../core/types';
 import type { JointRuntime } from '../../sim-context';
 import type { Gait } from '../gait';
 import type { HumanoidGeometry, Side } from '../geometry';
-import type { BodyCommand } from '../posture';
+import type { MocapSet } from '../mocap/library';
+import type { MotionPlayer } from '../mocap/player';
+import type { BodyCommand, JointMap } from '../posture';
 import type { Sense } from '../sense';
 import type { StanceParams } from '../stance';
 import type { OpponentView } from './targets';
@@ -22,6 +24,7 @@ export type SkillPhase = 'windup' | 'strike' | 'recover';
 export interface SkillPose {
   pelvisYaw: number;
   pelvisPitch: number;
+  pelvisRoll: number;
   pelvisDrop: number;
   waistYaw: number; // absolute waist targets
   waistPitch: number;
@@ -44,12 +47,22 @@ export interface SkillEnv {
   toTorso(p: Vec3): Vec3;
   /** Live joint state (motor, health, available torque) by design joint name. */
   joint(name: string): JointRuntime | undefined;
+  /** Mocap playback (null: procedural moves only). */
+  mocap: MocapSet | null;
+  player: MotionPlayer | null;
+  jm: JointMap;
+  rng: () => number;
 }
 
 export interface SkillRun {
   def: SkillDef;
   phase: SkillPhase;
   t: number; // time in phase
+  /** Clip-timed skills: progress through the current phase (0..1) and through the whole move. */
+  u?: number;
+  progress?: number;
+  /** The parts that land for this run (a mirrored clip strikes with the other side). */
+  strikers?: string[];
   durations: Record<SkillPhase, number>;
   zone: TargetZone;
   aim: Vec3 | null; // world aim point, locked when the strike starts
@@ -81,12 +94,30 @@ export interface SkillDef {
   strikeTime?(env: SkillEnv, run: SkillRun): number;
   /** Called once when the run ends or is cancelled. */
   end?(env: SkillEnv, run: SkillRun): void;
+  /** Mocap-driven: the clip's timeline sets the phases (see mocap/strikes.ts). */
+  clip?: ClipSkill;
+}
+
+/** A skill played from the motion library: the clip drives the phases and writes the command. */
+export interface ClipSkill {
+  /** Pick and start a move for this run; false if none fits (the run is dropped). */
+  begin(env: SkillEnv, run: SkillRun): boolean;
+  /** Advance the clip by `dt` and write the command; `done` ends the run. */
+  step(env: SkillEnv, run: SkillRun, dt: number): ClipStep;
+}
+
+export interface ClipStep {
+  phase: SkillPhase;
+  u: number; // progress through the phase
+  progress: number; // through the whole move
+  done: boolean;
 }
 
 export function neutralPose(stance: StanceParams): SkillPose {
   return {
     pelvisYaw: 0,
     pelvisPitch: 0,
+    pelvisRoll: 0,
     pelvisDrop: 0,
     waistYaw: stance.waistYaw,
     waistPitch: stance.waistPitch,

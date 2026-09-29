@@ -13,6 +13,7 @@ import { runs } from './contacts';
 import { fr, pt, SIDES, otherSide, type HumanTrack, type Side } from './human';
 import { footDown, kinematics, meanYaw, toFacing, v3, yawDiff, type Kin } from './kinematics';
 import { cross, dot, norm, sub } from './math';
+import { flashySegments, pivotSegments, switchSegments } from './flashy';
 import { peaks } from './signals';
 import type { StrikeAdjust } from './retarget';
 import type { LimbSide, MoveLabel, StrikeHeight } from './types';
@@ -38,6 +39,10 @@ export interface Segment {
   why: string; // compact feature summary for reports
   /** Derived move: retarget the source with this strike re-aim (see StrikeAdjust). */
   adjust?: StrikeAdjust;
+  /** Derived move: retarget the source lifted on a ballistic arc over these track frames (leapTrack). */
+  leap?: { from: number; to: number };
+  /** Derived move: retarget the source with a full extra turn on one foot (spinTrack). */
+  turn?: { from: number; to: number; angle: number; support: Side };
 }
 
 // ---------------------------------------------------------------- thresholds
@@ -639,7 +644,12 @@ export function segmentClip(tr: HumanTrack, clip: ClipInfo, only?: readonly Dete
   if (det.has('shuffle')) segs.push(...shuffleSegments(k, clip, busy()));
   if (det.has('guard')) segs.push(...guardSegments(k, clip, segs.map((s) => [s.start, s.end] as [number, number])));
   if (det.has('getup')) segs.push(...getupSegments(k, clip));
+  // Pivots and switches may overlap footwork (a sidestep that turns is a pivot), not strikes.
+  const striking = (): Array<[number, number]> => segs.filter((s) => s.striker).map((s) => [s.strike, s.recover]);
+  if (det.has('switch')) segs.push(...switchSegments(k, clip, striking()));
+  if (det.has('pivot')) segs.push(...pivotSegments(k, clip, striking()));
   segs.push(...manualSegments(k, clip));
+  segs.push(...flashySegments(k, clip));
   return { kin: k, segments: segs.sort((a, b) => a.start - b.start) };
 }
 

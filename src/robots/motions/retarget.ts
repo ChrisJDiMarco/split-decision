@@ -46,6 +46,11 @@ export interface StrikeAdjust {
   peak: number;
   to: number;
   dz: number;
+  /**
+   * Fold the leg instead: the ankle target is pulled up behind the knee (shin folded back toward
+   * the hip), full at the peak, so the knee leads (a jump kick re-aimed as a jumping knee).
+   */
+  fold?: boolean;
 }
 
 /** Weight of an adjust at track frame i (0 outside, 1 at the peak). */
@@ -106,6 +111,8 @@ const ARM_BURIED = 0.05; // m: a solved arm deeper than this in the mat is lifte
 const FLOOR_TOL = 0.005; // m below the mat after the limb solve that triggers the lift-out pass
 const LIFT_STEADY_W = 0.02; // per radian: the lift-out keeps the solved pose as far as the floor allows
 const FLOOR_W = 4; // floor rows (one-sided, only while violated) per metre below the mat
+const FOLD_BACK = 0.75; // folded knee strike: shin direction, toward the hip ...
+const FOLD_DOWN = 0.65; // ... and down
 
 /** Monotone piecewise map: [0, edgeH] stretches to [0, edgeR], beyond it slope k. */
 function stretch(x: number, edgeH: number, edgeR: number, k: number): number {
@@ -376,13 +383,24 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
       const P = fr(tr, 'pelvis', i);
       const lat = normalize([P[1], P[4], 0], [0, 1, 0]);
       const a = scale(pt(tr, `ankle${S}`, i), kLeg);
-      let dz = 0;
+      let dz = 0, fold = 0;
       for (const adj of opts.adjust ?? []) {
         if (adj.side !== s) continue;
+        if (adj.fold) {
+          fold = Math.max(fold, adjustWeight(adj, i));
+          continue;
+        }
         // In proportion to the ankle's height (full at the peak): the chamber and the rise keep
         // their shape, scaled down, instead of being pushed into the mat on the way up.
         const zPeak = Math.max(1e-3, pt(tr, `ankle${S}`, adj.peak)[2]);
         dz += kLeg * adj.dz * adjustWeight(adj, i) * clamp(a[2] / (kLeg * zPeak), 0, 1);
+      }
+      if (fold > 0) {
+        // Shin folded back from the knee toward the hip and down: the knee is the striking point.
+        const kh = scale(pt(tr, `knee${S}`, i), kLeg), hh = scale(pt(tr, `hip${S}`, i), kLeg);
+        const dir = normalize(add(scale(normalize(sub(hh, kh)), FOLD_BACK), [0, 0, -FOLD_DOWN]), [0, 0, -1]);
+        const folded = add(kh, scale(dir, kLeg * h.shin));
+        for (let c = 0; c < 3; c++) a[c] += (folded[c] - a[c]) * fold;
       }
       T.ankle.push([a[0] + lat[0] * widen, a[1] + lat[1] * widen, a[2] + lift + dz]);
       T.rot.push(fr(tr, `foot${S}`, i));

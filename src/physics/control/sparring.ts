@@ -56,9 +56,11 @@ export function sparringIntent(ctx: SimContext, robot: RobotRuntime): Intent {
   if (opp.windup > THREAT_WINDUP && dist < THREAT_M && rng() < GUARD_CHANCE) return intent('guard');
   const roll = rng();
   if (roll < CIRCLE_CHANCE) return intent(rng() < 0.5 ? 'circle_left' : 'circle_right', 'head', { counterIfLunge });
-  const geo = humanoidGeometry(robot.design);
+  // The controller's own skills and geometry (a mocap fighter's ranges come from its clips).
+  const c = robot.mem.control as { geo: ReturnType<typeof humanoidGeometry>; skillFor(id: SkillId): { range(g: unknown): [number, number] } | undefined } | undefined;
+  const geo = c?.geo ?? humanoidGeometry(robot.design);
   const reach = strikes.filter((id) => {
-    const [lo, hi] = SKILLS[id]!.range(geo);
+    const [lo, hi] = (c?.skillFor(id) ?? SKILLS[id]!).range(geo);
     return dist >= lo && dist <= hi;
   });
   const pool = reach.length && roll < STRIKE_CHANCE ? reach : strikes;

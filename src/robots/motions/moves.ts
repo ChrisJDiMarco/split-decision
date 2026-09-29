@@ -31,6 +31,7 @@ export interface MoveMetrics {
   trunkDrop: number; // max |trunk mat correction|, m
   sink: number; // deepest collision point below the mat over the move, m
   lookAway: [number, number]; // head heading off +x at the first and at the last frame, rad
+  lookAtImpact: number; // head heading off +x where the striker lands, rad (0 without a striker)
   footSlide: number; // worst drift of a planted foot (ball) within one contact run, m
 }
 
@@ -97,11 +98,12 @@ function closeLoop(q: Float32Array, root: Float32Array, frames: number, nj: numb
   root[last * 7 + 2] = root[2];
 }
 
-/** Strikes that land mid-arc (at impact) rather than at full reach. */
-const ARC_LABELS = new Set(['hook', 'overhand', 'low_kick', 'head_kick']);
+/** Strikes that land mid-arc (at impact) rather than at full reach. A jumping knee lands at the
+ * top of its drive (its impact frame), not at "full reach" (a knee is always a thigh from the hip). */
+export const ARC_LABELS = new Set(['hook', 'overhand', 'low_kick', 'head_kick', 'tornado_kick', 'spinning_backfist', 'jumping_knee']);
 /** Arcs that sweep across onto the opponent's centre line (an uppercut rises under the chin from
  * where it is; a low kick goes for the lead thigh). */
-const MIDLINE_ARCS = new Set(['hook', 'overhand', 'head_kick']);
+const MIDLINE_ARCS = new Set(['hook', 'overhand', 'head_kick', 'tornado_kick', 'spinning_backfist']);
 const HEAD_HALF_WIDTH_M = 0.1;
 /** m: one foot this far ahead of the other is a stance (orthodox or southpaw), less is square. */
 const STANCE_LEAD_M = 0.08;
@@ -183,7 +185,7 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     // IK error of the striker at reach (retarget targets are in the track frame, errors are frame-free).
     const side = seg.striker!.endsWith('_l') ? 0 : 3;
     const k = k0 + reachI;
-    const [tgt, got] = seg.striker!.startsWith('fist') ? [r.fistTarget, r.fist] : [r.ankleTarget, r.ankle];
+    const [tgt, got] = seg.striker!.startsWith('fist') ? [r.fistTarget, r.fist] : seg.striker!.startsWith('shin') ? [r.kneeTarget, r.knee] : [r.ankleTarget, r.ankle];
     const o = k * 6 + side;
     strikerErr = Math.hypot(tgt[o] - got[o], tgt[o + 1] - got[o + 1], tgt[o + 2] - got[o + 2]);
     // Worst miss along the strike itself: a limb eased across an IK branch flip strays off the
@@ -227,6 +229,7 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
   // far the head looks away from the opponent (+x) at the first and at the last frame.
   let sink = 0;
   const lookAway: [number, number] = [0, 0];
+  let lookAtImpact = 0;
   const lead: [number, number] = [0, 0];
   const d = m.dims;
   const ballLocal: Vec3 = [d.footCenterX + 0.6 * d.footHalf[0], 0, -d.soleDepth];
@@ -235,6 +238,10 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     const o = i * 7;
     fk(m, [root[o], root[o + 1], root[o + 2]], matFromQuat([root[o + 3], root[o + 4], root[o + 5], root[o + 6]]), q.subarray(i * nj, (i + 1) * nj), f);
     for (let b = 0; b < m.bodies.length; b++) sink = Math.max(sink, -bodyLowestZ(m, f, b));
+    if (contactI !== null && i === contactI) {
+      const H = f.rot[m.head];
+      if (Math.hypot(H[0], H[3]) > 0.3) lookAtImpact = Math.abs(Math.atan2(H[3], H[0]));
+    }
     if (i === 0 || i === frames - 1) {
       const H = f.rot[m.head]; // column 0: the head's forward axis
       if (Math.hypot(H[0], H[3]) > 0.3) lookAway[i === 0 ? 0 : 1] = Math.abs(Math.atan2(H[3], H[0]));
@@ -260,6 +267,8 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
   };
   const last = (frames - 1) * 7;
   const travel: Vec3 = [round4(root[last]), round4(root[last + 1]), round4(root[last + 2] - root[2])];
+  const flight = flightOf(contacts, root, frames);
+  const spin = spinOf(root, frames);
   const phase = (x: number) => Math.min(frames - 1, Math.max(0, x - seg.start));
   const json: MoveJson = {
     id: seg.id, label: seg.label, side: seg.side, striker: seg.striker, height: seg.height, loop: seg.loop, frames,
@@ -268,11 +277,15 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     reach: seg.reach === null ? null : phase(seg.reach),
     target, peakSpeed: round4(peakSpeed), travel, maxSpeed: round4(maxSpeed),
     switchesStance: Math.abs(lead[0]) > STANCE_LEAD_M && Math.abs(lead[1]) > STANCE_LEAD_M && Math.sign(lead[0]) !== Math.sign(lead[1]),
+    ...(flight ? { flight } : {}),
+    ...(Math.abs(spin) > MIN_SPIN_RAD ? { spin: round4(spin) } : {}),
     quality,
     source: {
       clip: seg.clip, start: seg.start, end: seg.start + frames, mirrored: seg.mirrored,
       scale: round4(r.scale.leg), lift: round4(r.scale.lift),
       align: { yaw: round4(yaw), x: round4(x0), y: round4(y0) },
+      ...(seg.turn ? { turn: { ...seg.turn, angle: round4(seg.turn.angle) } } : {}),
+      ...(seg.leap ? { leap: seg.leap } : {}),
     },
     q: encodeAngles(q), root: encodeRoot(root), contacts: encodeBytes(contacts),
   };
@@ -281,10 +294,50 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     metrics: {
       fistErr: quality.fistErr, footErr: quality.footErr,
       kneeErr: meanDist(r.kneeTarget, r.knee, k0, frames), elbowErr: meanDist(r.elbowTarget, r.elbow, k0, frames),
-      strikerErr, strikerPathErr, limitRate: quality.limitRate, jointPeak, slowest, trunkDrop, sink, lookAway, footSlide,
+      strikerErr, strikerPathErr, limitRate: quality.limitRate, jointPeak, slowest, trunkDrop, sink, lookAway, lookAtImpact, footSlide,
     },
   };
 }
 
 const round4 = (x: number): number => Math.round(x * 1e4) / 1e4;
+
+/** Shortest airborne run worth reporting (frames), and the smallest turn stored as a spin. */
+const MIN_FLIGHT_FRAMES = 3;
+const MIN_SPIN_RAD = 0.05;
+
+/**
+ * The airborne part: the longest run where nothing is on the mat (contact byte 0), as
+ * [take-off frame, landing frame, pelvis rise over its take-off height (m)]; null when the move
+ * always has something down.
+ */
+export function flightOf(contacts: Uint8Array, root: Float32Array, frames: number): [number, number, number] | null {
+  let best: [number, number] | null = null;
+  for (const [a, b] of runs(contacts.map((c) => (c === 0 ? 1 : 0)))) if (!best || b - a > best[1] - best[0]) best = [a, b];
+  if (!best || best[1] - best[0] < MIN_FLIGHT_FRAMES) return null;
+  let top = -Infinity;
+  for (let i = best[0]; i < Math.min(frames, best[1]); i++) top = Math.max(top, root[i * 7 + 2]);
+  return [best[0], Math.min(frames - 1, best[1]), round4(Math.max(0, top - root[best[0] * 7 + 2]))];
+}
+
+/**
+ * Pelvis heading change over the move about the vertical (rad, + counter-clockwise from above),
+ * unwrapped. Read off the pelvis's lateral axis, which stays level when the body folds over or
+ * goes horizontal in the air.
+ */
+export function spinOf(root: Float32Array, frames: number): number {
+  let total = 0, prev = 0;
+  for (let i = 0; i < frames; i++) {
+    const o = i * 7;
+    const R = matFromQuat([root[o + 3], root[o + 4], root[o + 5], root[o + 6]]);
+    const h = Math.atan2(R[4], R[1]) - Math.PI / 2; // column 1 (the pelvis's left) turned back to forward
+    if (i > 0) {
+      let d = h - prev;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      total += d;
+    }
+    prev = h;
+  }
+  return total;
+}
 

@@ -71,6 +71,21 @@ const VEL_FILTER_S = 0.012;
 const MAX_VEL_SHIFT_RAD = 0.35;
 
 /**
+ * Velocity feed-forward from a known target velocity (a mocap clip's exact q̇): the target is
+ * shifted by (kd/kp)·q̇_des so the servo's damping acts on the tracking error, not on the motion.
+ * `qd` is in r.joints order, rad/s.
+ */
+export function addVelocityFeedforward(r: RobotRuntime, targets: Float64Array, qd: ArrayLike<number>): void {
+  for (let i = 0; i < targets.length; i++) {
+    const kp = effectiveKp(r, i);
+    if (kp <= 0) continue;
+    const j = r.joints[i];
+    const v = Math.max(-j.motor.noLoadSpeedRadS, Math.min(j.motor.noLoadSpeedRadS, qd[i]));
+    targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, (j.kd * v) / kp));
+  }
+}
+
+/**
  * Velocity feed-forward. A position servo's damping acts on absolute joint speed, so it drags
  * against every commanded motion (kd·q̇ is ~270 N·m on a knee at 4 rad/s). Shifting the target
  * by (kd/kp)·q̇_des turns kv into damping on the tracking error instead. q̇_des is the filtered

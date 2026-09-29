@@ -17,6 +17,7 @@
 import type { Vec3 } from '../../core/types';
 import type { SimContext } from '../sim-context';
 import { SIDES, type HumanoidGeometry, type Side } from './geometry';
+import type { ClipGetUp } from './mocap/getup';
 import { clamp, minJerk, mulMM, mulMtM, mulMV, mulMtV, rotZ, sub, type Mat3 } from './math';
 import { newBodyCommand, solveBody, type BodyCommand, type JointMap } from './posture';
 import type { RollKey } from './roll-keys';
@@ -126,7 +127,7 @@ interface Frame {
   ly: number;
 }
 
-export type GetUpPhase = 'up' | 'settle' | 'legs' | 'roll' | 'arms' | 'hands' | 'press' | 'pike' | 'tuck_l' | 'plant_l' | 'tuck_r' | 'plant_r' | 'sit';
+export type GetUpPhase = 'up' | 'settle' | 'clip' | 'legs' | 'roll' | 'arms' | 'hands' | 'press' | 'pike' | 'tuck_l' | 'plant_l' | 'tuck_r' | 'plant_r' | 'sit';
 
 interface Phase {
   name: GetUpPhase;
@@ -197,6 +198,8 @@ const MIRRORED = new Set(['hip_roll', 'hip_yaw', 'shoulder_roll', 'shoulder_yaw'
 export class GetUp {
   phase: GetUpPhase = 'up';
   attempts = 0;
+  /** Mocap get-ups (mocap/getup.ts), tried first once the body lies still; null: scripted only. */
+  clip: ClipGetUp | null = null;
   private below = 0;
   private still = 0;
   private t = 0;
@@ -252,8 +255,14 @@ export class GetUp {
     if (this.below < FALL_CONFIRM_S) return false;
     this.below = 0;
     this.attempts = 0;
+    this.clip?.reset();
     this.enter('settle');
     return true;
+  }
+
+  /** What the body is doing, for telemetry: the clip's label while a mocap get-up plays. */
+  get skillName(): string {
+    return this.phase === 'clip' && this.clip ? `${this.clip.label}` : `getup_${this.phase}`;
   }
 
   /**
@@ -273,6 +282,18 @@ export class GetUp {
       else q.set(qNow);
       this.still = quiet(s) ? this.still + dt : 0;
       if ((this.t > this.tun.settleMin && this.still > STILL_S) || this.t > SETTLE_MAX_S) this.begin(s, qNow);
+      return false;
+    }
+    if (this.phase === 'clip' && this.clip) {
+      const res = this.clip.update(s, q, dt);
+      if (res === 'up') {
+        this.phase = 'up';
+        return true;
+      }
+      if (res === 'fail') {
+        this.clip.fail();
+        this.enter('settle'); // lie still, then the next variant (or the scripted sequence)
+      }
       return false;
     }
     if (this.total > MAX_ATTEMPT_S || (this.seq !== this.roll && this.seq !== LEGS_OUT && torsoFwdZ(s) > FLIPPED_FWD_Z)) {
@@ -348,6 +369,10 @@ export class GetUp {
   /** Lying still: straighten out if folded, then push up from the front or roll onto it first. */
   private begin(s: Sense, qNow: Float64Array): void {
     this.attempts++;
+    if (this.clip?.begin(s, qNow)) {
+      this.enter('clip');
+      return;
+    }
     this.total = 0;
     this.resteps = 0;
     this.frame = null;

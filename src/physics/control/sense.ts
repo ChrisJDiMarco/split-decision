@@ -103,6 +103,8 @@ export interface Sense {
   heading: number; // pelvis yaw
   upright: number; // torso up-axis z
   feet: Record<Side, FootSense>;
+  fists: Record<Side, Vec3>; // fist body origins, world
+  waistPitch: number; // measured, rad
 }
 
 function footSense(v: Views, body: number, shin: number, geo: HumanoidGeometry, side: Side): FootSense {
@@ -155,5 +157,18 @@ export function sense(ctx: SimContext, r: RobotRuntime, geo: HumanoidGeometry, i
     heading: yawOf(pelvisRot),
     upright: torsoRot[8],
     feet: { l: footSense(v, ids.foot.l, ids.shin.l, geo, 'l'), r: footSense(v, ids.foot.r, ids.shin.r, geo, 'r') },
+    fists: { l: readVec(v.xpos, ids.fist.l), r: readVec(v.xpos, ids.fist.r) },
+    waistPitch: waistPitchOf(r, v),
   };
+}
+
+const waistIndex = new WeakMap<RobotRuntime, number>();
+
+function waistPitchOf(r: RobotRuntime, v: Views): number {
+  let i = waistIndex.get(r);
+  if (i === undefined) {
+    i = r.jointIndex.get('waist_pitch') ?? -1;
+    waistIndex.set(r, i);
+  }
+  return i < 0 ? 0 : v.qpos[r.joints[i].qadr];
 }

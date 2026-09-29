@@ -10,7 +10,7 @@
 // foot frames are corrected by the bind-pose hip→ankle direction (see footCalibration).
 import type { Vec3 } from '../../core/types';
 import { bvhPose, firstFrameIsRestPose, newBvhPose, readMat, readVec, type BvhClip } from './bvh';
-import { cross, dot, mulMM, normalize, transpose, axisAngle, type Mat3 } from './math';
+import { cross, dot, mulMM, mulMV, normalize, rotZ, transpose, axisAngle, type Mat3 } from './math';
 
 /** CMU ASF length unit: 1/0.45 inch. */
 export const CMU_UNIT_M = 0.0254 / 0.45;
@@ -353,6 +353,87 @@ export function mirrorTrack(tr: HumanTrack): HumanTrack {
   }
   return { ...tr, p, r, mirrored: !tr.mirrored };
 }
+
+/**
+ * The same track with the whole actor lifted on a ballistic arc over frames (from, to): height
+ * 4·h·u·(1 − u) for u from 0 to 1, h = g·T²/8 for the arc's duration T (the height a body thrown
+ * up for T seconds reaches), times `scale`. Feet planted in the window leave the mat, so the
+ * contacts read it as a leap. Used to turn a lunge into a leap (a superman punch).
+ */
+export function leapTrack(tr: HumanTrack, from: number, to: number, scale = 1): HumanTrack {
+  const T = (to - from) / tr.fps;
+  const h = (9.81 * T * T) / 8 * scale;
+  const p = {} as Record<PointId, Float64Array>;
+  for (const k of POINTS) {
+    const out = new Float64Array(tr.p[k]);
+    for (let i = Math.max(0, from + 1); i < Math.min(tr.n, to); i++) {
+      const u = (i - from) / (to - from);
+      out[i * 3 + 2] += 4 * h * u * (1 - u);
+    }
+    p[k] = out;
+  }
+  return { ...tr, p };
+}
+
+/**
+ * The same track with a full extra turn: from frame `from` to `to` the whole actor turns by
+ * `angle` (rad, eased in and out) about the vertical through the foot bearing the weight (the
+ * ball of the planted foot; the `support` foot's when both or neither are down), and from `to`
+ * on keeps that turn. With angle = ±2π the motion after `to` is unchanged: the actor just spins
+ * once on the support foot on the way (a side kick → a spinning side kick; a roundhouse → the
+ * spin of a tornado kick).
+ */
+export function spinTrack(tr: HumanTrack, from: number, to: number, angle: number, support: Side): HumanTrack {
+  const turn = (i: number): number => {
+    if (i <= from) return 0;
+    if (i >= to) return angle;
+    const u = (i - from) / (to - from);
+    return angle * u * u * (3 - 2 * u);
+  };
+  // Pivot: planted-ness of each ball (low and slow), smoothed, as the weight between them.
+  const down = (id: 'ballL' | 'ballR', i: number): number => {
+    const a = Math.max(0, i - 1), b = Math.min(tr.n - 1, i + 1);
+    const p = readVec(tr.p[id], a), q = readVec(tr.p[id], b), z = readVec(tr.p[id], i)[2];
+    const v = (Math.hypot(q[0] - p[0], q[1] - p[1]) * tr.fps) / Math.max(1, b - a);
+    return z < SPIN_PIVOT_HEIGHT_M && v < SPIN_PIVOT_SPEED ? 1 : 0;
+  };
+  const pivot: Vec3[] = [];
+  for (let i = 0; i < tr.n; i++) {
+    let l = 0, r = 0;
+    for (let k = Math.max(0, i - SPIN_PIVOT_SMOOTH); k <= Math.min(tr.n - 1, i + SPIN_PIVOT_SMOOTH); k++) {
+      l += down('ballL', k);
+      r += down('ballR', k);
+    }
+    // 0: left foot, 1: right foot. Both down (or neither): the support foot of the strike.
+    const sup = support === 'r' ? 1 : 0;
+    const w = (l > 0) === (r > 0) ? sup : r > 0 ? 1 : 0;
+    const bl = readVec(tr.p.ballL, i), br = readVec(tr.p.ballR, i);
+    pivot.push([bl[0] + (br[0] - bl[0]) * w, bl[1] + (br[1] - bl[1]) * w, 0]);
+  }
+  const p = {} as Record<PointId, Float64Array>;
+  for (const k of POINTS) {
+    const src = tr.p[k];
+    const out = new Float64Array(src);
+    for (let i = from + 1; i < tr.n; i++) {
+      const c = pivot[i];
+      const v = mulMV(rotZ(turn(i)), [src[i * 3] - c[0], src[i * 3 + 1] - c[1], src[i * 3 + 2]]);
+      out[i * 3] = c[0] + v[0];
+      out[i * 3 + 1] = c[1] + v[1];
+    }
+    p[k] = out;
+  }
+  const r = {} as Record<FrameId, Float64Array>;
+  for (const k of FRAMES) {
+    const out = new Float64Array(tr.r[k]);
+    for (let i = from + 1; i < tr.n; i++) out.set(mulMM(rotZ(turn(i)), readMat(tr.r[k], i)), i * 9);
+    r[k] = out;
+  }
+  return { ...tr, p, r };
+}
+
+const SPIN_PIVOT_HEIGHT_M = 0.04; // a ball this low ...
+const SPIN_PIVOT_SPEED = 0.35; // ... and this slow (m/s) bears the weight
+const SPIN_PIVOT_SMOOTH = 4; // ± frames
 
 /** Load a track from BVH text (convenience for tools and the preview). */
 export function trackFromBvh(name: string, clip: BvhClip, fps?: number): HumanTrack {

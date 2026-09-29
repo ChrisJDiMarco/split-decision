@@ -13,7 +13,7 @@ import type { SimContext } from '../sim-context';
 import { canUse, TACTIC_SKILL } from './abilities';
 import type { HumanoidController } from './controller';
 import type { Sense } from './sense';
-import { SKILLS, isStrikeSkill, type SkillDef, type SkillId } from './skills';
+import { isStrikeSkill, type SkillDef, type SkillId } from './skills';
 import type { SkillEnv } from './skills/types';
 
 const REFLEX_WINDUP = 0.55; // opponent windup that fires a pre-armed counter
@@ -29,6 +29,23 @@ const SWEET_SPOT = 0.6; // where in a skill's range the feet aim
 const THROW_ZONE = 0.85; // walking in, throw once this far into the range (not at its very edge)
 const FEINT_AT = 0.6; // a feint is pulled at this fraction of its windup
 const MAX_HOLD_S = { defense: 3, grapple: 2.5 } as const;
+
+/**
+ * TODO(control-build): safe fallbacks for the fighter-intelligence tactics until the control build
+ * performs them from mocap. Each runs the nearest move the controller already has; a combo runs
+ * its first strike. Remove this map once MotionPlayer implements the real moves.
+ */
+const CONTROL_FALLBACK: Partial<Record<Tactic, Tactic>> = {
+  tornado_kick: 'head_kick', spinning_back_kick: 'front_kick', jump_kick: 'front_kick', jumping_knee: 'front_kick',
+  superman_punch: 'cross', spinning_backfist: 'hook', switch_stance: 'hold_range',
+  pivot_left: 'circle_left', pivot_right: 'circle_right', feint_left: 'feint', feint_right: 'feint',
+};
+
+/** TODO(control-build): the tactic the current controller can run for `tactic`. */
+export function fallbackTactic(tactic: Tactic, combo?: readonly Tactic[]): Tactic {
+  if (tactic === 'combo') return fallbackTactic(combo?.find((t) => t !== 'combo') ?? 'jab');
+  return CONTROL_FALLBACK[tactic] ?? tactic;
+}
 
 const FOOTWORK = new Set<Tactic>(['hold_range', 'close_distance', 'circle_left', 'circle_right', 'retreat']);
 const DEFENSIVE = new Set<Tactic>(['guard', 'retreat', 'hold_range', 'circle_left', 'circle_right', 'sidestep_counter']);
@@ -76,7 +93,8 @@ export class TacticRunner {
     return true;
   }
 
-  private run(ctx: SimContext, s: Sense, env: SkillEnv, tactic: Tactic, zone: TargetZone, aggression: number, dist: number, now: boolean): void {
+  private run(ctx: SimContext, s: Sense, env: SkillEnv, wanted: Tactic, zone: TargetZone, aggression: number, dist: number, now: boolean): void {
+    const tactic = fallbackTactic(wanted, this.c.r.intent?.combo); // TODO(control-build)
     const runner = this.c.skills;
     // A defensive call abandons a strike that has not been committed yet.
     const running = runner.run;
@@ -93,11 +111,11 @@ export class TacticRunner {
 
   /** The skill for `id` if this robot can still run it, else the nearest usable strike. */
   private usable(id: SkillId): SkillDef | null {
-    const def = SKILLS[id];
+    const def = this.c.skillFor(id);
     if (def && canUse(this.c.r, def) && (id === 'guard' || this.c.r.design.abilities.includes(id as never))) return def;
     if (def?.kind === 'defense') return null;
     const kind = def?.kind ?? 'arm';
-    const pool = this.c.r.design.abilities.map((a) => SKILLS[a as SkillId]).filter((d): d is SkillDef => !!d && isStrikeSkill(d) && canUse(this.c.r, d));
+    const pool = this.c.r.design.abilities.map((a) => this.c.skillFor(a as SkillId)).filter((d): d is SkillDef => !!d && isStrikeSkill(d) && canUse(this.c.r, d));
     return pool.find((d) => d.kind === kind) ?? pool[0] ?? null;
   }
 
@@ -115,7 +133,7 @@ export class TacticRunner {
   private closeRange(): number {
     let best = HOLD_RANGE_M;
     for (const a of this.c.r.design.abilities) {
-      const d = SKILLS[a as SkillId];
+      const d = this.c.skillFor(a as SkillId);
       if (!d || !isStrikeSkill(d)) continue;
       const [lo, hi] = d.range(this.c.geo);
       best = Math.min(best, lo + SWEET_SPOT * (hi - lo));
@@ -130,7 +148,7 @@ export class TacticRunner {
     if (dist > lo + throwAt * (hi - lo) || dist < lo) return this.goalAt(s, lo + sweet * (hi - lo), 0);
     this.still();
     if (!now && ctx.time < this.nextStrikeAt) return;
-    if (this.c.gait.phase !== 'double' || !this.c.gait.bothPlanted()) return;
+    if (this.c.gait.phase !== 'double' || !this.c.gait.bothPlanted() || !this.c.readyToStrike()) return;
     this.c.startSkill(def, zone === 'weapon' ? def.defaultZone : zone, aggression);
   }
 

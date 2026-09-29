@@ -10,7 +10,7 @@ import { partnerName, parseLibrary } from '../../src/robots/motions/library';
 import { matFromQuat } from '../../src/robots/motions/math';
 import { bodyLowestZ, fk, newFrames, robotModel, type RobotModel } from '../../src/robots/motions/robot-model';
 import { blendSamples, newSample, placeSample, sample, speedFor } from '../../src/robots/motions/sampler';
-import { LIBRARY_FORMAT, MOVE_LABELS, type LibraryJson, type MotionLibrary, type MotionSample, type MoveLabel } from '../../src/robots/motions/types';
+import { ANGLE_LABELS, FLASHY_LABELS, LIBRARY_FORMAT, MOVE_LABELS, type LibraryJson, type MotionLibrary, type MotionSample, type MoveLabel } from '../../src/robots/motions/types';
 
 const BIPEDS = Object.values(DESIGNS).filter((d) => d.bodyType === 'biped').map((d) => d.id);
 const MODERN = ['firecracker', 'savate', 'haymaker', 'pylon'];
@@ -63,6 +63,23 @@ describe('motion libraries', () => {
         for (const [label, n] of Object.entries(MINIMUM) as Array<[MoveLabel, number]>) expect(count(label), label).toBeGreaterThanOrEqual(n);
       });
 
+      it('stores flashy and angle moves with honest flight, spin and stance data', () => {
+        for (const mv of lib(id).moves) {
+          if (!mv.flight) continue;
+          const a = Math.round(mv.flight.takeoff * mv.fps), b = Math.round(mv.flight.land * mv.fps);
+          expect(b, mv.id).toBeGreaterThan(a);
+          for (let i = a; i < b; i++) expect(mv.contacts[i], `${mv.id} frame ${i} is airborne`).toBe(0);
+          expect(mv.flight.height, mv.id).toBeGreaterThanOrEqual(0);
+        }
+        // Jumps leave the mat; spins are stored clockwise (the orthodox turn); pivots turn their way.
+        for (const mv of lib(id).listMoves({ label: ['tornado_kick', 'jump_kick', 'jumping_knee', 'superman_punch'] })) expect(mv.flight, mv.id).not.toBeNull();
+        for (const mv of lib(id).listMoves({ label: ['tornado_kick', 'spinning_back_kick', 'spinning_backfist'] })) expect(mv.spin, mv.id).toBeLessThan(-Math.PI / 2);
+        for (const mv of lib(id).listMoves({ label: 'pivot_left' })) expect(mv.spin, mv.id).toBeGreaterThan(0.3);
+        for (const mv of lib(id).listMoves({ label: 'pivot_right' })) expect(mv.spin, mv.id).toBeLessThan(-0.3);
+        for (const mv of lib(id).listMoves({ label: 'switch_stance' })) expect(mv.switchesStance, mv.id).toBe(true);
+        for (const mv of lib(id).listMoves({ label: 'jumping_knee' })) expect(mv.striker, mv.id).toMatch(/^shin_/);
+      });
+
       it('stores strikes orthodox: jabs lead with the left fist, crosses throw the right', () => {
         for (const mv of lib(id).listMoves({ label: 'jab' })) expect([mv.side, mv.striker]).toEqual(['l', 'fist_l']);
         for (const mv of lib(id).listMoves({ label: 'cross' })) expect([mv.side, mv.striker]).toEqual(['r', 'fist_r']);
@@ -110,6 +127,16 @@ describe('motion libraries', () => {
           }
         }
       });
+    });
+  }
+});
+
+describe('flashy repertoire (electric roster)', () => {
+  for (const id of MODERN) {
+    it(`${id} has every flashy, angle and kip-up source move`, () => {
+      for (const label of [...FLASHY_LABELS, ...ANGLE_LABELS, 'kipup_source' as const]) {
+        expect(lib(id).listMoves({ label }).length, label).toBeGreaterThanOrEqual(1);
+      }
     });
   }
 });

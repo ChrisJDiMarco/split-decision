@@ -14,9 +14,9 @@ import type { LibraryJson, MotionLibrary } from './types';
 export { CONTACT, CONTACT_NAMES } from './contacts';
 export { filterMoves, mirrorMap, parseLibrary } from './library';
 export { blendSamples, mirrorContacts, newSample, placeSample, sample, speedFor } from './sampler';
-export { MOVE_LABELS } from './types';
+export { ANGLE_LABELS, FLASHY_LABELS, MOVE_LABELS } from './types';
 export type {
-  LimbSide, MirrorMap, MotionLibrary, MotionSample, Move, MoveFilter, MoveLabel, MovePhase, MoveQuality, MoveSource,
+  LimbSide, MirrorMap, MotionLibrary, MotionSample, Move, MoveFilter, MoveFlight, MoveLabel, MovePhase, MoveQuality, MoveSource,
   SampleOptions, StrikeHeight,
 } from './types';
 

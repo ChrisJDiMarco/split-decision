@@ -17,19 +17,22 @@ export const MOVE_TOL: StepTolerance = { pos: 0.05, yaw: 0.18 };
 export const HOLD_TOL: StepTolerance = { pos: 0.1, yaw: 0.3 };
 // Stance-frame advance per step, fraction of leg length: long strides while the goal is far, short
 // ones for the last stretch, so the fighter arrives square and settled (a kick needs that).
-const MAX_STRIDE_PER_LEG = 0.22;
-const FINE_STRIDE_PER_LEG = 0.12;
-const FINE_APPROACH = 0.35; // × leg length: inside this distance of the goal, fine strides only
-const COARSE_APPROACH = 0.9; // × leg length: beyond this, full strides
+/** Planned-step tuning (exported so tools can sweep it; the worker never changes it). */
+export const STEP_TUNING = {
+  maxStride: 0.22, // stance-frame advance per step, × leg length, while the goal is far...
+  fineStride: 0.12, // ...and for the last stretch
+  fineApproach: 0.35, // × leg length: inside this distance of the goal, fine strides only
+  coarseApproach: 0.9, // × leg length: beyond this, full strides
+  maxSwingTravel: 0.35, // fraction of leg length a foot moves per step (forward)
+  swingBase: 0.28, // s: swing time for a short step
+  swingPerM: 0.5, // extra swing time per metre of travel (heavy legs are torque-limited)
+};
 const PLANNED_MAX_SEPARATION = 0.55; // swing sole within this × leg length of the stance sole (with the pelvis dip)
 const YAW_WEIGHT = 0.25; // m of progress per radian of turn
 const REPEAT_PENALTY = 0.02; // m: prefer alternating feet
 const MIN_GAIN = 0.02; // m: a step must close at least this much
-const MAX_SWING_TRAVEL = 0.35; // fraction of leg length a foot moves per step (forward)
-const MAX_BACK_TRAVEL = 0.45 * MAX_SWING_TRAVEL; // the heel is short: less COP authority backward
-const MAX_SIDE_TRAVEL = 0.71 * MAX_SWING_TRAVEL;
-const SWING_BASE_S = 0.28; // swing time for a short step
-const SWING_PER_M = 0.5; // extra swing time per metre of travel (heavy legs are torque-limited)
+const BACK_TRAVEL = 0.45; // × the forward travel: the heel is short, less COP authority backward
+const SIDE_TRAVEL = 0.71;
 const MAX_TURN_PER_STEP = 0.25; // rad
 const CAPTURE_MARGIN = 0.02; // m outside the support polygon before a capture step
 const CAPTURE_OVERSHOOT = 0.06; // m past the predicted capture point
@@ -37,6 +40,8 @@ const MAX_CAPTURE_STEP = 0.75; // fraction of leg length from the stance foot
 const ADJUST_MARGIN = 0.02; // m inside the future support before a swing is re-aimed
 const CAPTURE_PREFER_M = 0.03; // the loaded foot only steps if it captures this much better
 const SKILL_CAPTURE_MARGIN = 0.05; // m outside the stance sole before a kick is abandoned for a step
+const SKILL_COMMITTED_MARGIN = 0.3; // ...while the kick is still on its way to the target: its own momentum carries
+// the capture point out, and the foot comes down forward right after it lands (a reclaim now kills the kick)
 const HURRY_MARGIN = 0.03; // m outside the stance sole before a slow swing is hurried down...
 const HURRY_S = 0.2; // ... to land within this
 
@@ -46,8 +51,8 @@ export const CAPTURE_TIMING: StepTiming = { shift: 0.001, shiftFraction: 0, swin
 export function limitFrame(cur: StanceFrame, want: StanceFrame, legLength: number): StanceFrame {
   const dx = want.x - cur.x, dy = want.y - cur.y;
   const d = Math.hypot(dx, dy);
-  const far = clamp((d / legLength - FINE_APPROACH) / (COARSE_APPROACH - FINE_APPROACH), 0, 1);
-  const maxD = lerp(FINE_STRIDE_PER_LEG, MAX_STRIDE_PER_LEG, far) * legLength;
+  const far = clamp((d / legLength - STEP_TUNING.fineApproach) / (STEP_TUNING.coarseApproach - STEP_TUNING.fineApproach), 0, 1);
+  const maxD = lerp(STEP_TUNING.fineStride, STEP_TUNING.maxStride, far) * legLength;
   const k = d > maxD ? maxD / d : 1;
   const dyaw = clamp(wrapAngle(want.heading - cur.heading), -MAX_TURN_PER_STEP, MAX_TURN_PER_STEP);
   return { x: cur.x + dx * k, y: cur.y + dy * k, heading: cur.heading + dyaw };
@@ -80,10 +85,10 @@ export function planStep(gait: Gait, geo: HumanoidGeometry, want: StanceFrame, t
   }
   if (!best) return null;
   const travel = Math.hypot(best.target.x - gait.feet[best.side].place.x, best.target.y - gait.feet[best.side].place.y);
-  const swing = Math.max(timing.swing, SWING_BASE_S + SWING_PER_M * travel);
+  const swing = Math.max(timing.swing, STEP_TUNING.swingBase + STEP_TUNING.swingPerM * travel);
   // Travelling, the body walks (lifts off on a capturable step); settling into place it shifts
   // its weight over the stance foot first.
-  const dynamic = Math.hypot(want.x - cur.x, want.y - cur.y) > FINE_APPROACH * geo.legLength;
+  const dynamic = Math.hypot(want.x - cur.x, want.y - cur.y) > STEP_TUNING.fineApproach * geo.legLength;
   return gait.step(best.side, best.target, { ...timing, swing, dynamic }) ? best.side : null;
 }
 
@@ -92,9 +97,10 @@ export function planStep(gait: Gait, geo: HumanoidGeometry, want: StanceFrame, t
 function travelLimit(from: FootPlace, to: FootPlace, heading: number, legLength: number): number {
   const dx = to.x - from.x, dy = to.y - from.y;
   const d = Math.hypot(dx, dy);
-  if (d < 1e-6) return MAX_SWING_TRAVEL * legLength;
+  if (d < 1e-6) return STEP_TUNING.maxSwingTravel * legLength;
   const along = (dx * Math.cos(heading) + dy * Math.sin(heading)) / d; // +1 forward, −1 backward
-  const frac = along >= 0 ? lerp(MAX_SIDE_TRAVEL, MAX_SWING_TRAVEL, along) : lerp(MAX_SIDE_TRAVEL, MAX_BACK_TRAVEL, -along);
+  const fwd = STEP_TUNING.maxSwingTravel, side = SIDE_TRAVEL * fwd, back = BACK_TRAVEL * fwd;
+  const frac = along >= 0 ? lerp(side, fwd, along) : lerp(side, back, -along);
   return frac * legLength;
 }
 
@@ -149,13 +155,13 @@ function capturePlan(gait: Gait, geo: HumanoidGeometry, s: Sense, side: Side): {
  * target): the kicking leg comes down where the capture point is heading instead of finishing
  * the kick. Returns true when the leg was reclaimed; the caller ends the skill.
  */
-export function skillCaptureStep(gait: Gait, geo: HumanoidGeometry, s: Sense): boolean {
+export function skillCaptureStep(gait: Gait, geo: HumanoidGeometry, s: Sense, committed = false): boolean {
   const side = gait.skillLegActive();
   if (!side || gait.feet[side].phase !== 'skill') return false;
   const stance = other(side);
   const sole = footCorners(geo, stance, gait.feet[stance].place, 0);
   const { d, closest } = polygonDistance(sole, [s.capture[0], s.capture[1]]);
-  if (d < SKILL_CAPTURE_MARGIN) return false;
+  if (d < (committed ? SKILL_COMMITTED_MARGIN : SKILL_CAPTURE_MARGIN)) return false;
   const target = captureTarget(geo, s, closest, CAPTURE_TIMING.swing);
   gait.returnSkillLeg({ x: target[0], y: target[1], yaw: gait.feet[stance].place.yaw }, CAPTURE_TIMING, s);
   return true;
@@ -176,7 +182,7 @@ export function captureTarget(geo: HumanoidGeometry, s: Sense, pivot: P2, swing:
  * landing creates (stance sole + landing sole), slide the landing toward it until it is. A
  * normal step (capture point over the stance sole) is left alone.
  */
-export function adjustSwing(gait: Gait, geo: HumanoidGeometry, s: Sense): void {
+export function adjustSwing(gait: Gait, geo: HumanoidGeometry, s: Sense, hurry = true): void {
   if (gait.phase !== 'single' || !gait.swingSide) return;
   const side = gait.swingSide;
   const f = gait.feet[side];
@@ -187,7 +193,8 @@ export function adjustSwing(gait: Gait, geo: HumanoidGeometry, s: Sense): void {
   const { d: out, closest: pivot } = polygonDistance(sole, [s.capture[0], s.capture[1]]);
   if (out <= 0) return;
   // The body is already tipping off the stance sole: this foot must land now, not on schedule.
-  if (out > HURRY_MARGIN) gait.hurrySwing(HURRY_S);
+  // (Walking-style footwork falls past the stance sole on purpose: it only re-aims.)
+  if (hurry && out > HURRY_MARGIN) gait.hurrySwing(HURRY_S);
   const remaining = Math.max(0.02, f.dur - f.t);
   const pred = predictCapture(s, pivot, remaining);
   const hull = convexHull([...sole, ...footCorners(geo, side, f.target, ADJUST_MARGIN)]);

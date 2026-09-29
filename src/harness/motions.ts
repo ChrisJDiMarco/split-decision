@@ -11,7 +11,7 @@ import { createStudio } from '../render/robot-kit/showroom/studio';
 import { parseBvh } from '../robots/motions/bvh';
 import { CLIPS, bvhPath } from '../robots/motions/clips';
 import { CONTACT } from '../robots/motions/contacts';
-import { humanTrack, mirrorTrack, pt, type HumanTrack, type PointId } from '../robots/motions/human';
+import { humanTrack, leapTrack, mirrorTrack, pt, spinTrack, type HumanTrack, type PointId } from '../robots/motions/human';
 import { loadLibrary, sample, type MotionLibrary, type Move, type MotionSample } from '../robots/motions';
 import { matFromQuat, mulMtV, mulMV, quatFromMat, rotZ, sub, type Mat3 } from '../robots/motions/math';
 import { retarget, type Retargeted } from '../robots/motions/retarget';
@@ -252,7 +252,11 @@ async function movePlayable(lib: MotionLibrary, move: Move): Promise<Playable> {
   let ghostTrack: HumanTrack | null = null;
   try {
     const tr = await loadTrack(move.source.clip);
-    ghostTrack = move.source.mirrored ? mirrorTrack(tr) : tr;
+    // Derived moves (spun, leapt): the ghost is the edited actor the move was retargeted from.
+    const S0 = move.source;
+    const turned = S0.turn ? spinTrack(tr, S0.turn.from, S0.turn.to, S0.turn.angle, S0.turn.support) : tr;
+    const lifted = S0.leap ? leapTrack(turned, S0.leap.from, S0.leap.to) : turned;
+    ghostTrack = S0.mirrored ? mirrorTrack(lifted) : lifted;
   } catch {
     ghostTrack = null; // raw BVH not present (fresh clone): no ghost
   }
@@ -281,7 +285,10 @@ async function movePlayable(lib: MotionLibrary, move: Move): Promise<Playable> {
       return { q, rootPos: s.rootPos, rootRot: matFromQuat(s.rootQuat), contacts: s.contacts, ghost, targets: [] };
     },
     bands: phaseBands(move),
-    events: move.impact !== null ? [{ t: move.impact, label: 'impact' }] : [],
+    events: [
+      ...(move.impact !== null ? [{ t: move.impact, label: 'impact' }] : []),
+      ...(move.flight ? [{ t: move.flight.takeoff, label: 'take-off' }, { t: move.flight.land, label: 'land' }] : []),
+    ],
     contacts: (t) => sample(move, t, { mirror: state.mirror }).contacts,
     facing: () => 0,
     keyTimes: move.loop || move.impact === null
@@ -295,6 +302,11 @@ async function movePlayable(lib: MotionLibrary, move: Move): Promise<Playable> {
       `duration ${dur.toFixed(2)} s  ${move.frames} frames${move.loop ? '  loop' : ''}`,
       move.impact !== null ? `impact at ${move.impact.toFixed(2)} s  peak ${move.peakSpeed.toFixed(1)} m/s` : '',
       `max speed-up within motor limits ×${move.maxSpeed.toFixed(2)}`,
+      move.striker ? `striker ${move.striker}${move.target ? `  lands at [${move.target.map((v) => v.toFixed(2)).join(', ')}] m` : ''}` : '',
+      move.flight ? `airborne ${move.flight.takeoff.toFixed(2)}-${move.flight.land.toFixed(2)} s, pelvis +${(move.flight.height * 100).toFixed(0)} cm` : '',
+      Math.abs(move.spin) > 0.05 ? `spin ${((move.spin * 180) / Math.PI).toFixed(0)}° (${move.spin < 0 ? 'clockwise' : 'counter-clockwise'} from above)` : '',
+      move.source.turn || move.source.leap ? `derived: ${[move.source.turn ? 'full turn added' : '', move.source.leap ? 'leap added' : ''].filter(Boolean).join(', ')}` : '',
+      move.switchesStance ? 'ends in the other stance' : '',
       `IK error fist ${(move.quality.fistErr * 100).toFixed(1)} cm  foot ${(move.quality.footErr * 100).toFixed(1)} cm`,
       `joints on a limit ${(move.quality.limitRate * 100).toFixed(1)}% of joint-frames`,
       model.design.name,
@@ -698,14 +710,52 @@ async function seek(t: number): Promise<void> {
  */
 async function shot(name: string, width = 1400, url = RECEIVER): Promise<string> {
   await step(1, 0);
-  const src = document.getElementById('c') as HTMLCanvasElement;
+  const src = await grab();
   const out = document.createElement('canvas');
   out.width = width;
   out.height = Math.round((src.height * width) / src.width);
-  const g = out.getContext('2d')!;
-  studio.render();
-  g.drawImage(src, 0, 0, out.width, out.height);
+  out.getContext('2d')!.drawImage(src, 0, 0, out.width, out.height);
   return post(out, name, url);
+}
+
+/**
+ * Render the current view (with the studio's post-processing) into an offscreen target and read
+ * it back. Unlike copying the page canvas this never returns a stale frame, so screenshots work
+ * in a hidden or background tab, where the canvas is not presented.
+ */
+async function grab(): Promise<HTMLCanvasElement> {
+  const r = studio.renderer;
+  const size = r.getDrawingBufferSize(new THREE.Vector2());
+  const w = Math.max(1, Math.floor(size.x)), h = Math.max(1, Math.floor(size.y));
+  const rt = new THREE.RenderTarget(w, h, { type: THREE.UnsignedByteType });
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+  // Straight scene render (no bloom) into a target the renderer treats as its output, so tone
+  // mapping and the sRGB conversion still apply.
+  studio.controls.update();
+  r.setOutputRenderTarget(rt);
+  r.setRenderTarget(rt);
+  try {
+    r.render(studio.scene, studio.camera);
+  } finally {
+    r.setRenderTarget(null);
+    r.setOutputRenderTarget(null);
+  }
+  const raw = await r.readRenderTargetPixelsAsync(rt, 0, 0, w, h);
+  const px = raw instanceof Uint8Array ? raw : new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+  rt.dispose();
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const img = new ImageData(w, h);
+  // WebGPU reads rows top-down; WebGL bottom-up. Rows may be padded to 256 bytes (WebGPU).
+  const stride = studio.isWebGPU ? Math.ceil((w * 4) / 256) * 256 : w * 4;
+  for (let y = 0; y < h; y++) {
+    const srcRow = studio.isWebGPU ? y : h - 1 - y;
+    img.data.set(px.subarray(srcRow * stride, srcRow * stride + w * 4), y * w * 4);
+  }
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  c.getContext('2d')!.putImageData(img, 0, 0);
+  return c;
 }
 
 const RECEIVER = 'http://127.0.0.1:5399/save';
@@ -746,12 +796,9 @@ async function sheet(name: string, opts: { times?: number[]; cam?: 'front' | 'si
     state.t = times[k];
     tick(0);
     view(opts.cam ?? 'three');
-    // Same capture sequence as shot(): render, yield once, render again and copy in that task (a
-    // WebGPU canvas is only readable in the task that drew it).
     await step(1, 0);
-    studio.render();
     const x = (k % cols) * tileW, y = Math.floor(k / cols) * tileH;
-    g.drawImage(src, x, y, tileW, tileH);
+    g.drawImage(await grab(), x, y, tileW, tileH);
     g.fillStyle = '#e9ecef';
     g.font = '600 15px JetBrains Mono, monospace';
     const band = playable.bands.find((b) => times[k] >= b.from - 1e-6 && times[k] <= b.to + 1e-6);

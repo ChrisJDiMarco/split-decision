@@ -31,6 +31,8 @@ export interface SkillStats {
 export class SkillRunner {
   run: SkillRun | null = null;
   readonly stats: SkillStats = { thrown: 0, landed: 0, lastLandedSpeed: 0 };
+  /** How the last run ended (diagnostics): 'done', 'cancelled' or 'forced'. */
+  lastEnd = '';
   private strikerGeoms = new Set<number>();
   private oppGeoms = new Set<number>();
   private strikerBody = -1;
@@ -75,6 +77,7 @@ export class SkillRunner {
   /** Abandon the current skill (allowed in the windup, or when forced by a fall). */
   cancel(env: SkillEnv | null, force = false): boolean {
     if (!this.run || (this.committed() && !force)) return false;
+    this.lastEnd = force ? 'forced' : 'cancelled';
     if (env) this.run.def.end?.(env, this.run);
     this.run = null;
     return true;
@@ -90,7 +93,7 @@ export class SkillRunner {
   windup(): number {
     const r = this.run;
     if (!r) return 0;
-    const u = clamp(r.t / Math.max(1e-3, r.durations[r.phase]), 0, 1);
+    const u = r.u ?? clamp(r.t / Math.max(1e-3, r.durations[r.phase]), 0, 1);
     if (r.phase === 'windup') return r.def.telegraph * u;
     if (r.phase === 'strike') return r.def.telegraph;
     return r.def.telegraph * (1 - u);
@@ -100,6 +103,7 @@ export class SkillRunner {
   progress(): number {
     const r = this.run;
     if (!r) return 0;
+    if (r.progress !== undefined) return clamp(r.progress, 0, 1);
     const d = r.durations;
     const total = d.windup + d.strike + d.recover;
     const before = r.phase === 'windup' ? 0 : r.phase === 'strike' ? d.windup : d.windup + d.strike;
@@ -109,6 +113,7 @@ export class SkillRunner {
   update(ctx: SimContext, env: SkillEnv, dt: number): void {
     const r = this.run;
     if (!r) return;
+    if (r.def.clip) return this.updateClip(ctx, env, r, dt);
     r.t += dt;
     if (r.phase === 'windup') {
       r.aim = this.leadAim(env, r);
@@ -141,6 +146,39 @@ export class SkillRunner {
     r.def.pose(env, r, u);
   }
 
+  /**
+   * A mocap skill: the clip's own timeline moves it through windup, strike and recovery. The aim
+   * tracks the target through the windup and locks (with a velocity lead) as the strike starts.
+   */
+  private updateClip(ctx: SimContext, env: SkillEnv, r: SkillRun, dt: number): void {
+    const clip = r.def.clip!;
+    if (r.scratch.begun === undefined) {
+      r.scratch.begun = true;
+      r.aim = this.leadAim(env, r);
+      if (!clip.begin(env, r)) {
+        this.run = null;
+        return;
+      }
+      if (r.strikers) this.bindParts(r.strikers);
+    }
+    r.t += dt;
+    if (r.phase === 'windup') r.aim = this.leadAim(env, r);
+    const st = clip.step(env, r, dt);
+    r.u = st.u;
+    r.progress = st.progress;
+    if (st.phase !== r.phase) this.enter(r, st.phase);
+    if (r.phase === 'strike' || (r.phase === 'recover' && r.t < FOLLOW_THROUGH_S)) {
+      this.trackStriker(ctx, dt);
+      if (!r.landed) this.detectLanding(ctx, r);
+      if (r.landed && r.scratch.landedAt === undefined) r.scratch.landedAt = r.t;
+    }
+    if (st.done) {
+      r.def.end?.(env, r);
+      this.run = null;
+      this.lastEnd = 'done';
+    }
+  }
+
   private enter(r: SkillRun, phase: SkillPhase): void {
     r.phase = phase;
     r.t = 0;
@@ -154,10 +192,14 @@ export class SkillRunner {
   }
 
   private bindStrikers(def: SkillDef): void {
+    this.bindParts(def.strikers);
+  }
+
+  private bindParts(strikers: readonly string[]): void {
     this.strikerGeoms.clear();
     this.oppGeoms.clear();
     this.strikerBody = -1;
-    for (const id of def.strikers) {
+    for (const id of strikers) {
       const part = this.me.parts.get(id);
       if (!part) continue;
       for (const g of part.geoms) this.strikerGeoms.add(g);
