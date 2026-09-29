@@ -43,7 +43,7 @@ describe('state words', () => {
       blue: { skill: 'hook', joints: sc.blue.parts.flatMap((p) => (p.joints ?? []).map((j) => ({ name: j.name, health: j.name === 'knee_l' ? 0.3 : 1, state: j.name === 'knee_l' ? 'degraded' as const : 'ok' as const, tempC: 30, torqueFrac: 0 }))) },
     });
     const state = serializeState(fc, readSituation(fc, f), [], CLOCK, 'jab', { yours: 'your tornado kicks: 1 of 3 landed, fell once', his: 'his low kicks keep landing' });
-    expect(state.opponent.openings).toBe("he's turned away from you; his left knee is failing; he just missed a hook and is recovering; his hands are down");
+    expect(state.opponent.openings).toBe('his back is to you; his left knee is failing; he just missed a hook and is recovering; his hands are down');
     expect(state.you.flashy_risk).toContain('tornado kick: high fall risk');
     expect(state.you.flashy_risk).toContain('spinning backfist: low fall risk');
     expect(state.you.flashy_risk).toContain('kip-up: moderate fall risk');
@@ -145,7 +145,10 @@ describe('question sets per design', () => {
     expect(qs.questions.getup_style.type).toBe('noul');
     const combo = qs.questions.combo;
     if (combo.type !== 'choice') throw new Error('combo must be a choice');
-    expect(combo.criteria['jab-cross-low_kick']).toMatch(/jab, cross, low kick \(a signature combination for a kickboxer\)/);
+    // Each combination is just its strikes; the signature note is said once, in the instructions.
+    expect(combo.criteria['jab-cross-low_kick']).toBe('jab, cross, low kick');
+    expect(combo.instructions).toMatch(/The first \d are signature combinations for a kickboxer\.$/);
+    for (const text of Object.values(combo.criteria)) expect(text).not.toMatch(/signature/);
   });
 });
 
@@ -216,12 +219,20 @@ describe('fight memory', () => {
 });
 
 describe('House Mind', () => {
-  test('down: light bodies try the kip-up, heavy ones get up safely', () => {
-    for (const [id, risk, want] of [['firecracker', 0.29, 'kip_up'], ['haymaker', 0.8, 'safe']] as const) {
-      const { sc, fc } = setup(id, 'savate');
-      const s = readSituation(fc, frame(sc, 10, 1.5, { red: { ...me([], { moveRisk: { ...RISK, kip_up: risk } }), down: true } }));
-      expect(obviousDecision(fc, s)?.getupStyle).toBe(want);
-    }
+  test('down: light, wild bodies try the kip-up often, heavy, disciplined ones rarely (seeded)', () => {
+    const rate = (id: string, risk: number, temperament: number) => {
+      const { sc, fc } = setup(id, 'savate', temperament);
+      let kips = 0;
+      for (let i = 0; i < 400; i++) {
+        const s = readSituation(fc, frame(sc, 10 + i * 0.25, 1.5, { red: { ...me([], { moveRisk: { ...RISK, kip_up: risk } }), down: true } }));
+        if (obviousDecision(fc, s, 3)?.getupStyle === 'kip_up') kips++;
+      }
+      return kips / 400;
+    };
+    expect(rate('firecracker', 0.29, 1.6)).toBeGreaterThan(0.5);
+    expect(rate('haymaker', 0.75, 0.5)).toBeLessThan(0.15);
+    expect(rate('haymaker', 0.75, 0.5)).toBeGreaterThan(0); // rarely, not never
+    expect(rate('firecracker', 1, 1.8)).toBe(0); // a limp joint: never
   });
 
   test('with an opening it often goes for a move that exploits it, and throws combos in range', () => {
@@ -306,7 +317,7 @@ describe('intent mapping with a mocked Jev', () => {
     const q = b.calls[0].questions.opening_move;
     expect(q?.type).toBe('choice');
     const state = b.calls[0].state as { opponent: Record<string, string>; you: Record<string, string> };
-    expect(state.opponent.openings).toBe("he's turned away from you");
+    expect(state.opponent.openings).toBe('his back is to you');
     expect(state.you.flashy_risk).toContain('jump kick: high fall risk');
     const gambled = b.intents.filter((i) => i.tactic === 'jump_kick');
     expect(gambled.length).toBeGreaterThan(0);

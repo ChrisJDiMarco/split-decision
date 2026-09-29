@@ -21,10 +21,14 @@ export const FLASHY_MOVES = [
 ] as const;
 export type FlashyMove = (typeof FLASHY_MOVES)[number];
 
-/** An opening one fighter sees on its opponent, computed in physics every frame. */
+/**
+ * An opening one fighter sees on its opponent, computed in physics every frame. side_on: his
+ * shoulders are 60-120° off square to you; turned_away: more than 120° (his back is to you).
+ */
 export type Opening =
   | 'off_balance' | 'turned_away' | 'missed_recovering' | 'stunned' | 'rising'
-  | 'on_cage' | 'gyro_saturated' | 'weak_left_leg' | 'weak_right_leg' | 'low_guard' | 'overcommitted';
+  | 'on_cage' | 'gyro_saturated' | 'weak_left_leg' | 'weak_right_leg' | 'low_guard' | 'overcommitted'
+  | 'side_on';
 
 export type Stance = 'orthodox' | 'southpaw';
 export type GetupStyle = 'safe' | 'kip_up';
@@ -44,6 +48,17 @@ export interface Intent {
   combo?: Tactic[]; // 2-4 strikes/feints run in order when tactic is 'combo', e.g. ['jab','cross','low_kick']
   getupStyle?: GetupStyle; // how to rise when down
   flourish?: boolean; // allowed to attempt a flashy variant if the opening is still there
+  /**
+   * Pre-armed opening reflexes, like counterIfLunge: the move to throw the instant one of these
+   * openings appears (RobotTelemetry.openings) while this intent stands, without a brain round trip.
+   * Short openings (missed_recovering, overcommitted: ~0.2 s) are gone before a decision could land.
+   * Control contract: a new Intent re-arms it; poll this fighter's openings (openingsNow() in
+   * src/physics/openings, cached per tick); the first time a listed opening is present while the
+   * opponent is inside the move's range and the move is available
+   * (canUse, moveRisk < 0.97, not mid-strike past the commit point) and no counterIfLunge is firing,
+   * run the move once at max(aggression, 0.8) aimed at intent.target, then disarm until the next Intent.
+   */
+  onOpening?: Partial<Record<Opening, Tactic>>;
 }
 
 // ---------------------------------------------------------------- body → world
@@ -111,8 +126,8 @@ export interface RobotTelemetry {
   // Fighter intelligence (src/physics/openings). Optional so hand-built telemetry (fixtures, the
   // showroom puppet, the dev fake fight) stays valid; the physics worker always fills them.
   openings?: Opening[]; // what this fighter sees on its opponent right now
-  moveRisk?: Record<string, number>; // 0..1 fall/failure risk per flashy move (FlashyMove), from body state
-  stance?: Stance; // from the lead foot
+  moveRisk?: Record<string, number>; // 0..1 fall/failure risk per flashy move (FlashyMove), from body state; balance term held at the last planted moment
+  stance?: Stance; // from the lead foot, read with both feet planted and held >= 0.4 s (no flip per step)
   facingOffDeg?: number; // signed angle of the shoulders off square to the opponent (CCW positive)
 }
 

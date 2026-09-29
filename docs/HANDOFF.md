@@ -30,7 +30,7 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
 
 - Committed since resume: electric roster + kits (5e2616f), mocap library for all 7 designs (e8d860d), openings detector + creative brain (8437d7f), head-pop/flash fixes (e03d382), select-screen livery fix (6a831f0).
 - Running: `tracking-controller` workflow (mocap tracking core + flashy library → flashy moves + kip-up search → metrics + live critic) and `brain-gaps` workflow (pre-armed opening reflexes `Intent.onOpening`, kip-up appetite, stance hysteresis, side_on vs turned_away, injury-aware combos, stable MIND panel).
-- After both: the control layer must consume `Intent.onOpening` (fire the armed gamble locally when the opening appears; see brain-gaps report) and replace any remaining TODO(control-build) fallbacks.
+- brain-gaps DONE. After the tracking workflow: the control layer must consume `Intent.onOpening` exactly per docs/design/onopening-control-contract.md, and replace any remaining TODO(control-build) fallbacks. Known brain follow-ups: reflexes may fire too often (spinning backfist dominates the menu), `stunned` rarely fires, `rising` spans the whole knockdown.
 
 ## Next steps, in order
 

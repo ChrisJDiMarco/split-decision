@@ -4,6 +4,7 @@
 import type { FlashyMove, Opening, RobotTelemetry, Tactic, TargetZone } from '../core/protocol';
 import type { RobotDesign } from '../core/types';
 import { jointGroupName } from './bands';
+import { IMPOSSIBLE_RISK, moveReady } from './limbs';
 import { mixSeed, rng } from './rng';
 import { canThrow, styleOf, styleWeight, type StyleProfile } from './style';
 import { isFlashy, skillAction, tacticWords } from './tactics';
@@ -12,7 +13,8 @@ import { isFlashy, skillAction, tacticWords } from './tactics';
 
 const OPENING_WORDS: Record<Opening, string> = {
   off_balance: "he's off balance",
-  turned_away: "he's turned away from you",
+  turned_away: 'his back is to you',
+  side_on: "he's side-on to you",
   missed_recovering: 'he just missed and is recovering',
   stunned: "he's rocked from a hard shot",
   rising: "he's getting up off the canvas",
@@ -72,6 +74,7 @@ const PAYOFF: Record<string, string> = {
 /** Which moves exploit each opening, best first. */
 const EXPLOITS: Record<Opening, Tactic[]> = {
   turned_away: ['jump_kick', 'superman_punch', 'head_kick', 'cross', 'low_kick'],
+  side_on: ['hook', 'superman_punch', 'head_kick', 'low_kick', 'front_kick', 'cross'],
   off_balance: ['front_kick', 'low_kick', 'superman_punch', 'cage_pin', 'jump_kick'],
   missed_recovering: ['spinning_backfist', 'cross', 'hook', 'head_kick', 'tornado_kick'],
   stunned: ['jumping_knee', 'tornado_kick', 'head_kick', 'overhand', 'combo', 'hook'],
@@ -85,7 +88,8 @@ const EXPLOITS: Record<Opening, Tactic[]> = {
 };
 
 const OPPORTUNE_WHY: Record<Opening, string> = {
-  turned_away: 'his back is to you',
+  turned_away: 'he cannot see it coming',
+  side_on: 'his guard is turned off you',
   off_balance: 'one shove and he goes over',
   missed_recovering: 'he is out of position after the miss',
   stunned: 'he cannot defend right now',
@@ -105,8 +109,7 @@ const TARGET_FOR: Partial<Record<Opening, TargetZone>> = {
 const FOOTWORK_OK = new Set<Tactic>(['sidestep_counter', 'cage_pin', 'combo']);
 const MAX_MOVES = 8;
 export const NONE = 'none';
-/** A move whose risk is at least this is not offered: it cannot be attempted at all. */
-export const IMPOSSIBLE_RISK = 0.97;
+export { IMPOSSIBLE_RISK };
 /** With no opening, how often (times the gamble appetite) a creative gamble is still offered. */
 export const CREATIVE_RATE = 0.12;
 const CREATIVE_STREAM = 11;
@@ -143,20 +146,19 @@ function describeItem(item: Omit<MenuItem, 'description'>, info: string): string
 function usable(design: RobotDesign, me: RobotTelemetry, t: Tactic): boolean {
   if (!FOOTWORK_OK.has(t) && !canThrow(design, t)) return false;
   if (t === 'cage_pin' && !canThrow(design, 'clinch')) return false;
-  const risk = riskOf(me, t);
-  return risk === null || risk < IMPOSSIBLE_RISK;
+  return moveReady(me, t);
 }
 
 /**
  * The opening_move menu: moves that exploit the current openings (in the order the openings
  * matter), then, when there is no opening, the style's own flashy gambles. `describe` gives the
- * base description of a tactic.
+ * base description of a tactic; `hasCombos` false (every combination needs a dead limb) drops 'combo'.
  */
-export function openingMenu(design: RobotDesign, me: RobotTelemetry, openings: readonly Opening[], describe: (t: Tactic) => string, creative: boolean): OpeningMenu {
+export function openingMenu(design: RobotDesign, me: RobotTelemetry, openings: readonly Opening[], describe: (t: Tactic) => string, creative: boolean, hasCombos = true): OpeningMenu {
   const style = styleOf(design);
   const byMove = new Map<Tactic, MenuItem>();
   const add = (move: Tactic, opening: Opening | null) => {
-    if (byMove.has(move) || byMove.size >= MAX_MOVES || !usable(design, me, move)) return;
+    if (byMove.has(move) || byMove.size >= MAX_MOVES || (move === 'combo' && !hasCombos) || !usable(design, me, move)) return;
     const risk = riskOf(me, move);
     const base = { move, risk, target: opening ? TARGET_FOR[opening] ?? null : null, opening, weight: styleWeight(style, move) };
     byMove.set(move, { ...base, description: describeItem(base, describe(move)) });
@@ -166,6 +168,47 @@ export function openingMenu(design: RobotDesign, me: RobotTelemetry, openings: r
   for (let i = 0; lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) add(l[i][0], l[i][1]);
   if (creative) for (const t of flashyByStyle(style)) add(t, null);
   return { items: [...byMove.values()], creative: creative && openings.length === 0 };
+}
+
+// ---------------------------------------------------------------- opening reflexes
+
+/** The short openings a pre-armed reflex answers: gone (~0.2 s) before a decision round trip lands. */
+export const REFLEX_OPENINGS: readonly Opening[] = ['missed_recovering', 'overcommitted'];
+export const NOTHING = 'nothing';
+const REFLEX_MAX = 6;
+const REFLEX_EXCLUDE = new Set<Tactic>(['combo', 'cage_pin']);
+
+/**
+ * The on_opening menu: the moves worth firing the instant he whiffs or overcommits (their exploits,
+ * round-robin) and the style's flashy moves, at most REFLEX_MAX, each one the body can throw now.
+ * Descriptions stay short (flashy: risk band and payoff; others are described in the tactic question).
+ */
+export function reflexMenu(design: RobotDesign, me: RobotTelemetry): MenuItem[] {
+  const style = styleOf(design);
+  const out = new Map<Tactic, MenuItem>();
+  const add = (move: Tactic) => {
+    if (out.has(move) || out.size >= REFLEX_MAX || REFLEX_EXCLUDE.has(move) || !usable(design, me, move)) return;
+    const risk = riskOf(me, move);
+    const payoff = PAYOFF[move];
+    const description = risk === null ? '' : `${riskBand(risk)}${payoff ? `; payoff: ${payoff}` : ''}`;
+    out.set(move, { move, risk, target: null, opening: null, weight: styleWeight(style, move), description });
+  };
+  // Half the slots: the textbook answers to a whiff or an overcommit (round-robin); the rest: the
+  // style's own flashy moves, so a kickboxer can arm a tornado kick and a swarmer a jumping knee.
+  const [a, b] = REFLEX_OPENINGS.map((o) => EXPLOITS[o]);
+  for (let i = 0; i < Math.max(a.length, b.length) && out.size < REFLEX_MAX / 2; i++) {
+    if (i < a.length) add(a[i]);
+    if (i < b.length && out.size < REFLEX_MAX / 2) add(b[i]);
+  }
+  for (const t of flashyByStyle(style)) add(t);
+  for (const t of [...a, ...b]) add(t);
+  return [...out.values()];
+}
+
+/** The openings a reflex move answers: a sidestep only meets something coming at you. */
+export function reflexArming(move: Tactic): Partial<Record<Opening, Tactic>> {
+  const openings = move === 'sidestep_counter' ? (['overcommitted'] as const) : REFLEX_OPENINGS;
+  return Object.fromEntries(openings.map((o) => [o, move]));
 }
 
 /** The style's flashy moves, most characteristic first. */

@@ -37,6 +37,8 @@ export interface BodySnapshot {
   balance: number;
   /** Mid-step (one foot swinging), when the balance margin dips by design. */
   stepping: boolean;
+  /** Standing with both feet planted and no kick running: when stance and move risk are read. */
+  planted: boolean;
   upright: number; // torso up-axis z
   gyro: { health: number; saturation: number } | null;
   battery: number;
@@ -73,6 +75,7 @@ export function snapshot(ctx: SimContext, r: RobotRuntime): BodySnapshot {
   const head = bodyOf(r, 'head');
   const footL = bodyOf(r, 'foot_l'), footR = bodyOf(r, 'foot_r');
   const getUpPhase = c?.getUp.phase ?? 'up';
+  const run = c?.skills.run;
   return {
     corner: r.corner,
     time: ctx.time,
@@ -81,6 +84,7 @@ export function snapshot(ctx: SimContext, r: RobotRuntime): BodySnapshot {
     torsoYaw: yawOf(T),
     balance: c ? c.balanceMargin() : r.down ? 0 : 1,
     stepping: c?.gait.phase === 'single',
+    planted: !r.down && (c ? c.gait.bothPlanted() && run?.def.kind !== 'leg' : true),
     upright: T[8],
     gyro: r.gyro ? { health: r.gyro.health, saturation: r.gyro.saturation } : null,
     battery: r.battery,

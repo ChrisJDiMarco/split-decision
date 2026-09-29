@@ -20,6 +20,7 @@ export interface MindView {
   gamble?: { move: string; opening: string | null; p: number | null; risk: number | null } | null;
   combo?: readonly string[] | null; // the combination being thrown
   getupStyle?: string; // 'safe' | 'kip_up', while down
+  onOpening?: Readonly<Record<string, string | undefined>> | null; // pre-armed reflex: opening → move
 }
 
 /** "OPENING: TURNED AWAY → SPINNING BACK KICK 41%" (or "GAMBLE → ..." with no opening), or null. */
@@ -40,6 +41,24 @@ export function comboLine(mind: MindView): string | null {
 export function seesLine(mind: MindView): string | null {
   if (mind.gamble || !mind.openings?.length) return null;
   return `SEES: ${mind.openings.slice(0, 3).map(tacticLabel).join(' · ')}`;
+}
+
+const REFLEX_LABEL: Record<string, string> = { missed_recovering: 'WHIFF', overcommitted: 'OVERCOMMIT' };
+
+/**
+ * The armed reflex: "ARMED: WHIFF → SPINNING BACKFIST" (one move for both a whiff and an
+ * overcommit reads as a whiff), "ARMED: OVERCOMMIT → SIDESTEP COUNTER", or null.
+ */
+export function armedLine(mind: MindView): string | null {
+  const armed = Object.entries(mind.onOpening ?? {}).filter((e): e is [string, string] => !!e[1]);
+  if (!armed.length) return null;
+  const moves = [...new Set(armed.map(([, m]) => m))];
+  if (moves.length === 1) {
+    const whiff = armed.some(([o]) => o === 'missed_recovering');
+    const head = whiff ? 'WHIFF' : REFLEX_LABEL[armed[0][0]] ?? tacticLabel(armed[0][0]);
+    return `ARMED: ${head} → ${tacticLabel(moves[0])}`;
+  }
+  return `ARMED: ${armed.map(([o, m]) => `${REFLEX_LABEL[o] ?? tacticLabel(o)} → ${tacticLabel(m)}`).join(' · ')}`;
 }
 
 /** Per-corner minds, red first. A null entry means "no decision yet". */

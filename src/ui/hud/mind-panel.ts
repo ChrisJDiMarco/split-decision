@@ -1,7 +1,9 @@
 // JEV MIND panel: the fighter's live tactic distribution (top 5), chosen target, the READ
-// on the opponent, aggression and latency, with a HOUSE MIND badge on fallback.
+// on the opponent, aggression and latency, with a HOUSE MIND badge on fallback. The opening,
+// armed-reflex and combo lines each keep a fixed one-line slot (empty or not), so the panel's
+// height never changes and the bottom-anchored tactic list above them never jumps.
 import { h, meter, setFill, setText, toggleClass } from '../dom';
-import { comboLine, gambleLine, seesLine, tacticLabel, topTactics, type MindView } from '../minds';
+import { armedLine, comboLine, gambleLine, seesLine, tacticLabel, topTactics, type MindView } from '../minds';
 
 const ROWS = 5;
 
@@ -14,6 +16,7 @@ export class MindPanel {
   private latency: HTMLElement;
   private reason: HTMLElement;
   private gamble: HTMLElement;
+  private armed: HTMLElement;
   private combo: HTMLElement;
   private read = meter('READ · COMMITTING', 'read');
   private aggression = meter('AGGRESSION');
@@ -36,11 +39,11 @@ export class MindPanel {
     }
     this.target = h('b', {}, '—');
     this.reason = h('div', 'mind-reason', '');
-    this.gamble = h('div', 'mind-gamble', '');
-    this.combo = h('div', 'mind-combo', '');
+    this.gamble = h('div', 'mind-line mind-gamble', '');
+    this.armed = h('div', 'mind-line mind-armed', '');
+    this.combo = h('div', 'mind-line mind-combo', '');
     const rows = h('div', 'mind-rows',
-      this.gamble,
-      this.combo,
+      h('div', 'mind-lines', this.gamble, this.armed, this.combo),
       h('div', 'mind-target', h('span', {}, 'TARGET'), this.target),
       this.read.el,
       this.aggression.el,
@@ -76,7 +79,12 @@ export class MindPanel {
     const gamble = gambleLine(mind) ?? seesLine(mind) ?? (mind.getupStyle === 'kip_up' ? 'GET-UP: KIP-UP' : null);
     setText(this.gamble, gamble ?? '');
     toggleClass(this.gamble, 'taken', !!mind.gamble || mind.getupStyle === 'kip_up');
+    const armed = armedLine(mind);
+    setText(this.armed, armed ?? '');
+    this.armed.title = armed ?? '';
     const combo = comboLine(mind);
     setText(this.combo, combo ? `COMBO: ${combo}` : '');
+    this.gamble.title = gamble ?? '';
+    this.combo.title = combo ?? '';
   }
 }

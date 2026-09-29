@@ -3,7 +3,7 @@
 import type { RobotTelemetry, Tactic, TargetZone } from '../core/protocol';
 import type { PartDef, RobotDesign } from '../core/types';
 import { hpWords } from './bands';
-import { NONE, riskBand, type MenuItem, type OpeningMenu } from './gambles';
+import { NONE, NOTHING, riskBand, type MenuItem, type OpeningMenu } from './gambles';
 import type { JevQuestion } from './jev-client';
 import type { FighterContext } from './situation';
 import { comboId, styleOf } from './style';
@@ -37,6 +37,8 @@ export interface QuestionSet {
   creative: boolean; // the menu is a creative gamble with no opening
   combos: Tactic[][]; // combo options (empty when not asked)
   getup: boolean; // getup_style asked
+  /** on_opening options (empty when not asked); the choice keys are their moves plus 'nothing'. */
+  reflex: MenuItem[];
 }
 
 /** The optional questions for one decision (all ride in the same Jev call). */
@@ -44,6 +46,7 @@ export interface ExtraQuestions {
   menu?: OpeningMenu | null; // ask opening_move when it has items
   combos?: Tactic[][] | null; // ask combo (and offer 'combo' as a tactic) when non-empty
   kipRisk?: number | null; // ask getup_style (only when down)
+  reflex?: MenuItem[] | null; // ask on_opening (the pre-armed reflex) when non-empty
 }
 
 /** Which target zone a part belongs to, from its tags. */
@@ -111,8 +114,22 @@ export function openingMoveQuestion(menu: OpeningMenu): JevQuestion {
 export function comboQuestion(fc: FighterContext, combos: readonly Tactic[][]): JevQuestion {
   const style = styleOf(fc.design);
   const signature = new Set(style.combos.map(comboId));
-  const criteria = Object.fromEntries(combos.map((c) => [comboId(c), signature.has(comboId(c)) ? `${comboWords(c)} (a signature combination for ${style.words.split(':')[0]})` : comboWords(c)]));
-  return { type: 'choice', instructions: 'If `you` throw a combination next, which one fits this moment and `plan` best?', criteria };
+  const lead = combos.findIndex((c) => !signature.has(comboId(c)));
+  const n = lead < 0 ? combos.length : lead; // signature combos come first (designCombos)
+  const note = n ? ` The first ${n === 1 ? 'one is a signature combination' : `${n} are signature combinations`} for ${style.words.split(':')[0]}.` : '';
+  const criteria = Object.fromEntries(combos.map((c) => [comboId(c), comboWords(c)]));
+  return { type: 'choice', instructions: `If \`you\` throw a combination next, which one fits this moment and \`plan\` best?${note}`, criteria };
+}
+
+/** "If he whiffs or overcommits in the next second, what do you throw?": the pre-armed reflex. */
+export function onOpeningQuestion(items: readonly MenuItem[]): JevQuestion {
+  const criteria: Record<string, string | null> = Object.fromEntries(items.map((i) => [i.move, i.description || null]));
+  criteria[NOTHING] = 'nothing: stay on the plan';
+  return {
+    type: 'choice',
+    instructions: 'If the `opponent` whiffs a strike or overcommits in the next second, what do `you` throw the instant it happens? It fires on reflex, before you can think again; weigh each fall risk against your `personality` and your `record`.',
+    criteria,
+  };
 }
 
 /** Plain odds for a kip-up from its risk ("it usually works for your body right now"). */
@@ -137,8 +154,10 @@ export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: 
   const counters = counterOptions(fc.design);
   const menu = extras.menu?.items.length ? extras.menu : null;
   const kip = extras.kipRisk !== undefined && extras.kipRisk !== null && Number.isFinite(extras.kipRisk);
+  const reflex = extras.reflex?.length ? extras.reflex : [];
   const extra: Record<string, JevQuestion> = {};
   if (menu) extra.opening_move = openingMoveQuestion(menu);
+  if (reflex.length) extra.on_opening = onOpeningQuestion(reflex);
   if (combos.length) extra.combo = comboQuestion(fc, combos);
   if (kip) extra.getup_style = getupQuestion(extras.kipRisk as number);
   return {
@@ -149,6 +168,7 @@ export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: 
     creative: menu?.creative ?? false,
     combos,
     getup: kip,
+    reflex,
     questions: {
       ...extra,
       tactic: { type: 'choice', instructions: 'Which tactic should `you` run for the next second, following `plan` and `personality`?', criteria: describe(tactics) },

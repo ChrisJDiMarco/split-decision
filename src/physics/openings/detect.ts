@@ -11,8 +11,9 @@ export const OFF_BALANCE_MARGIN = 0.3; // balance margin below this is off balan
 export const WOBBLE_MARGIN = 0.55; // ... below this it is, if the COM is also moving fast or the gyro is full
 export const FAST_COM_MPS = 1.0; // horizontal COM speed that counts as "moving fast"
 export const OFF_BALANCE_UPRIGHT = 0.8; // torso tilted past ~37°
-// turned_away
-export const TURNED_AWAY_DEG = 60;
+// side_on / turned_away: his shoulders this far off square to us
+export const SIDE_ON_DEG = 60;
+export const TURNED_AWAY_DEG = 120;
 /** Below this torso up-axis z (tilted past 60°, or face-down in a get-up crouch) the torso's yaw means nothing. */
 export const FACING_MIN_UPRIGHT = 0.5;
 // stunned
@@ -70,7 +71,7 @@ export function facingOffDeg(me: BodySnapshot, opp: BodySnapshot): number {
   return (wrapAngle(me.torsoYaw - bearing(me, opp)) * 180) / Math.PI;
 }
 
-/** Orthodox when the left foot leads (is further toward the opponent), southpaw otherwise. */
+/** The lead foot right now: orthodox when the left foot is further toward the opponent. */
 export function stanceOf(me: BodySnapshot, opp: BodySnapshot): Stance {
   if (!me.feet) return 'orthodox';
   const b = bearing(me, opp);
@@ -86,7 +87,8 @@ function weakLeg(opp: BodySnapshot, side: 'l' | 'r'): boolean {
   });
 }
 
-function offBalance(opp: BodySnapshot): boolean {
+/** A real stumble (not the margin dip of a normal step): see OFF_BALANCE_* above. */
+export function offBalance(opp: BodySnapshot): boolean {
   if (opp.down) return false;
   const speed = Math.hypot(opp.comVel[0], opp.comVel[1]);
   const gyroFull = !!opp.gyro && opp.gyro.saturation >= GYRO_SATURATED;
@@ -113,7 +115,11 @@ export function detectOpenings(me: BodySnapshot, opp: BodySnapshot, oppStunnedAt
   const out: Opening[] = [];
   if (opp.ko) return out; // nothing to exploit: the fight is over
   if (offBalance(opp)) out.push('off_balance');
-  if (!opp.down && opp.upright > FACING_MIN_UPRIGHT && Math.abs(facingOffDeg(opp, me)) > TURNED_AWAY_DEG) out.push('turned_away');
+  if (!opp.down && opp.upright > FACING_MIN_UPRIGHT) {
+    const off = Math.abs(facingOffDeg(opp, me));
+    if (off > TURNED_AWAY_DEG) out.push('turned_away');
+    else if (off > SIDE_ON_DEG) out.push('side_on');
+  }
   const k = opp.skill;
   if (k && (k.kind === 'arm' || k.kind === 'leg') && k.phase === 'recover' && !k.landed) out.push('missed_recovering');
   if (opp.time - oppStunnedAt <= STUN_WINDOW_S) out.push('stunned');
@@ -125,4 +131,38 @@ export function detectOpenings(me: BodySnapshot, opp: BodySnapshot, oppStunnedAt
   if (!opp.down && opp.fistZ && opp.chinZ !== null && Math.max(opp.fistZ.l, opp.fistZ.r) < opp.chinZ - LOW_GUARD_TOL_M) out.push('low_guard');
   if (overcommitted(me, opp)) out.push('overcommitted');
   return out;
+}
+
+// stance hysteresis: a walking step swaps which foot is nearer the opponent (65/35 each step), so
+// the published stance only changes once the other lead has been read, feet planted, for this long.
+export const STANCE_HOLD_S = 0.4;
+
+export interface StanceMemory {
+  stance: Stance | null;
+  pending: Stance | null;
+  pendingSince: number;
+}
+
+export function newStanceMemory(): StanceMemory {
+  return { stance: null, pending: null, pendingSince: 0 };
+}
+
+/**
+ * The stance to publish: the lead foot read only with both feet planted, and a new lead held
+ * (every planted read agreeing) for STANCE_HOLD_S before it replaces the old one. Mutates `mem`.
+ */
+export function heldStance(mem: StanceMemory, me: BodySnapshot, opp: BodySnapshot): Stance {
+  if (!me.planted) return mem.stance ?? stanceOf(me, opp);
+  const raw = stanceOf(me, opp);
+  if (mem.stance === null || raw === mem.stance) {
+    mem.stance = raw;
+    mem.pending = null;
+  } else if (mem.pending !== raw) {
+    mem.pending = raw;
+    mem.pendingSince = me.time;
+  } else if (me.time - mem.pendingSince >= STANCE_HOLD_S) {
+    mem.stance = raw;
+    mem.pending = null;
+  }
+  return mem.stance;
 }

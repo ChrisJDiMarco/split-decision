@@ -2,7 +2,9 @@
 // "obvious tick" rules that settle a decision without a call even when Jev is online.
 // Deterministic for a given (seed, corner, tick) so fallback fights replay exactly.
 import type { GetupStyle, Opening, Tactic, TargetZone } from '../core/protocol';
-import { creativeRoll, gambleAppetite, IMPOSSIBLE_RISK, openingMenu, type MenuItem } from './gambles';
+import { creativeRoll, gambleAppetite, openingMenu, reflexArming, reflexMenu, type MenuItem } from './gambles';
+import { readyCombos } from './limbs';
+import { sampleKip } from './policy';
 import { zoneHealth } from './questions';
 import { mixSeed, rng } from './rng';
 import type { FighterContext, Situation } from './situation';
@@ -12,14 +14,20 @@ import { abilityTactics, FINISHER_ORDER, isFlashy, isStrike, TACTIC_INFO } from 
 const RULE_STREAM = 7;
 const GAMBLE_STREAM = 8;
 const COMBO_RULE_STREAM = 9;
+const REFLEX_RULE_STREAM = 12;
 /** House Mind takes an opening move this often (before its risk gate). */
 const HOUSE_TAKE_OPENING = 0.6;
 /** ...if its fall risk is under this times the fighter's appetite (a creative gamble: half that). */
 const HOUSE_RISK_PER_APPETITE = 0.45;
 /** Throws a combination instead of a single strike this often, times the appetite. */
 const HOUSE_COMBO_RATE = 0.3;
-/** Tries a kip-up when its risk is under this times the appetite. */
-const HOUSE_KIP_PER_APPETITE = 0.35;
+/** The House Mind's own P(yes) for a kip-up: Jev's typical answer, then the same appetite scaling. */
+export const HOUSE_KIP_YES = 0.33;
+/** Aggression the get-up appetite is read at: a knockdown call should not swing with the last tactic. */
+const KIP_AGGRESSION = 0.5;
+/** Arms an opening reflex this often (before its risk gate). */
+const HOUSE_ARM_REFLEX = 0.7;
+const REFLEX_BANDS = new Set(['clinch', 'striking range', 'just outside reach']);
 const HEAD_STRIKES = new Set<Tactic>(['head_kick', 'hook', 'overhand', 'uppercut', 'rocket_punch', 'hammer_smash']);
 const LEG_STRIKES = new Set<Tactic>(['low_kick']);
 const DAMAGED_ZONE_HP = 0.7;
@@ -35,14 +43,31 @@ export interface RuleDecision {
   getupStyle?: GetupStyle;
   flourish?: boolean;
   gamble?: { move: Tactic; opening: Opening | null; risk: number | null };
+  onOpening?: Partial<Record<Opening, Tactic>>;
 }
 
-/** The House Mind's get-up call: a kip-up when this body's risk is low enough for its appetite. */
-export function houseGetupStyle(fc: FighterContext, s: Situation): GetupStyle {
+/** How readily this fighter gambles on a kip-up: its style and temperament at a neutral aggression. */
+export function kipAppetite(fc: FighterContext): number {
+  return gambleAppetite(styleOf(fc.design), fc.setup.temperament, KIP_AGGRESSION);
+}
+
+/**
+ * The House Mind's get-up call: the same seeded draw as a Jev answer (policy.kipChance), from
+ * HOUSE_KIP_YES scaled by appetite and the body's kip-up risk. No risk published: safe.
+ */
+export function houseGetupStyle(fc: FighterContext, s: Situation, seed = 0): GetupStyle {
   const risk = s.me.moveRisk?.kip_up;
-  if (risk === undefined || !Number.isFinite(risk) || risk >= IMPOSSIBLE_RISK) return 'safe';
-  const appetite = gambleAppetite(styleOf(fc.design), fc.setup.temperament, 0.5);
-  return risk < HOUSE_KIP_PER_APPETITE * appetite ? 'kip_up' : 'safe';
+  if (risk === undefined || !Number.isFinite(risk)) return 'safe';
+  return sampleKip(HOUSE_KIP_YES, kipAppetite(fc), risk, seed, fc.corner, s.tick);
+}
+
+/** The House Mind's pre-armed reflex: its style's favourite answer to a whiff that its appetite accepts. */
+function houseReflex(fc: FighterContext, s: Situation, seed: number, aggression: number): Partial<Record<Opening, Tactic>> | null {
+  if (s.me.down || !REFLEX_BANDS.has(s.band)) return null;
+  if (rng(mixSeed(seed, fc.corner, s.tick, REFLEX_RULE_STREAM))() >= HOUSE_ARM_REFLEX) return null;
+  const limit = HOUSE_RISK_PER_APPETITE * gambleAppetite(styleOf(fc.design), fc.setup.temperament, aggression);
+  const pick = reflexMenu(fc.design, s.me).filter((i) => (i.risk ?? 0) < limit).sort((a, b) => b.weight - a.weight)[0];
+  return pick ? reflexArming(pick.move) : null;
 }
 
 /** The first menu move (by style weight) whose risk the fighter's appetite accepts. */
@@ -53,13 +78,13 @@ function houseGamble(fc: FighterContext, s: Situation, seed: number, aggression:
   if (!openings.length && !creative) return null;
   if (rng(mixSeed(seed, fc.corner, s.tick, GAMBLE_STREAM))() >= HOUSE_TAKE_OPENING) return null;
   const limit = HOUSE_RISK_PER_APPETITE * appetite * (creative ? 0.5 : 1);
-  const menu = openingMenu(fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative);
+  const menu = openingMenu(fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative, readyCombos(s.me, designCombos(fc.design)).length > 0);
   const ok = menu.items.filter((i) => i.move !== 'sidestep_counter' || s.oppPhase !== 'neutral').filter((i) => (i.risk ?? 0) < limit);
   return ok.sort((a, b) => b.weight - a.weight)[0] ?? null;
 }
 
 function houseCombo(fc: FighterContext, s: Situation, seed: number, aggression: number): Tactic[] | null {
-  const combos = designCombos(fc.design);
+  const combos = readyCombos(s.me, designCombos(fc.design));
   if (!combos.length) return null;
   const appetite = gambleAppetite(styleOf(fc.design), fc.setup.temperament, aggression);
   const u = rng(mixSeed(seed, fc.corner, s.tick, COMBO_RULE_STREAM));
@@ -117,10 +142,10 @@ function strikeTarget(t: Tactic, fc: FighterContext, s: Situation): TargetZone {
  * Settles an obvious tick locally, or returns null when the call deserves Jev.
  * Obvious: I'm down (the body is getting up), or the opponent is far and not a threat.
  */
-export function obviousDecision(fc: FighterContext, s: Situation): RuleDecision | null {
+export function obviousDecision(fc: FighterContext, s: Situation, seed = 0): RuleDecision | null {
   const counterIfLunge: Tactic = 'sidestep_counter';
   if (s.me.down) {
-    const getupStyle = houseGetupStyle(fc, s);
+    const getupStyle = houseGetupStyle(fc, s, seed);
     return { tactic: 'guard', target: 'torso', aggression: 0.2, counterIfLunge, reason: getupStyle === 'kip_up' ? 'down: try a kip-up' : 'down: cover up while the body gets up', getupStyle };
   }
   if (s.band === 'far' && s.geometry.oppApproachSpeed < 1.5) {
@@ -129,10 +154,17 @@ export function obviousDecision(fc: FighterContext, s: Situation): RuleDecision 
   return null;
 }
 
-/** The full fallback behavior tree (first matching branch wins). */
+/** The full fallback behavior tree (first matching branch wins), with a pre-armed reflex on top. */
 export function houseMind(fc: FighterContext, s: Situation, seed: number): RuleDecision {
-  const obvious = obviousDecision(fc, s);
+  const obvious = obviousDecision(fc, s, seed);
   if (obvious) return obvious;
+  const d = houseTree(fc, s, seed);
+  if (s.oppPhase === 'down') return d;
+  const onOpening = houseReflex(fc, s, seed, d.aggression);
+  return onOpening ? { ...d, onOpening } : d;
+}
+
+function houseTree(fc: FighterContext, s: Situation, seed: number): RuleDecision {
   const u = rng(mixSeed(seed, fc.corner, s.tick, RULE_STREAM))();
   const agg = baseAggression(s);
   const close = s.band === 'clinch' || s.band === 'striking range';
@@ -146,7 +178,7 @@ export function houseMind(fc: FighterContext, s: Situation, seed: number): RuleD
   const gamble = houseGamble(fc, s, seed, agg);
   if (gamble) {
     const why = gamble.opening ? `opening (${gamble.opening.replace(/_/g, ' ')})` : 'creative gamble';
-    const combo = gamble.move === 'combo' ? houseCombo(fc, s, seed, 1) ?? designCombos(fc.design)[0] : undefined;
+    const combo = gamble.move === 'combo' ? houseCombo(fc, s, seed, 1) ?? readyCombos(s.me, designCombos(fc.design))[0] : undefined;
     return {
       ...pack(gamble.move, Math.max(agg, 0.7), `${why}: ${gamble.move.replace(/_/g, ' ')}`, gamble.target ?? undefined),
       ...(combo ? { combo } : {}),

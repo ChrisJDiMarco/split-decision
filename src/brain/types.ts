@@ -49,6 +49,8 @@ export interface BrainDecision {
   combo: Tactic[] | null; // the combination it is running (tactic 'combo')
   getupStyle?: GetupStyle; // chosen while down
   flourish: boolean;
+  /** The pre-armed opening reflex riding on this intent ({ missed_recovering: 'spinning_backfist', ... }). */
+  onOpening: Partial<Record<Opening, Tactic>> | null;
 }
 
 /** An opening move (or creative gamble) the fighter went for. */

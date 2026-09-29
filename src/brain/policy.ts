@@ -1,7 +1,7 @@
 // Turning Jev's distributions into one intent: seeded temperature sampling,
 // confidence gating and hysteresis. Pure functions, so replays are deterministic.
 import type { GetupStyle, Opening, Tactic, TargetZone } from '../core/protocol';
-import { gambleWeights, IMPOSSIBLE_RISK, NONE } from './gambles';
+import { gambleWeights, IMPOSSIBLE_RISK, NONE, NOTHING, reflexArming } from './gambles';
 import type { JevAnswer, JevResult } from './jev-client';
 import { AGGRESSION_LEVELS, WINNING_LEVELS, type QuestionSet } from './questions';
 import { comboId } from './style';
@@ -162,13 +162,39 @@ export function decide(input: PolicyInput): PolicyOutput {
 
 export const OPENING_STREAM = 3;
 export const COMBO_STREAM = 4;
-/** P(yes) a kip-up needs at appetite 1; bolder fighters need less, disciplined ones more. */
-export const KIP_THRESHOLD = 0.5;
+export const REFLEX_STREAM = 5;
+export const KIP_STREAM = 6;
+/** Crowd factor on the kip-up odds: Chris wants fighters to attempt it, not wait for certainty. */
+export const KIP_SHOWMAN = 1.5;
+/** The kip-up risk a neutral fighter is calibrated at (a mid-weight body): lighter goes more, heavier less. */
+const KIP_REF_SAFETY = 0.6;
+const KIP_P_MIN = 0.01;
+const KIP_P_MAX = 0.99;
+
+/**
+ * P(attempt a kip-up) from Jev's P(yes), scaled by the fighter's gamble appetite (style and
+ * temperament) and by its body's odds: odds(p) · appetite² · (1 − risk)/0.6 · KIP_SHOWMAN. A light,
+ * wild fighter (appetite ~1.4, risk ~0.3) turns Jev's usual 0.33 into ~0.64; a heavy, disciplined
+ * one (appetite ~0.6, risk ~0.75) into ~0.1. Impossible (a limp joint): 0.
+ */
+export function kipChance(kipYes: number, appetite: number, kipRisk: number | null): number {
+  const risk = kipRisk ?? 1 - KIP_REF_SAFETY;
+  if (risk >= IMPOSSIBLE_RISK) return 0;
+  const p = Math.max(KIP_P_MIN, Math.min(KIP_P_MAX, kipYes));
+  const odds = (p / (1 - p)) * appetite * appetite * ((1 - risk) / KIP_REF_SAFETY) * KIP_SHOWMAN;
+  return odds / (1 + odds);
+}
+
+/** The seeded kip-up draw: same (seed, corner, tick) → same call, so replays match. */
+export function sampleKip(kipYes: number, appetite: number, kipRisk: number | null, seed: number, corner: number, tick: number): GetupStyle {
+  return rng(mixSeed(seed, corner, tick, KIP_STREAM))() < kipChance(kipYes, appetite, kipRisk) ? 'kip_up' : 'safe';
+}
 
 export interface ExtraParsed {
   openingProbs: Record<string, number> | null; // Jev's distribution over the menu plus 'none'
   comboProbs: Record<string, number> | null;
   kipYes: number | null; // P(try a kip-up)
+  reflexProbs: Record<string, number> | null; // on_opening: the reflex menu plus 'nothing'
 }
 
 /** Reads the optional answers; any that are missing or malformed are simply null. */
@@ -179,13 +205,14 @@ export function parseExtras(result: JevResult, qs: QuestionSet): ExtraParsed {
     openingProbs: qs.menu.length ? choiceProbs(a.opening_move, [...qs.menu.map((i) => i.move), NONE]) : null,
     comboProbs: qs.combos.length ? choiceProbs(a.combo, qs.combos.map(comboId)) : null,
     kipYes: qs.getup && kip?.type === 'noul' && Number.isFinite(kip.noul) ? Math.max(0, Math.min(1, kip.noul)) : null,
+    reflexProbs: qs.reflex.length ? choiceProbs(a.on_opening, [...qs.reflex.map((i) => i.move), NOTHING]) : null,
   };
 }
 
 export interface GambleInput {
   extras: ExtraParsed;
   qs: QuestionSet;
-  appetite: number; // gambleAppetite(style, temperament, aggression)
+  appetite: number; // gambleAppetite(style, temperament, aggression); for a get-up, kipAppetite
   temperature: number;
   kipRisk: number | null;
   seed: number;
@@ -202,11 +229,14 @@ export interface GambleOutput {
   combo: Tactic[] | null; // the combination to run if the tactic is 'combo'
   comboP: number | null;
   getupStyle: GetupStyle | undefined;
+  kipP: number | null; // the kip-up chance the draw used
+  onOpening: Partial<Record<Opening, Tactic>> | null; // the armed reflex (null: 'nothing' or not asked)
+  reflexP: number | null; // Jev's own probability for the armed move
 }
 
 export function decideGambles(input: GambleInput): GambleOutput {
   const { extras, qs, appetite, temperature, seed, corner, tick } = input;
-  const out: GambleOutput = { move: null, moveP: null, opening: null, risk: null, target: null, combo: null, comboP: null, getupStyle: undefined };
+  const out: GambleOutput = { move: null, moveP: null, opening: null, risk: null, target: null, combo: null, comboP: null, getupStyle: undefined, kipP: null, onOpening: null, reflexP: null };
   if (extras.openingProbs) {
     const weighted = gambleWeights(extras.openingProbs, qs.menu, appetite);
     const pick = seededSample(weighted, temperature, seed, corner, tick, OPENING_STREAM);
@@ -219,10 +249,16 @@ export function decideGambles(input: GambleInput): GambleOutput {
     out.combo = qs.combos.find((c) => comboId(c) === pick) ?? null;
     out.comboP = extras.comboProbs ? probs[pick] : null;
   }
+  if (extras.reflexProbs) {
+    // Same appetite weighting as the opening move: a bold fighter arms the flashy answer.
+    const weighted = gambleWeights(extras.reflexProbs, qs.reflex, appetite);
+    const pick = seededSample(weighted, temperature, seed, corner, tick, REFLEX_STREAM);
+    const item = qs.reflex.find((i) => i.move === pick);
+    if (item) Object.assign(out, { onOpening: reflexArming(item.move), reflexP: extras.reflexProbs[pick] });
+  }
   if (qs.getup && extras.kipYes !== null) {
-    const possible = input.kipRisk === null || input.kipRisk < IMPOSSIBLE_RISK;
-    const threshold = Math.max(0.25, Math.min(0.8, KIP_THRESHOLD / appetite));
-    out.getupStyle = possible && extras.kipYes >= threshold ? 'kip_up' : 'safe';
+    out.kipP = kipChance(extras.kipYes, appetite, input.kipRisk);
+    out.getupStyle = sampleKip(extras.kipYes, appetite, input.kipRisk, seed, corner, tick);
   }
   return out;
 }

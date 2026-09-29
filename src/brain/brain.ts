@@ -5,9 +5,10 @@
 import type { GetupStyle, Intent, Tactic, WorldMeta } from '../core/protocol';
 import type { Corner, FighterSetup, RobotDesign } from '../core/types';
 import { DESIGNS } from '../robots/designs';
-import { creativeRoll, gambleAppetite, IMPOSSIBLE_RISK, openingMenu, riskBand } from './gambles';
-import { houseGetupStyle, houseMind, obviousDecision, type RuleDecision } from './house-mind';
+import { creativeRoll, gambleAppetite, IMPOSSIBLE_RISK, openingMenu, reflexMenu, riskBand } from './gambles';
+import { houseGetupStyle, houseMind, kipAppetite, obviousDecision, type RuleDecision } from './house-mind';
 import type { JevResult } from './jev-client';
+import { readyCombos } from './limbs';
 import { JevLink } from './link';
 import { FightMemory } from './memory';
 import { FightObserver } from './observer';
@@ -57,6 +58,8 @@ interface PendingRequest { tick: number; time: number; key: string; gen: number;
 /** Bands where an opening move (or a creative gamble) is worth asking about. */
 const GAMBLE_BANDS = new Set<DistanceBand>(['clinch', 'striking range', 'just outside reach', 'mid range']);
 const CREATIVE_BANDS = new Set<DistanceBand>(['striking range', 'just outside reach']);
+/** Bands where he could whiff or overcommit within the next second: worth arming a reflex. */
+const REFLEX_BANDS = new Set<DistanceBand>(['clinch', 'striking range', 'just outside reach']);
 
 let defaultLink: JevLink | null = null;
 /** The page-wide link used when a Brain is not given one. */
@@ -172,7 +175,7 @@ export class Brain {
 
   private decideNow(s: Situation) {
     const trigger = this.pendingTrigger ?? 'cadence';
-    const obvious = obviousDecision(this.fc, s);
+    const obvious = obviousDecision(this.fc, s, this.opts.seed);
     // Down: ask Jev once per knockdown whether to try a kip-up (a one-question call).
     if (s.me.down && !this.getupAsked && !this.link.offline && this.kipPossible(s)) {
       if (this.inFlight >= MAX_IN_FLIGHT || !this.link.canSend()) return;
@@ -224,14 +227,20 @@ export class Brain {
     return gambleAppetite(styleOf(this.fc.design), this.fc.setup.temperament, this.lastAggression);
   }
 
-  /** The optional questions for this decision: opening_move (openings, or a creative roll) and combo. */
+  /**
+   * The optional questions for this decision: opening_move (openings, or a creative roll), combo
+   * (only combinations the body can still throw) and on_opening (the reflex to pre-arm, in range
+   * with both on their feet: a downed opponent cannot whiff or overcommit, as in the House Mind).
+   */
   private extras(s: Situation, appetite: number) {
     const openings = s.me.openings ?? [];
+    const combos = readyCombos(s.me, this.combos);
     const creative = !openings.length && CREATIVE_BANDS.has(s.band) && creativeRoll(appetite, this.opts.seed, this.corner, s.tick);
     const menu = GAMBLE_BANDS.has(s.band) && (openings.length || creative) && !s.me.down
-      ? openingMenu(this.fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative)
+      ? openingMenu(this.fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative, combos.length > 0)
       : null;
-    return { menu, combos: this.combos };
+    const reflex = REFLEX_BANDS.has(s.band) && !s.me.down && s.oppPhase !== 'down' ? reflexMenu(this.fc.design, s.me) : null;
+    return { menu, combos, reflex };
   }
 
   private query(s: Situation, trigger: string) {
@@ -251,9 +260,9 @@ export class Brain {
   /** Down on the canvas: one small call, "try a kip-up?". Its answer holds for this knockdown. */
   private queryGetup(s: Situation, trigger: string) {
     const kipRisk = this.kipRisk(s) as number;
-    const qs: QuestionSet = { questions: { getup_style: getupQuestion(kipRisk) }, tactics: [], targets: [], counters: [], menu: [], creative: false, combos: [], getup: true };
+    const qs: QuestionSet = { questions: { getup_style: getupQuestion(kipRisk) }, tactics: [], targets: [], counters: [], menu: [], creative: false, combos: [], getup: true, reflex: [] };
     const state = serializeState(this.fc, s, this.observer.recentActions(s.time), this.matchClock(s), this.currentTactic, this.memory.words());
-    const req: PendingRequest = { tick: s.tick, time: s.time, key: coarseKey(s), gen: this.generation, trigger, qs, appetite: this.appetite(), kipRisk };
+    const req: PendingRequest = { tick: s.tick, time: s.time, key: coarseKey(s), gen: this.generation, trigger, qs, appetite: kipAppetite(this.fc), kipRisk };
     this.getupAsked = true;
     this.inFlight++;
     this.stats.requests++;
@@ -273,9 +282,10 @@ export class Brain {
     const g = decideGambles({ extras: parseExtras(res, req.qs), qs: req.qs, appetite: req.appetite, temperature: this.fc.setup.temperament, kipRisk: req.kipRisk, seed: this.opts.seed, corner: this.corner, tick: req.tick });
     this.getupStyle = g.getupStyle ?? 'safe';
     const kipYes = res.answers.getup_style?.type === 'noul' ? res.answers.getup_style.noul : null;
-    const rule = obviousDecision(this.fc, now) ?? houseMind(this.fc, now, this.opts.seed);
-    const pct = kipYes === null ? '' : ` (kip-up ${Math.round(kipYes * 100)}%)`;
-    const reason = `${this.getupStyle === 'kip_up' ? 'down: Jev says kip-up' : 'down: Jev says safe get-up'}${pct}`;
+    const rule = obviousDecision(this.fc, now, this.opts.seed) ?? houseMind(this.fc, now, this.opts.seed);
+    const pct = (p: number) => `${Math.round(p * 100)}%`;
+    const odds = kipYes === null || g.kipP === null ? '' : ` (Jev ${pct(kipYes)}, appetite ${pct(g.kipP)})`;
+    const reason = `${this.getupStyle === 'kip_up' ? 'down: going for the kip-up' : 'down: safe get-up'}${odds}`;
     this.emitRule({ ...rule, getupStyle: this.getupStyle, reason }, 'jev', now, req.trigger, res.latencyMs);
   }
 
@@ -303,12 +313,12 @@ export class Brain {
     // An opening move overrides the tactic: code saw the opening, Jev chose to go for it.
     const tactic = g.move ?? out.tactic;
     const target = g.move ? g.target ?? out.target : out.target;
-    const combo = tactic === 'combo' ? g.combo ?? this.combos[0] ?? null : null;
+    const combo = tactic === 'combo' ? g.combo ?? req.qs.combos[0] ?? null : null;
     const flourish = g.move !== null && (isFlashy(g.move) || g.opening !== null);
     const aggression = g.move ? Math.max(out.aggression, parsed.aggression) : out.aggression;
     const intent: Intent = {
       tactic, target, aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence, source: 'jev',
-      ...(combo ? { combo } : {}), ...(flourish ? { flourish } : {}),
+      ...(combo ? { combo } : {}), ...(flourish ? { flourish } : {}), ...(g.onOpening ? { onOpening: g.onOpening } : {}),
     };
     const gamble: GambleView | null = g.move ? { move: g.move, opening: g.opening, p: g.moveP, risk: g.risk } : null;
     const reason = g.move ? `${g.opening ? 'took the opening' : 'creative gamble'}${g.risk !== null ? `, ${riskBand(g.risk)}` : ''}` : out.reason;
@@ -319,7 +329,7 @@ export class Brain {
       aggression, counterIfLunge: parsed.counter, confidence: parsed.tacticConfidence,
       tacticProbs: parsed.tacticProbs, targetProbs: parsed.targetProbs, oppCommit: parsed.oppCommit,
       winning: parsed.winning, latencyMs: res.latencyMs, reason, trigger: req.trigger,
-      openings: now.me.openings ?? [], gamble, combo, flourish,
+      openings: now.me.openings ?? [], gamble, combo, flourish, onOpening: g.onOpening,
     }, now);
   }
 
@@ -340,13 +350,18 @@ export class Brain {
     // Down: this knockdown's get-up call holds for every intent until up. While Jev's answer is
     // in flight it stays undecided (the body's default, a safe get-up), never the House Mind's guess.
     const pending = this.getupAsked && this.getupStyle === null && source !== 'fallback';
-    const getupStyle = !s.me.down || pending ? undefined : this.getupStyle ?? rule.getupStyle ?? houseGetupStyle(this.fc, s);
+    const getupStyle = !s.me.down || pending ? undefined : this.getupStyle ?? rule.getupStyle ?? houseGetupStyle(this.fc, s, this.opts.seed);
     if (s.me.down && source === 'fallback' && this.getupStyle === null) this.getupStyle = getupStyle ?? 'safe';
+    // The House Mind rolls its kip-up per tick; this knockdown's latched call is what the body does.
+    const reason = s.me.down && source !== 'jev' && getupStyle && rule.getupStyle && getupStyle !== rule.getupStyle
+      ? (getupStyle === 'kip_up' ? 'down: try a kip-up' : 'down: cover up while the body gets up')
+      : rule.reason;
     const intent: Intent = {
       tactic: rule.tactic, target: rule.target, aggression: rule.aggression, counterIfLunge: rule.counterIfLunge,
       confidence: 1, source: source === 'fallback' ? 'fallback' : 'jev',
       ...(source === 'local' ? { settledLocally: true } : {}),
       ...(rule.combo ? { combo: rule.combo } : {}), ...(getupStyle ? { getupStyle } : {}), ...(rule.flourish ? { flourish: true } : {}),
+      ...(rule.onOpening ? { onOpening: rule.onOpening } : {}),
     };
     this.schedule(s);
     this.lastAppliedTick = Math.max(this.lastAppliedTick, s.tick);
@@ -354,8 +369,9 @@ export class Brain {
       tick: s.tick, time: s.time, source, mode: 'commit', tactic: rule.tactic, target: rule.target,
       aggression: rule.aggression, counterIfLunge: rule.counterIfLunge, confidence: 1,
       tacticProbs: { [rule.tactic]: 1 }, targetProbs: { [rule.target]: 1 }, oppCommit: null,
-      winning: null, latencyMs, reason: rule.reason, trigger,
+      winning: null, latencyMs, reason, trigger,
       openings: s.me.openings ?? [], combo: rule.combo ?? null, flourish: !!rule.flourish, ...(getupStyle ? { getupStyle } : {}),
+      onOpening: rule.onOpening ?? null,
       gamble: rule.gamble ? { ...rule.gamble, p: null } : null,
     }, s);
   }
