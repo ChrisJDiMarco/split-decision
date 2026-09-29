@@ -1,6 +1,6 @@
 // Display metadata for skins and fighters (swatches, portraits). The robot kit owns the
 // real materials; these are only the broadcast's chips and labels.
-import type { SkinId } from '../core/types';
+import type { RobotDesign, SkinId } from '../core/types';
 
 export interface SkinSwatch {
   id: SkinId;
@@ -16,12 +16,21 @@ export const SKIN_SWATCHES: Record<SkinId, SkinSwatch> = {
   racing: { id: 'racing', name: 'Racing', base: '#a3141f', accent: '#f4f1ea' },
   scrapyard: { id: 'scrapyard', name: 'Scrapyard', base: '#8a5634', accent: '#7c8a8d' },
   neon: { id: 'neon', name: 'Neon', base: '#131518', accent: '#22e6ff' },
+  // The design's own paint scheme. These colours are only the fallback for designs without a palette.
+  livery: { id: 'livery', name: 'Livery', base: '#3a3d44', accent: '#e8e2d4' },
 };
 
-export const SKIN_ORDER: SkinId[] = ['factory', 'chrome', 'military', 'racing', 'scrapyard', 'neon'];
+export const SKIN_ORDER: SkinId[] = ['livery', 'factory', 'chrome', 'military', 'racing', 'scrapyard', 'neon'];
+
+/** Chip colours for a skin on a given design: the livery chip shows that design's own palette. */
+export function swatchFor(skin: SkinId, design?: RobotDesign): SkinSwatch {
+  const base = SKIN_SWATCHES[skin] ?? SKIN_SWATCHES.factory;
+  if (skin !== 'livery' || !design?.palette) return base;
+  return { ...base, base: design.palette.primary, accent: design.palette.accent };
+}
 
 /** Concept-art portraits shipped with the broadcast module, by design id. */
-const PORTRAITS = new Set(['bruiser', 'anvil', 'jackal', 'buzzsaw', 'striker', 'goliath']);
+const PORTRAITS = new Set(['firecracker', 'savate', 'haymaker', 'pylon', 'bruiser', 'anvil', 'jackal', 'buzzsaw', 'striker', 'goliath']);
 
 export function portraitUrl(designId: string): string | null {
   return PORTRAITS.has(designId) ? `/assets/broadcast/portraits/${designId}.jpg` : null;

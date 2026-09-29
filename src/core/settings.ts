@@ -49,6 +49,14 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
   for (const fn of listeners) fn(current);
 }
 
+// Another tab changed a setting (same origin, same storage): apply it here too, so switching
+// sound off in one tab silences every open tab at once.
+globalThis.addEventListener?.('storage', (e: StorageEvent) => {
+  if (e.key !== STORAGE_KEY) return;
+  current = load();
+  for (const fn of listeners) fn(current);
+});
+
 export function onSettingsChange(fn: Listener): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);

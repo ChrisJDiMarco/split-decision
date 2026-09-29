@@ -4,7 +4,7 @@ import { setSetting, settings } from '../core/settings';
 import type { Corner, FighterSetup, MatchSetup, RobotDesign, SkinId } from '../core/types';
 import { h, setText, toggleClass } from './dom';
 import { DamageSilhouette } from './hud/silhouette';
-import { CORNER_NAMES, portraitUrl, SKIN_ORDER, SKIN_SWATCHES } from './skins';
+import { CORNER_NAMES, portraitUrl, SKIN_ORDER, SKIN_SWATCHES, swatchFor } from './skins';
 import { taleOfTheTape } from './tale';
 
 export const PLAN_MAX_WORDS = 150;
@@ -160,8 +160,13 @@ export class SelectScreen {
       setText(tagline, d.tagline);
       setText(kind, d.bodyType.toUpperCase());
       for (const { id, b } of designButtons) toggleClass(b, 'on', id === d.id);
-      for (const { id, b } of skinButtons) toggleClass(b, 'on', id === card.setup.skin);
-      setText(skinName, SKIN_SWATCHES[card.setup.skin].name.toUpperCase());
+      for (const { id, b } of skinButtons) {
+        toggleClass(b, 'on', id === card.setup.skin);
+        const sw = swatchFor(id as SkinId, d); // the livery chip takes each design's own palette
+        b.style.setProperty('--base', sw.base);
+        b.style.setProperty('--accent', sw.accent);
+      }
+      setText(skinName, swatchFor(card.setup.skin, d).name.toUpperCase());
       tape.replaceChildren(...[
         ['MASS', `${Math.round(t.massKg)} kg`],
         ['HEIGHT', `${t.heightM.toFixed(2)} m`],
