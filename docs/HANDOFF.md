@@ -51,6 +51,11 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
   - Main game (after the fighter-IQ build frees main.ts/broadcast.ts): JEV/YOU toggle per corner, PlayerMode wiring per the integration doc, BREAK on the player HUD from the referee events.
   - Controls: remap main's S/Q/R and the broadcast's C/H; move the default guard off Ctrl (Ctrl+Tab/W/Space clash with browser and OS shortcuts); check pointer lock in real Chrome.
 - Chris approved OFFLINE CPU MOVE POLISH (SAMCON family; no GPU, no neural net) so mocap moves play fluidly in real physics, but heavy runs ONLY OVERNIGHT while he sleeps. `move-polish-poc` (wf_34e4f671-4ea) runs the light design phase now (three methods judged → docs/design/move-polish.md). At bedtime, resume it with args {runProof: true} and resumeFromRunId wf_34e4f671-4ea to polish 5 PoC moves (4 workers), then an adversarial verify and go/no-go for all ~875 moves. The runtime hook-up belongs to the balance engine (control/**).
+- Fighter IQ (9d6c106) and hit feel (f15327d) are DONE and committed. IQ follow-ups for control:
+  - Feints need a real, sellable windup, and a low feint. Right now reads are about 4 per minute and carry no signal (34% react to a feint vs 38% to no feint).
+  - Chain combos in the body (`COMBO_SEQUENCING = 'body'`): 44% of plan steps are never thrown.
+  - Other open items: tests/openings/perf is tight under load; the hit-feel shockwave ring may look too stylised (taste call); the harness 'Head off' holds the push-in.
+- Running: `player-mode-integration` (wf_5d295099-a06). JEV/YOU per corner, FAIR MODE, main.ts wiring, camera `setExternal`, key remaps, guard key moved off Ctrl.
 - After the balance engine: flashy moves + kip-ups in the body (consume `Intent.onOpening`, replace TODO(control-build) fallbacks), then a live critic.
 
 ## Next steps, in order
