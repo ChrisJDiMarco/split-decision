@@ -38,6 +38,26 @@ export const CAPS: Record<MoveLabel, number> = {
 /** A human joint never turns faster than this at 1×: anything above is an IK branch flip. */
 const MAX_JOINT_SPEED = 35;
 
+/** Worst striker miss over the strike phase (m): above this the strike was eased across an IK flip. */
+const MAX_FIST_PATH_ERR = 0.12;
+const MAX_FOOT_PATH_ERR = 0.2;
+/** Deepest a collision geom may go below the mat (m): a limb in the floor is a target no servo can hold. */
+const MAX_SINK = 0.06;
+/** Fighting moves start and end squared up to the opponent (head within this of +x, rad): a jab
+ * that finishes turned 90° away leaves the fighter facing the wrong way when it chains the next. */
+const MAX_LOOK_AWAY = (40 * Math.PI) / 180;
+/** Footwork and guard keep the fighter's level: they chain, so they must end where they began. */
+const LEVEL_LABELS = new Set<MoveLabel>(['guard_idle', 'shuffle_forward', 'shuffle_back', 'shuffle_left', 'shuffle_right', 'walk_forward', 'walk_back']);
+const MAX_LEVEL_CHANGE = 0.1; // m of pelvis height, end vs start
+/** The idle loops all fight long: its feet must stay put (m of planted-foot drift per loop). */
+const MAX_GUARD_SLIDE = 0.06;
+/** A round or side kick turns the body over: it may land further round (the controller squares up). */
+const MAX_LOOK_AWAY_AFTER_KICK = (80 * Math.PI) / 180;
+const FACING_LABELS = new Set<MoveLabel>([
+  'jab', 'cross', 'hook', 'uppercut', 'overhand', 'front_kick', 'low_kick', 'head_kick', 'side_kick',
+  'block', 'guard_idle', 'shuffle_forward', 'shuffle_back', 'shuffle_left', 'shuffle_right', 'walk_forward', 'walk_back',
+]);
+
 /** Labels where both sides are worth keeping (lead and rear hooks, left and right blocks...). */
 const TWO_SIDED = new Set<MoveLabel>(['hook', 'uppercut', 'overhand', 'block', 'front_kick', 'low_kick', 'head_kick', 'side_kick']);
 
@@ -48,9 +68,20 @@ function passes(seg: Segment, b: BuiltMove): string | null {
   const foot = seg.striker?.startsWith('foot');
   if (fist && m.strikerErr > 0.06) return `fist misses its target by ${(m.strikerErr * 100).toFixed(0)} cm`;
   if (foot && m.strikerErr > 0.25) return `foot misses its target by ${(m.strikerErr * 100).toFixed(0)} cm`;
+  if (fist && m.strikerPathErr > MAX_FIST_PATH_ERR) return `fist strays ${(m.strikerPathErr * 100).toFixed(0)} cm off the actor's path mid-strike`;
+  if (foot && m.strikerPathErr > MAX_FOOT_PATH_ERR) return `foot strays ${(m.strikerPathErr * 100).toFixed(0)} cm off the actor's path mid-strike`;
   if (seg.label.startsWith('getup')) {
     if (m.footErr > 0.12 || m.fistErr > 0.15) return `get-up limbs off target (feet ${(m.footErr * 100).toFixed(0)} cm, hands ${(m.fistErr * 100).toFixed(0)} cm)`;
   } else if (m.footErr > 0.06) return `feet off target by ${(m.footErr * 100).toFixed(1)} cm`;
+  if (FACING_LABELS.has(seg.label)) {
+    const deg = (x: number) => ((x * 180) / Math.PI).toFixed(0);
+    const endMax = foot ? MAX_LOOK_AWAY_AFTER_KICK : MAX_LOOK_AWAY;
+    if (m.lookAway[0] > MAX_LOOK_AWAY) return `starts looking ${deg(m.lookAway[0])}° away from the opponent`;
+    if (m.lookAway[1] > endMax) return `ends looking ${deg(m.lookAway[1])}° away from the opponent`;
+  }
+  if (LEVEL_LABELS.has(seg.label) && Math.abs(b.json.travel[2]) > MAX_LEVEL_CHANGE) return `pelvis ends ${(b.json.travel[2] * 100).toFixed(0)} cm from where it started (a rise or a duck, not footwork)`;
+  if (seg.label === 'guard_idle' && m.footSlide > MAX_GUARD_SLIDE) return `guard loop drags a planted foot ${(m.footSlide * 100).toFixed(0)} cm`;
+  if (m.sink > MAX_SINK) return `sinks ${(m.sink * 100).toFixed(0)} cm into the mat`;
   if (m.limitRate > 0.18) return `${(m.limitRate * 100).toFixed(0)}% of joint-frames on a limit`;
   let peak = 0, which = 0;
   m.jointPeak.forEach((v, j) => { if (v > peak) { peak = v; which = j; } });
@@ -125,7 +156,7 @@ export interface DesignReport {
   design: string;
   bytes: number;
   gzipBytes: number;
-  moves: Array<{ id: string; label: MoveLabel; side: string | null; seconds: number; maxSpeed: number; strikerErrCm: number; fistErrCm: number; footErrCm: number; limitPct: number; slowest: string }>;
+  moves: Array<{ id: string; label: MoveLabel; side: string | null; seconds: number; maxSpeed: number; strikerErrCm: number; strikerPathErrCm: number; fistErrCm: number; footErrCm: number; limitPct: number; slowest: string }>;
   rejected: Array<{ id: string; why: string }>;
   clampPct: Record<string, number>; // joint → % of frames on a limit over the selected moves
 }
@@ -183,7 +214,7 @@ export function buildDesign(design: RobotDesign, sources: Map<string, SourceSegm
     }
     report.moves.push({
       id: J.id, label: J.label, side: J.side, seconds: (J.frames - 1) / LIBRARY_FPS, maxSpeed: J.maxSpeed,
-      strikerErrCm: b.metrics.strikerErr * 100, fistErrCm: b.metrics.fistErr * 100, footErrCm: b.metrics.footErr * 100,
+      strikerErrCm: b.metrics.strikerErr * 100, strikerPathErrCm: b.metrics.strikerPathErr * 100, fistErrCm: b.metrics.fistErr * 100, footErrCm: b.metrics.footErr * 100,
       limitPct: b.metrics.limitRate * 100, slowest: b.metrics.slowest,
     });
   }
@@ -236,7 +267,7 @@ function main(): void {
     if (report.rejected.length) console.log(`  rejected ${report.rejected.length}: ${report.rejected.slice(0, 8).map((r) => `${r.id} (${r.why})`).join('; ')}${report.rejected.length > 8 ? '; …' : ''}`);
     if (showMoves) {
       for (const m of report.moves) {
-        console.log(`    ${m.id.padEnd(30)} ${(m.side ?? '-').padEnd(2)} ${m.seconds.toFixed(2)}s ×${m.maxSpeed.toFixed(2)} (${m.slowest}) striker ${m.strikerErrCm.toFixed(1)}cm fist ${m.fistErrCm.toFixed(1)}cm foot ${m.footErrCm.toFixed(1)}cm limits ${m.limitPct.toFixed(1)}%`);
+        console.log(`    ${m.id.padEnd(30)} ${(m.side ?? '-').padEnd(2)} ${m.seconds.toFixed(2)}s ×${m.maxSpeed.toFixed(2)} (${m.slowest}) striker ${m.strikerErrCm.toFixed(1)}cm path ${m.strikerPathErrCm.toFixed(1)}cm fist ${m.fistErrCm.toFixed(1)}cm foot ${m.footErrCm.toFixed(1)}cm limits ${m.limitPct.toFixed(1)}%`);
       }
     }
   }

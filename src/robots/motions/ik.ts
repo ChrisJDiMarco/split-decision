@@ -117,8 +117,10 @@ function buildRows(m: RobotModel, chain: Chain, f: BodyFrames, q: ArrayLike<numb
     } else {
       const p = bodyPoint(f, t.body, t.local);
       const gap = t.minZ - (p[2] - t.radius);
-      if (gap <= 0) continue;
-      const row: Row = { e: gap * t.w, j: new Float64Array(n) };
+      // Active within FLOOR_MARGIN above the mat too (with zero error): a point resting on the
+      // floor is held there instead of dropping back through it on the next iteration.
+      if (gap <= -FLOOR_MARGIN) continue;
+      const row: Row = { e: Math.max(0, gap) * t.w, j: new Float64Array(n) };
       for (let k = 0; k < n; k++) {
         if (!mv?.[k]) continue;
         const ji = chain.joints[k];
@@ -128,6 +130,9 @@ function buildRows(m: RobotModel, chain: Chain, f: BodyFrames, q: ArrayLike<numb
     }
   }
 }
+
+/** m: floor rows stay active this far above the mat (see buildRows). */
+const FLOOR_MARGIN = 0.01;
 
 const scratchRows: Row[] = [];
 
@@ -171,6 +176,43 @@ export function solveChainRobust(
 }
 
 /**
+ * Damped least-squares step with joint limits as an active set: a joint already on a limit that
+ * the step pushes further out is locked (its column dropped) and the step re-solved, so the other
+ * joints make up for it in the same iteration instead of stalling against the clamp.
+ */
+function solveWithLimits(A: Float64Array, g: Float64Array, n: number, chain: Chain, m: RobotModel, q: ArrayLike<number>): Float64Array {
+  const locked = new Uint8Array(n);
+  let dq = solveSymmetric(A, g, n);
+  for (let pass = 0; pass < n; pass++) {
+    let more = false;
+    for (let k = 0; k < n; k++) {
+      if (locked[k]) continue;
+      const j = m.joints[chain.joints[k]], v = q[chain.joints[k]];
+      if ((v <= j.solveLo + LIMIT_EPS && dq[k] < 0) || (v >= j.solveHi - LIMIT_EPS && dq[k] > 0)) {
+        locked[k] = 1;
+        more = true;
+      }
+    }
+    if (!more) break;
+    const Al = new Float64Array(A), gl = new Float64Array(g);
+    for (let k = 0; k < n; k++) {
+      if (!locked[k]) continue;
+      for (let c = 0; c < n; c++) {
+        Al[k * n + c] = 0;
+        Al[c * n + k] = 0;
+      }
+      Al[k * n + k] = 1;
+      gl[k] = 0;
+    }
+    dq = solveSymmetric(Al, gl, n);
+  }
+  return dq;
+}
+
+/** rad: a joint this close to a limit counts as on it. */
+const LIMIT_EPS = 1e-6;
+
+/**
  * Solve one chain in place: `q` (indexed like m.joints) is the warm start and the result; `f`
  * must hold the posed frame of the chain's base body and is left posed at the solution.
  */
@@ -201,7 +243,7 @@ export function solveChain(m: RobotModel, chain: Chain, f: BodyFrames, q: Float6
       }
     }
     for (let a = 0; a < n; a++) A[a * n + a] += lambda2;
-    const dq = solveSymmetric(A, g, n);
+    const dq = solveWithLimits(A, g, n, chain, m, q);
     let step = 0;
     for (let k = 0; k < n; k++) {
       const ji = chain.joints[k];

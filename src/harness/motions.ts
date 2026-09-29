@@ -323,6 +323,8 @@ const ankleMarks = new Markers(studio.physicsRoot, 0x3d8bff, 2);
 const targetMarks = new Markers(studio.physicsRoot, 0xffd21f, 9, 0.06);
 
 const STRIP_SPACING_M = 1.35;
+/** Filmstrip spacing scaled to the robot (a 1.3 m fighter packs tighter than a 1.9 m one). */
+const stripSpacing = (): number => STRIP_SPACING_M * Math.min(1, robotModel(DESIGNS[state.design]).dims.legLength / 0.9);
 let strip: Puppet[] = [];
 
 function ensurePuppet(): void {
@@ -336,6 +338,7 @@ function ensurePuppet(): void {
     for (const p of strip) p.dispose();
     strip = Array.from({ length: want }, () => new Puppet(DESIGNS[state.design], studio.physicsRoot));
   }
+  if (want === 0 && puppet) puppet.root.visible = true; // poseStrip hid it
 }
 
 /** Filmstrip times: a move's key times, or evenly over [from, to] (clip seconds). */
@@ -365,7 +368,7 @@ function poseStrip(): void {
   const marks: Vec3[] = [];
   strip.forEach((p, k) => {
     const fr = playable!.frameAt(times[k]);
-    const off = (k - (strip.length - 1) / 2) * STRIP_SPACING_M;
+    const off = (k - (strip.length - 1) / 2) * stripSpacing();
     // Each copy keeps its own travel from the first frame, so steps and lunges read.
     const pos: Vec3 = [fr.rootPos[0] + ax * off, fr.rootPos[1] + ay * off, fr.rootPos[2]];
     p.pose(fr.q, pos, fr.rootRot);
@@ -612,7 +615,7 @@ function view(preset: 'front' | 'side' | 'three' | 'top' | 'back'): void {
   };
   const [dx, dy, dz] = dir[preset];
   const c = Math.cos(yaw), s = Math.sin(yaw);
-  const dist = strip.length > 1 ? Math.max(state.dist, strip.length * STRIP_SPACING_M * 1.65) : state.dist;
+  const dist = strip.length > 1 ? Math.max(state.dist, strip.length * stripSpacing() * 1.25) : state.dist;
   const side = strip.length > 1 ? 0 : state.ghost ? GHOST_SIDE_M * 0.5 : 0;
   const target = new THREE.Vector3(pos[0], pos[1] + side, Math.max(0.35, pos[2] * 0.85));
   const eye = new THREE.Vector3(target.x + dist * (c * dx - s * dy), target.y + dist * (s * dx + c * dy), target.z + dist * dz);

@@ -73,6 +73,9 @@ export interface Move {
   travel: Vec3;
   /** Largest time scale that keeps every joint under its motor's no-load speed (× margin). */
   maxSpeed: number;
+  /** Starts with one foot leading and ends with the other (a kick that lands forward): after it
+   * the fighter stands southpaw, so its next orthodox move plays mirrored. */
+  switchesStance: boolean;
   quality: MoveQuality;
   source: MoveSource;
   q: Float32Array; // frames × joints
@@ -140,6 +143,7 @@ export interface MoveJson {
   peakSpeed: number;
   travel: Vec3;
   maxSpeed: number;
+  switchesStance?: boolean; // absent in older libraries: false
   quality: MoveQuality;
   source: MoveSource;
   q: string; // base64 int16 LE, frames × joints, × QUANT.angle

@@ -95,6 +95,7 @@ const WALK = {
   minRunS: 1.6,
   minCycleS: 0.7,
   maxCycleS: 1.7,
+  maxTurn: 0.26, // rad of pelvis heading change over one cycle: more is a curve, not a straight walk
 };
 
 const GETUP = {
@@ -461,7 +462,12 @@ function walkSegments(k: Kin, clip: ClipInfo, busy: Array<[number, number]>): Se
     // Steady state only: drop the first and last cycles of the run (starting, stopping).
     for (const [a, b] of cycles.slice(1, -1)) {
       if (busy.some(([x, y]) => overlaps(a, b, x, y)) || inSkip(clip, fps, a, b)) continue;
-      const yaw = meanYaw(k.yaw, a, b);
+      // A loop repeats: a cycle that turns would be bent back straight at its seam.
+      const turn = Math.abs(yawDiff(k.pelvisYaw[b], k.pelvisYaw[a]));
+      if (turn > WALK.maxTurn) continue;
+      // Walks are read in the body's frame (pelvis heading): an actor strolling sideways while
+      // looking where they go is a side step, not a walk forward.
+      const yaw = meanYaw(k.pelvisYaw, a, b);
       const d = travelIn(k, a, b, yaw);
       const dir = direction(d);
       const heading = Math.abs(yawDiff(Math.atan2(d[1], d[0]), 0));
@@ -471,8 +477,8 @@ function walkSegments(k: Kin, clip: ClipInfo, busy: Array<[number, number]>): Se
       out.push({
         id: segId(label, clip.id, a, false), clip: clip.id, label, side: null, height: null, striker: null, mirrored: false,
         start: a, end: b + 1, strike: a, recover: b, impact: null, reach: null, loop: true, yaw,
-        score: Math.max(0.05, straight), auto: true,
-        why: `cycle ${((b - a) / fps).toFixed(2)}s d[${d.map((x) => x.toFixed(2)).join(',')}]`,
+        score: Math.max(0.05, straight) * (1 - (0.5 * turn) / WALK.maxTurn), auto: true,
+        why: `cycle ${((b - a) / fps).toFixed(2)}s d[${d.map((x) => x.toFixed(2)).join(',')}] turn ${turn.toFixed(2)}`,
       });
     }
   }
@@ -481,13 +487,19 @@ function walkSegments(k: Kin, clip: ClipInfo, busy: Array<[number, number]>): Se
 
 // ---------------------------------------------------------------- guard
 
-/** Pose distance used to close guard loops: limb points relative to the hips, facing frame. */
+/** Pose distance used to close guard loops: limb points relative to the hips (facing frame), feet on the mat. */
 function poseDistance(k: Kin, a: number, b: number): number {
   let e = 0;
   for (const s of SIDES) {
     e += norm(sub(v3(k.fist[s].rel, a), v3(k.fist[s].rel, b))) ** 2;
     e += norm(sub(v3(k.ankle[s].rel, a), v3(k.ankle[s].rel, b))) ** 2;
     e += 0.05 * norm(sub(v3(k.fist[s].vel, a), v3(k.fist[s].vel, b))) ** 2;
+  }
+  // The feet must come back to the same spots on the mat too: closing a loop that stepped or
+  // drifted drags planted feet.
+  for (const s of SIDES) {
+    const fa = pt(k.tr, `ankle${S[s]}`, a), fb = pt(k.tr, `ankle${S[s]}`, b);
+    e += 4 * ((fa[0] - fb[0]) ** 2 + (fa[1] - fb[1]) ** 2);
   }
   const ha = pt(k.tr, 'hipC', a)[2], hb = pt(k.tr, 'hipC', b)[2];
   return Math.sqrt(e + 4 * (ha - hb) ** 2);

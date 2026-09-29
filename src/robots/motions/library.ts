@@ -64,7 +64,8 @@ export function parseLibrary(json: LibraryJson): MotionLibrary {
       phases: { strike: mj.phases[0] / f, recover: mj.phases[1] / f },
       impact: mj.impact === null ? null : mj.impact / f,
       reach: mj.reach === null ? null : mj.reach / f,
-      target: mj.target, peakSpeed: mj.peakSpeed, travel: mj.travel, maxSpeed: mj.maxSpeed, quality: mj.quality, source: mj.source,
+      target: mj.target, peakSpeed: mj.peakSpeed, travel: mj.travel, maxSpeed: mj.maxSpeed, switchesStance: mj.switchesStance ?? false,
+      quality: mj.quality, source: mj.source,
       q, root, contacts, mirror,
     };
   });

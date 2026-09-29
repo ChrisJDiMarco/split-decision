@@ -60,17 +60,41 @@ export function sample(move: Move, t: number, opts: SampleOptions = {}, out?: Mo
   const w = i1 === i0 ? 0 : fpos - i0;
   const rate = move.fps * speed;
 
+  // Joints: cubic Hermite through the frames with Catmull-Rom tangents, so targets are smooth
+  // (C1) between the 60 Hz frames and qd is their exact derivative (servo feed-forward without a
+  // velocity step every frame). A held last frame has zero velocity.
   const q = move.q;
   const mirror: MirrorMap | null = opts.mirror ? move.mirror : null;
+  const last = move.frames - 1;
+  const cyclic = loop && move.loop; // stored loops repeat their first frame as their last
+  const nb = (k: number, d: -1 | 1): number => {
+    const x = k + d;
+    if (x < 0) return cyclic ? last - 1 : 0;
+    if (x > last) return cyclic ? 1 : last;
+    return x;
+  };
+  /** Neighbours of frame k and how many frame steps lie between them (2 inside, 1 at an end). */
+  const span = (k: number) => {
+    const lo = nb(k, -1), hi = nb(k, 1);
+    return { lo, hi, steps: Math.max(1, (lo === k ? 0 : 1) + (hi === k ? 0 : 1)) };
+  };
+  const t0 = span(i0), t1 = span(i1);
+  const w2 = w * w, w3 = w2 * w;
+  const h00 = 2 * w3 - 3 * w2 + 1, h10 = w3 - 2 * w2 + w, h01 = -2 * w3 + 3 * w2, h11 = w3 - w2;
+  const d00 = 6 * w2 - 6 * w, d10 = 3 * w2 - 4 * w + 1, d01 = -6 * w2 + 6 * w, d11 = 3 * w2 - 2 * w;
   for (let j = 0; j < nj; j++) {
     const src = mirror ? mirror.perm[j] : j;
     const sg = mirror ? mirror.sign[j] : 1;
     const a = q[i0 * nj + src], b = q[i1 * nj + src];
-    s.q[j] = sg * (a + (b - a) * w);
-    // Slope of the segment we are on (the last frame reuses the previous segment's slope).
-    const k0 = i1 === i0 ? Math.max(0, i0 - 1) : i0;
-    const k1 = i1 === i0 ? i0 : i1;
-    s.qd[j] = k1 === k0 ? 0 : sg * (q[k1 * nj + src] - q[k0 * nj + src]) * rate;
+    const m0 = (q[t0.hi * nj + src] - q[t0.lo * nj + src]) / t0.steps;
+    const m1 = (q[t1.hi * nj + src] - q[t1.lo * nj + src]) / t1.steps;
+    if (i1 === i0) {
+      s.q[j] = sg * a;
+      s.qd[j] = s.done ? 0 : sg * m0 * rate;
+    } else {
+      s.q[j] = sg * (h00 * a + h10 * m0 + h01 * b + h11 * m1);
+      s.qd[j] = sg * (d00 * a + d10 * m0 + d01 * b + d11 * m1) * rate;
+    }
   }
 
   const r = move.root;

@@ -4,7 +4,8 @@
 import type { Quat, Vec3 } from '../../core/types';
 import { encodeAngles, encodeBytes, encodeRoot } from './codec';
 import { matFromQuat, mulMM, mulMV, quatFromMat, quatSlerp, rotZ, type Mat3 } from './math';
-import { fk, newFrames, type RobotModel } from './robot-model';
+import { CONTACT, runs } from './contacts';
+import { bodyLowestZ, bodyPoint, fk, newFrames, type RobotModel } from './robot-model';
 import type { Retargeted } from './retarget';
 import type { Segment } from './segment';
 import type { MoveJson, MoveQuality } from './types';
@@ -23,10 +24,14 @@ export interface MoveMetrics {
   kneeErr: number;
   elbowErr: number;
   strikerErr: number; // striker: requested vs reached at reach, m (0 for non-strikes)
+  strikerPathErr: number; // striker: worst requested vs reached over the strike phase, m
   limitRate: number;
   jointPeak: Float64Array; // rad/s at 1×, per joint
   slowest: string; // joint that caps maxSpeed
   trunkDrop: number; // max |trunk mat correction|, m
+  sink: number; // deepest collision point below the mat over the move, m
+  lookAway: [number, number]; // head heading off +x at the first and at the last frame, rad
+  footSlide: number; // worst drift of a planted foot (ball) within one contact run, m
 }
 
 export interface BuiltMove {
@@ -92,6 +97,18 @@ function closeLoop(q: Float32Array, root: Float32Array, frames: number, nj: numb
   root[last * 7 + 2] = root[2];
 }
 
+/** Strikes that land mid-arc (at impact) rather than at full reach. */
+const ARC_LABELS = new Set(['hook', 'overhand', 'low_kick', 'head_kick']);
+/** Arcs that sweep across onto the opponent's centre line (an uppercut rises under the chin from
+ * where it is; a low kick goes for the lead thigh). */
+const MIDLINE_ARCS = new Set(['hook', 'overhand', 'head_kick']);
+const HEAD_HALF_WIDTH_M = 0.1;
+/** m: one foot this far ahead of the other is a stance (orthodox or southpaw), less is square. */
+const STANCE_LEAD_M = 0.08;
+
+/** Labels whose loops travel: walks and sideways-walk shuffles. */
+export const isLocomotion = (label: string): boolean => label.startsWith('walk') || label.startsWith('shuffle');
+
 function transposeM(m: Mat3): Mat3 {
   return [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
 }
@@ -122,7 +139,8 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     root.set([p[0], p[1], r.rootPos[k * 3 + 2], rq[0], rq[1], rq[2], rq[3]], i * 7);
     contacts[i] = r.contacts[k];
   }
-  if (seg.loop) closeLoop(q, root, frames, nj, seg.label.startsWith('walk'));
+  // Locomotion loops keep their stride (the sampler accumulates it per cycle); a guard loop stays put.
+  if (seg.loop) closeLoop(q, root, frames, nj, isLocomotion(seg.label));
 
   // Striker numbers from the robot's own forward kinematics (move frame).
   const rel = (f: number) => Math.min(frames - 1, Math.max(0, f - seg.start));
@@ -136,9 +154,29 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
   let target: Vec3 | null = null;
   let peakSpeed = 0;
   let strikerErr = 0;
+  let strikerPathErr = 0;
+  let contactI: number | null = seg.impact === null ? null : rel(seg.impact);
   if (strikerBody !== null && seg.reach !== null && seg.impact !== null) {
-    const reachI = rel(seg.reach), impI = rel(seg.impact);
-    target = strikerAt(reachI).map((v) => Math.round(v * 1000) / 1000) as Vec3;
+    const reachI = rel(seg.reach);
+    let impI = rel(seg.impact);
+    // Thrusts land at full extension. Sweeping arcs (hooks, overhands, head kicks) can peak in
+    // speed while still out wide and follow through past the target: they land where the arc
+    // first comes within a head's width of the line to the opponent (y = 0 in the move frame),
+    // or as close to it as it gets.
+    if (MIDLINE_ARCS.has(seg.label)) {
+      let best = Infinity;
+      const from = impI;
+      for (let i = from; i <= reachI; i++) {
+        const y = Math.abs(strikerAt(i)[1]);
+        if (y < best) {
+          best = y;
+          impI = i;
+        }
+        if (y <= HEAD_HALF_WIDTH_M) break;
+      }
+      contactI = impI;
+    }
+    target = strikerAt(ARC_LABELS.has(seg.label) ? impI : reachI).map((v) => Math.round(v * 1000) / 1000) as Vec3;
     const a = strikerAt(Math.max(0, impI - 1)), b = strikerAt(Math.min(frames - 1, impI + 1));
     const span = (Math.min(frames - 1, impI + 1) - Math.max(0, impI - 1)) / fps;
     peakSpeed = span > 0 ? Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / span : 0;
@@ -148,6 +186,12 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     const [tgt, got] = seg.striker!.startsWith('fist') ? [r.fistTarget, r.fist] : [r.ankleTarget, r.ankle];
     const o = k * 6 + side;
     strikerErr = Math.hypot(tgt[o] - got[o], tgt[o + 1] - got[o + 1], tgt[o + 2] - got[o + 2]);
+    // Worst miss along the strike itself: a limb eased across an IK branch flip strays off the
+    // actor's path mid-strike even when it arrives at the end.
+    for (let i = rel(seg.strike); i <= reachI; i++) {
+      const p = (k0 + i) * 6 + side;
+      strikerPathErr = Math.max(strikerPathErr, Math.hypot(tgt[p] - got[p], tgt[p + 1] - got[p + 1], tgt[p + 2] - got[p + 2]));
+    }
   }
 
   // Joint speed at 1× (lightly smoothed finite differences) → the time-scale limit.
@@ -179,6 +223,34 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
       if (v - J.lo < AT_LIMIT_RAD || J.hi - v < AT_LIMIT_RAD) atLimit++;
     }
   }
+  // Deepest any collision geom goes below the mat (the IK keeps limbs out where it can), and how
+  // far the head looks away from the opponent (+x) at the first and at the last frame.
+  let sink = 0;
+  const lookAway: [number, number] = [0, 0];
+  const lead: [number, number] = [0, 0];
+  const d = m.dims;
+  const ballLocal: Vec3 = [d.footCenterX + 0.6 * d.footHalf[0], 0, -d.soleDepth];
+  const balls: Record<'l' | 'r', Vec3[]> = { l: [], r: [] }; // left ankle ahead of the right (x, m) at the first and last frame
+  for (let i = 0; i < frames; i++) {
+    const o = i * 7;
+    fk(m, [root[o], root[o + 1], root[o + 2]], matFromQuat([root[o + 3], root[o + 4], root[o + 5], root[o + 6]]), q.subarray(i * nj, (i + 1) * nj), f);
+    for (let b = 0; b < m.bodies.length; b++) sink = Math.max(sink, -bodyLowestZ(m, f, b));
+    if (i === 0 || i === frames - 1) {
+      const H = f.rot[m.head]; // column 0: the head's forward axis
+      if (Math.hypot(H[0], H[3]) > 0.3) lookAway[i === 0 ? 0 : 1] = Math.abs(Math.atan2(H[3], H[0]));
+      lead[i === 0 ? 0 : 1] = f.pos[m.legs.l.bodies[2]][0] - f.pos[m.legs.r.bodies[2]][0];
+    }
+    balls.l.push(bodyPoint(f, m.legs.l.bodies[2], ballLocal));
+    balls.r.push(bodyPoint(f, m.legs.r.bodies[2], ballLocal));
+  }
+  // Planted feet: how far the ball of each foot drifts within one of the actor's contact runs.
+  let footSlide = 0;
+  for (const [side, bit] of [['l', CONTACT.FOOT_L], ['r', CONTACT.FOOT_R]] as const) {
+    for (const [a, b] of runs(contacts, bit)) {
+      const p0 = balls[side][a];
+      for (let i = a; i < b; i++) footSlide = Math.max(footSlide, Math.hypot(balls[side][i][0] - p0[0], balls[side][i][1] - p0[1]));
+    }
+  }
   let trunkDrop = 0;
   for (let i = 0; i < frames; i++) trunkDrop = Math.max(trunkDrop, Math.abs(r.trunkDrop[k0 + i]));
   const quality: MoveQuality = {
@@ -192,9 +264,11 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
   const json: MoveJson = {
     id: seg.id, label: seg.label, side: seg.side, striker: seg.striker, height: seg.height, loop: seg.loop, frames,
     phases: [phase(seg.strike), Math.max(phase(seg.strike), phase(seg.recover))],
-    impact: seg.impact === null ? null : phase(seg.impact),
+    impact: contactI,
     reach: seg.reach === null ? null : phase(seg.reach),
-    target, peakSpeed: round4(peakSpeed), travel, maxSpeed: round4(maxSpeed), quality,
+    target, peakSpeed: round4(peakSpeed), travel, maxSpeed: round4(maxSpeed),
+    switchesStance: Math.abs(lead[0]) > STANCE_LEAD_M && Math.abs(lead[1]) > STANCE_LEAD_M && Math.sign(lead[0]) !== Math.sign(lead[1]),
+    quality,
     source: {
       clip: seg.clip, start: seg.start, end: seg.start + frames, mirrored: seg.mirrored,
       scale: round4(r.scale.leg), lift: round4(r.scale.lift),
@@ -207,7 +281,7 @@ export function buildMove(seg: Segment, r: Retargeted, speedLimit: ArrayLike<num
     metrics: {
       fistErr: quality.fistErr, footErr: quality.footErr,
       kneeErr: meanDist(r.kneeTarget, r.knee, k0, frames), elbowErr: meanDist(r.elbowTarget, r.elbow, k0, frames),
-      strikerErr, limitRate: quality.limitRate, jointPeak, slowest, trunkDrop,
+      strikerErr, strikerPathErr, limitRate: quality.limitRate, jointPeak, slowest, trunkDrop, sink, lookAway, footSlide,
     },
   };
 }

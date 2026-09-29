@@ -36,7 +36,9 @@ export interface RetargetOptions {
 
 /**
  * Height change of one foot's path over track frames [from, to], full at `peak` and eased to
- * nothing at both ends (sin² bump). `dz` is in the actor's metres; the robot gets dz × leg scale.
+ * nothing at both ends (sin² bump), scaled by the ankle's height relative to its height at the
+ * peak (so a lowered kick keeps its shape). `dz` is in the actor's metres; the robot gets
+ * dz × leg scale.
  */
 export interface StrikeAdjust {
   side: Side;
@@ -100,6 +102,10 @@ const JUMP_RAD_S = 21; // rad/s in one frame: a step this sudden is a flip unles
 const FLIP_TRAVEL_PER_RAD = 0.2; // m of target travel per rad of joint step that makes a step genuine
 const FLIP_STEP_MAX = 0.5; // rad/frame: above twice this a step is a flip whatever the targets did
 const JUMP_WINDOW_S = 0.1; // eased on each side of a jump
+const ARM_BURIED = 0.05; // m: a solved arm deeper than this in the mat is lifted out too
+const FLOOR_TOL = 0.005; // m below the mat after the limb solve that triggers the lift-out pass
+const LIFT_STEADY_W = 0.02; // per radian: the lift-out keeps the solved pose as far as the floor allows
+const FLOOR_W = 4; // floor rows (one-sided, only while violated) per metre below the mat
 
 /** Monotone piecewise map: [0, edgeH] stretches to [0, edgeR], beyond it slope k. */
 function stretch(x: number, edgeH: number, edgeR: number, k: number): number {
@@ -232,13 +238,20 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
   const neck = makeChain(m, pathTo(m.torso, m.head));
   const trunkJoints = [...waist.joints, ...neck.joints];
   const coreBodies = [m.pelvis, ...waist.bodies, ...neck.bodies];
+  // Shoulder and hip ends of the limbs: a sphere at the joint whatever the limb does (a capsule
+  // that starts at the joint). A robot lying on its side rests on them, so they hold the trunk up.
+  const limbRoots = [m.arms.l, m.arms.r, m.legs.l, m.legs.r].map((L) => {
+    const b = L.bodies[0];
+    const r = Math.max(0, ...m.bodies[b].part.geoms.flatMap(geomExtremes).filter((e) => Math.hypot(e.p[0], e.p[1], e.p[2]) < 1e-6).map((e) => e.r));
+    return { b, r };
+  }).filter((x) => x.r > 0);
   // Chains start at the trunk so any intermediate bodies (a clavicle, say) are solved too.
   const limbSolver = (limb: Limb, trunk: number): LimbSolver => {
     const chain = makeChain(m, pathTo(trunk, limb.bodies[2]));
     const stance = chain.joints.map((j) => clamp(m.design.stance[m.joints[j].name] ?? 0, m.joints[j].solveLo, m.joints[j].solveHi));
     const zero = chain.joints.map((j) => clamp(0, m.joints[j].solveLo, m.joints[j].solveHi));
     const posture: Task[] = limb.kind === 'arm' ? chain.joints.map((j, k) => ({ kind: 'joint', joint: j, target: stance[k], w: ARM_POSTURE_W })) : [];
-    return { limb, chain, floor: floorTasks(m, chain.bodies, 4), posture, seeds: [stance, zero] };
+    return { limb, chain, floor: floorTasks(m, chain.bodies, FLOOR_W), posture, seeds: [stance, zero] };
   };
   const arms = { l: limbSolver(m.arms.l, m.torso), r: limbSolver(m.arms.r, m.torso) };
   const legs = { l: limbSolver(m.legs.l, m.pelvis), r: limbSolver(m.legs.r, m.pelvis) };
@@ -263,6 +276,10 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
     solveChain(m, neck, f, q, [{ kind: 'dir', body: m.head, local: [1, 0, 0], target: col(Hd, 0), w: 1 }], { iterations: 8, tol: 1e-4 });
     let lo = Infinity;
     for (const b of coreBodies) lo = Math.min(lo, bodyLowestZ(m, f, b));
+    for (const { b, r } of limbRoots) {
+      fkBody(m, b, q, f);
+      lo = Math.min(lo, f.pos[b][2] - r);
+    }
     low[k] = lo;
     out.rootPos.set(rootPos, k * 3);
     out.rootRot.set(P, k * 9);
@@ -360,7 +377,13 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
       const lat = normalize([P[1], P[4], 0], [0, 1, 0]);
       const a = scale(pt(tr, `ankle${S}`, i), kLeg);
       let dz = 0;
-      for (const adj of opts.adjust ?? []) if (adj.side === s) dz += kLeg * adj.dz * adjustWeight(adj, i);
+      for (const adj of opts.adjust ?? []) {
+        if (adj.side !== s) continue;
+        // In proportion to the ankle's height (full at the peak): the chamber and the rise keep
+        // their shape, scaled down, instead of being pushed into the mat on the way up.
+        const zPeak = Math.max(1e-3, pt(tr, `ankle${S}`, adj.peak)[2]);
+        dz += kLeg * adj.dz * adjustWeight(adj, i) * clamp(a[2] / (kLeg * zPeak), 0, 1);
+      }
       T.ankle.push([a[0] + lat[0] * widen, a[1] + lat[1] * widen, a[2] + lift + dz]);
       T.rot.push(fr(tr, `foot${S}`, i));
       T.planted.push(false);
@@ -415,6 +438,16 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
   // pulled weakly toward its value one frame earlier: where the pose leaves a joint free (the twist
   // of a straight arm) it holds still instead of drifting and then whipping around.
   const steady = (chain: Chain, w: number): Task[] => chain.joints.map((j) => ({ kind: 'joint', joint: j, target: q[j], w }));
+  // Where no pose within the joint limits reaches the actor's leg without passing through the mat
+  // (a frog-legged knee the hip can't abduct to), the targets lose: the leg is lifted out with
+  // the smallest joint change, floor rows only. (A solved arm only once it is buried: a hand
+  // pressed a few cm into the mat under a bulky chest is a push, while lifting it out swings the
+  // arm off the actor's. Eased arms, below, are always lifted.)
+  const liftOut = (sol: LimbSolver, tol = FLOOR_TOL) => {
+    let depth = 0;
+    for (const b of sol.chain.bodies) depth = Math.max(depth, -bodyLowestZ(m, f, b));
+    if (depth > tol) solveChain(m, sol.chain, f, q, [...sol.floor, ...steady(sol.chain, LIFT_STEADY_W)], { iterations: 30, tol: 1e-5 });
+  };
   for (let k = 0; k < n; k++) {
     poseTrunk(k);
     for (const s of SIDES) {
@@ -433,6 +466,7 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
         ...sol.posture,
         ...(k > 0 ? steady(sol.chain, ARM_STEADY_W) : []),
       ], sol.seeds, RESTART_ABOVE);
+      liftOut(sol, ARM_BURIED);
       const o = k * 6 + (s === 'l' ? 0 : 3);
       out.fistTarget.set(fistT, o);
       out.elbowTarget.set(elbowT, o);
@@ -451,6 +485,7 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
         ...sol.floor,
         ...(k > 0 ? steady(sol.chain, LEG_STEADY_W) : []),
       ], sol.seeds, RESTART_ABOVE);
+      liftOut(sol);
       const o = k * 6 + (s === 'l' ? 0 : 3);
       out.ankleTarget.set(L.ankle[k], o);
       out.kneeTarget.set(L.knee[k], o);
@@ -463,20 +498,29 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
   // ---------------------------------------------------------------- D. jump repair
   // Where a limb still jumps to another IK branch between two frames (faster than any joint can
   // turn), ease it across over a short window instead: the pose strays briefly, the servo can follow.
-  type Reached = { chain: Chain; out: Float64Array; mid: Float64Array; endT: Float64Array; midT: Float64Array; end: number; midBody: number; o: number };
+  type Reached = { sol: LimbSolver; chain: Chain; out: Float64Array; mid: Float64Array; endT: Float64Array; midT: Float64Array; end: number; midBody: number; o: number };
   const reached: Reached[] = [];
   for (const s of SIDES) {
     const o = s === 'l' ? 0 : 3;
-    reached.push({ chain: arms[s].chain, out: out.fist, mid: out.elbow, endT: out.fistTarget, midT: out.elbowTarget, end: m.arms[s].bodies[2], midBody: m.arms[s].bodies[1], o });
-    reached.push({ chain: legs[s].chain, out: out.ankle, mid: out.knee, endT: out.ankleTarget, midT: out.kneeTarget, end: m.legs[s].bodies[2], midBody: m.legs[s].bodies[1], o });
+    reached.push({ sol: arms[s], chain: arms[s].chain, out: out.fist, mid: out.elbow, endT: out.fistTarget, midT: out.elbowTarget, end: m.arms[s].bodies[2], midBody: m.arms[s].bodies[1], o });
+    reached.push({ sol: legs[s], chain: legs[s].chain, out: out.ankle, mid: out.knee, endT: out.ankleTarget, midT: out.kneeTarget, end: m.legs[s].bodies[2], midBody: m.legs[s].bodies[1], o });
   }
   for (const R of reached) {
-    // Target travel per frame: a real snap moves the fist (or foot) with the joints; a branch flip
-    // turns joints while the targets stay put.
+    // Target travel per frame, seen from the limb's base (torso / pelvis): a real snap moves the
+    // fist (or foot) with the joints; a branch flip turns joints while the targets stay put. In the
+    // base frame, a planted foot under a pelvis whipping round into a kick travels too.
+    const base = m.bodies[R.chain.bodies[0]].parent;
+    const rel = new Float64Array(n * 6);
+    for (let k = 0; k < n; k++) {
+      poseTrunk(k);
+      const at = (arr: Float64Array): Vec3 => [arr[k * 6 + R.o], arr[k * 6 + R.o + 1], arr[k * 6 + R.o + 2]];
+      rel.set(mulMtV(f.rot[base], sub(at(R.endT), f.pos[base])), k * 6);
+      rel.set(mulMtV(f.rot[base], sub(at(R.midT), f.pos[base])), k * 6 + 3);
+    }
     const travel = new Float64Array(n);
     for (let k = 1; k < n; k++) {
-      const d = (arr: Float64Array) => Math.hypot(arr[k * 6 + R.o] - arr[(k - 1) * 6 + R.o], arr[k * 6 + R.o + 1] - arr[(k - 1) * 6 + R.o + 1], arr[k * 6 + R.o + 2] - arr[(k - 1) * 6 + R.o + 2]);
-      travel[k] = d(R.endT) + d(R.midT);
+      const d = (o: number) => Math.hypot(rel[k * 6 + o] - rel[(k - 1) * 6 + o], rel[k * 6 + o + 1] - rel[(k - 1) * 6 + o + 1], rel[k * 6 + o + 2] - rel[(k - 1) * 6 + o + 2]);
+      travel[k] = d(0) + d(3);
     }
     for (const [a, b] of jumpWindows(out.q, nj, n, R.chain.joints, JUMP_RAD_S / tr.fps, Math.max(2, Math.round(JUMP_WINDOW_S * tr.fps)), travel)) {
       const k0 = Math.max(0, a - 1), k1 = Math.min(n - 1, b + 1);
@@ -486,6 +530,8 @@ export function retarget(tr: HumanTrack, m: RobotModel, opts: RetargetOptions = 
         poseTrunk(k);
         for (const j of R.chain.joints) q[j] = out.q[k * nj + j];
         for (const body of R.chain.bodies) fkBody(m, body, q, f);
+        liftOut(R.sol); // easing between two poses can pass through the mat (arms too, here)
+        for (const j of R.chain.joints) out.q[k * nj + j] = q[j];
         R.out.set(f.pos[R.end], k * 6 + R.o);
         R.mid.set(f.pos[R.midBody], k * 6 + R.o);
       }
