@@ -36,6 +36,14 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
 - Chris (16:50): heads must move and eyes/lights react; hands are a swappable customization (stock gloves/knuckles, dexterous tendon hands, later weapons); eventually a full WORKSHOP to build, customize and repair bots. Running: `expressive-heads-and-hands` workflow (gaze + grip systems, reactive eyes, loadout slot, HANDS picker, docs/design/loadouts-and-workshop.md). Neck pitch joint waits for the balance-engine build (humanoid.ts).
 - Chris approved the order: tracking core → BALANCE ENGINE (design from `balance-engine-design` workflow; fusion of mocap style + physics-correct foot placement, Euphoria/Bodycam-style recovery) → flashy moves + kip-ups → live critic. Stop the tracking workflow after core:tracking completes, before its Flashy stage.
 
+## In flight (2026-09-29 evening)
+
+- Committed: tracking core + flashy library (22d78a6), motion-matching notes in the balance design (54266c9), fight audio (3e273eb, listen at /harness/audio.html), heads/eyes/hands loadout (cea595e).
+- Running: `balance-engine` workflow (wf_38bd1af8-d17): Phase 0 drills + Phase 1 "walk in like a fighter" with inertialized target switches → independent verify (one fix round, stops if the gate still fails) → Phases 2-5 (impedance, weight-transfer strikes + mocap kicks + strike warping, Euphoria-style reactions, motion-matched mocap footwork) → judge. `CONTROL.balance` flips to 'dcm' only when Phase 1 passes.
+- Running: `fighter-iq-and-hit-feel` (brain, openings, camera, vfx, post) and `player-mode` (src/player, harness/player.html). Commit their files when they finish; integrate player mode into the main game per docs/design/player-mode-integration.md.
+- Known follow-ups: walkout tale of the tape ignores the loadout (src/ui/broadcast.ts ~line 210: `taleOfTheTape(applyLoadout(...))`); HAYMAKER's lock-on flare fires too often (uppercut in the physics big-shot list); HAYMAKER get-ups weaker with dexterous/knuckle hands; tests/openings/fallback.test.ts 'thrown' count 2 (needs >2) after control changes.
+- After the balance engine: flashy moves + kip-ups in the body (consume `Intent.onOpening`, replace TODO(control-build) fallbacks), then a live critic.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
