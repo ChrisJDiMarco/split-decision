@@ -1,6 +1,21 @@
 # Next-gen chassis: a new generation of fighters
 
-Status: **PROPOSAL, awaiting Chris's sign-off. Nothing is built.** The research behind it is in `docs/research/10-engineai-fighters.md`, cited below as "10 §n".
+Status: **APPROVED in part by Chris (2026-09-29). Nothing is built yet.**
+
+**Chris's decisions (2026-09-29):**
+- **Phase 0:** approved, to run **overnight** after the balance engine's Phase 1 lands, so it tests on the new balance.
+- **Hip:** **Option 1, the full T800-style hip, regardless** of whether it wins only side kicks ("T800-style hip regardless"). Phase 0 therefore stops being the Option 1 vs 2 gate. It becomes the baseline and tuning run for ranges, mass placement and drives, and a regression reference.
+- **Era name:** **NEXT GEN**.
+- **Roll-out:** **all three designs** (PINWHEEL, JACKKNIFE, CAPSTAN) after Phase 0, not PINWHEEL alone.
+- **Defaults until Chris says otherwise:**
+  - Names and looks as in section 2.
+  - Ankles stay inside real robots, widened only as a labelled departure if they saturate.
+  - NEXT GEN is hidden until it passes tuning.
+  - CAPSTAN at ~90 kg is fine (HAYMAKER is the precedent).
+  - Get-up bar: URKL's 3 s, with EngineAI's ~1.6 s as the reference.
+  - Workshop upgrades of existing fighters come later.
+
+Original status: PROPOSAL. The research behind it is in `docs/research/10-engineai-fighters.md`, cited below as "10 §n".
 
 Chris asked for "even better robots with more advanced joints and parts", modelled on EngineAI's URKL fighters. The rest of this doc follows his direction:
 - **Scope:** "we can have a variety of robots! but these new hips and things robots can be like the newer versions in the game you can use". The iron three and the modern four (FIRECRACKER, SAVATE, HAYMAKER, PYLON) stay exactly as they are.

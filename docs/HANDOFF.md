@@ -56,6 +56,8 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
   - Chain combos in the body (`COMBO_SEQUENCING = 'body'`): 44% of plan steps are never thrown.
   - Other open items: tests/openings/perf is tight under load; the hit-feel shockwave ring may look too stylised (taste call); the harness 'Head off' holds the push-in.
 - Running: `minds-and-player-integration` (wf_b27aa470-00c), which replaces the stopped player-integration run. Mind picker per corner: JEV (cloud) / LOCAL (open-source Jev on this Mac, via /api/local-jev) / HOUSE (rules only) / YOU (player); global MINDS override; player mode in the main game; FAIR MODE; guard key moved off Ctrl. The local model (Kev or Mapika decider) waits for Chris's OK on the exact download sizes.
+- EngineAI study DONE (d38678a): docs/research/10-engineai-fighters.md, docs/design/next-gen-chassis.md. Chris decided: NEXT GEN era; full T800-style hip (Option 1) regardless; all three designs (PINWHEEL, JACKKNIFE, CAPSTAN); Phase 0 runs OVERNIGHT after balance-engine Phase 1.
+- OVERNIGHT QUEUE (start when Chris says he's going to bed): (1) move-polish proof: resume wf_34e4f671-4ea with args {runProof: true}; (2) NEXT GEN Phase 0 (six SAVATE variants, byte-lock + behaviour golden) if balance-engine Phase 1 has passed.
 - After the balance engine: flashy moves + kip-ups in the body (consume `Intent.onOpening`, replace TODO(control-build) fallbacks), then a live critic.
 
 ## Next steps, in order
