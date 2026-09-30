@@ -1,5 +1,5 @@
 // Player keymap: every action has one or more bindings. A binding is a KeyboardEvent.code
-// ('KeyW', 'Space', 'ControlLeft') or a mouse button ('Mouse0' left, 'Mouse1' middle,
+// ('KeyW', 'Space', 'KeyG') or a mouse button ('Mouse0' left, 'Mouse1' middle,
 // 'Mouse2' right), optionally prefixed 'Shift+' for a modified press. Held actions ignore
 // modifiers (Shift+W still walks). Rebinds persist per browser (localStorage, best effort).
 import { KEYMAP_STORAGE_KEY } from './config';
@@ -23,7 +23,8 @@ export const DEFAULT_KEYMAP: Readonly<Keymap> = {
   move_back: ['KeyS'],
   move_left: ['KeyA'],
   move_right: ['KeyD'],
-  guard: ['ControlLeft', 'ControlRight'],
+  // G, not Ctrl: Ctrl+Tab/W/Space/click are browser and OS shortcuts (a held Ctrl guard closed tabs).
+  guard: ['KeyG'],
   clinch: ['KeyC'],
   jab: ['Mouse0'],
   cross: ['Mouse2'],
@@ -56,10 +57,18 @@ export const isHeld = (a: ActionId): a is HeldAction => HELD.has(a);
 
 const SHIFT = 'Shift+';
 const BINDING_RE = /^(Shift\+)?(Mouse[0-4]|[A-Za-z][A-Za-z0-9]{1,24})$/;
+/**
+ * Keys a binding may not use: Ctrl, Alt and Cmd turn the other game keys into browser and OS
+ * shortcuts (Ctrl+W closes the tab, Alt+F opens the menu, Cmd+Q quits). Saved keymaps that still
+ * bind them lose those bindings on load (see mergeKeymap).
+ */
+const MODIFIER_RE = /^(Control|Alt|Meta|OS)(Left|Right)?$/;
+/** When a default key is already taken by a saved rebind, the action falls back to the first free one. */
+const FALLBACK_KEYS = ['KeyG', 'KeyY', 'KeyU', 'KeyJ', 'KeyK'] as const;
 
-/** Is this a well-formed binding string? */
+/** Is this a well-formed, bindable binding string? */
 export function validBinding(b: unknown): b is string {
-  return typeof b === 'string' && BINDING_RE.test(b);
+  return typeof b === 'string' && BINDING_RE.test(b) && !MODIFIER_RE.test(baseOf(b));
 }
 
 /** The binding a keyboard or mouse input produces: 'Shift+KeyR', 'Mouse0'. Shift keys alone are never chords. */
@@ -110,15 +119,41 @@ export function rebind(map: Keymap, action: ActionId, binding: string): Keymap {
   return out;
 }
 
-/** Defaults with any valid stored overrides on top. Unknown actions and bad bindings are ignored. */
+/**
+ * Defaults with any valid stored overrides on top. Unknown actions and bad bindings are ignored.
+ * Migration: a saved keymap from before the guard left Ctrl loses its Ctrl bindings, and an action
+ * left with nothing gets its default key back, or the first free fallback key when a saved rebind
+ * already uses that key (a key does one thing).
+ */
 export function mergeKeymap(stored: unknown): Keymap {
   const out: Keymap = { ...DEFAULT_KEYMAP } as Keymap;
   for (const a of Object.keys(out) as ActionId[]) out[a] = [...DEFAULT_KEYMAP[a]];
   if (!stored || typeof stored !== 'object') return out;
+  const fromStore = new Set<ActionId>();
   for (const [a, list] of Object.entries(stored as Record<string, unknown>)) {
     if (!(a in out) || !Array.isArray(list)) continue;
     const valid = list.filter(validBinding);
-    if (valid.length) out[a as ActionId] = valid;
+    if (!valid.length) continue;
+    out[a as ActionId] = valid;
+    fromStore.add(a as ActionId);
+  }
+  // Defaults filled in next to saved rebinds must not reuse a key a saved action already owns
+  // (same clash rule as rebind: the same chord, or the same base key where a held action is involved).
+  const owned: Array<{ b: string; held: boolean }> = [];
+  for (const a of fromStore) for (const b of out[a]) owned.push({ b, held: isHeld(a) });
+  const clashes = (action: ActionId, x: string) => owned.some((o) => o.b === x || ((o.held || isHeld(action)) && baseOf(o.b) === baseOf(x)));
+  const inUse = (k: string) => Object.values(out).some((list) => list.some((b) => baseOf(b) === k));
+  for (const a of Object.keys(out) as ActionId[]) {
+    if (fromStore.has(a)) continue;
+    const kept = out[a].filter((b) => !clashes(a, b));
+    if (!kept.length) {
+      const free = FALLBACK_KEYS.find((k) => !clashes(a, k) && !inUse(k));
+      if (free) {
+        kept.push(free);
+        owned.push({ b: free, held: isHeld(a) });
+      }
+    }
+    out[a] = kept;
   }
   return out;
 }

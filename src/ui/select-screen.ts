@@ -1,15 +1,25 @@
-// Fighter select: two corner cards (design, skin, tale of the tape, fight plan,
+// Fighter select: two corner cards (mind, design, skin, tale of the tape, fight plan,
 // temperament) around a see-through center that shows the cage, and a FIGHT button.
-import { setSetting, settings } from '../core/settings';
+// Each corner's mind is JEV (cloud), LOCAL (open-source Jev on this Mac), HOUSE (rules) or YOU
+// (the player); the MINDS setting under FIGHT can put every non-player corner on one mind.
+import { probeLocalHealth, sharedJevLink } from '../brain';
+import { GLOBAL_MINDS, onSettingsChange, setSetting, settings } from '../core/settings';
 import type { Corner, FighterSetup, HandsOption, MatchSetup, RobotDesign, SkinId } from '../core/types';
 import { applyLoadout, HANDS_LABEL, HANDS_OPTIONS, stockHands } from '../robots/loadout';
 import { h, setText, toggleClass } from './dom';
 import { DamageSilhouette } from './hud/silhouette';
 import { CORNER_NAMES, portraitUrl, SKIN_ORDER, SKIN_SWATCHES, swatchFor } from './skins';
 import { taleOfTheTape } from './tale';
+import {
+  CORNER_PICKS, GLOBAL_LABEL, LOCAL_SETUP_DOC, MIND_TAG, PICK_DETAIL, PICK_LABEL, cornerPick, effectiveMind, isOverridden, localStatusLine, pickMind,
+  type CornerPick, type LocalHealthView,
+} from './mind-picks';
+import { PLAYER_REACTION_DELAY_S } from '../player/config';
 
 export const PLAN_MAX_WORDS = 150;
 export const TEMPERAMENT = { MIN: 0.3, MAX: 1.8, STEP: 0.05 } as const;
+/** How often the LOCAL model's health is re-read while a corner has it picked (ms). */
+const LOCAL_PROBE_MS = 5000;
 
 export function wordCount(text: string): number {
   const t = text.trim();
@@ -41,6 +51,10 @@ export class SelectScreen {
   private cards: CornerCard[] = [];
   private fight: HTMLButtonElement;
   private base: MatchSetup;
+  private syncSettings: () => void = () => {};
+  private localHealth: LocalHealthView | null = null;
+  private localAt = -Infinity;
+  private probing = false;
 
   constructor(private opts: SelectOptions) {
     this.base = opts.initial;
@@ -54,29 +68,109 @@ export class SelectScreen {
     this.cards = [0, 1].map((c) => this.buildCard(c as Corner, opts.initial.fighters[c]));
     this.el = h('div', 'select-screen', title, this.cards[0].root, center, this.cards[1].root);
     this.validate();
+    // Settings changed here or in another tab: the toggles, the corner minds and their status follow.
+    onSettingsChange(() => {
+      this.syncSettings();
+      this.renderCards();
+      this.probeLocal();
+    });
+    setInterval(() => this.probeLocal(), LOCAL_PROBE_MS);
+    this.probeLocal();
   }
 
-  /** Presentation settings. They never touch physics: a hydraulic leak still costs pressure with oil effects off. */
+  /**
+   * Settings: MINDS (the global mind override), FAIR MODE, and the presentation toggles. Only MINDS
+   * and FAIR MODE change who decides or how fast; physics never reads any of them.
+   */
   private buildSettings(): HTMLElement {
-    const input = h('input', { type: 'checkbox', class: 'sel-toggle-input' }) as HTMLInputElement;
-    input.checked = settings().oilEffects;
-    input.addEventListener('change', () => setSetting('oilEffects', input.checked));
-    const sound = h('input', { type: 'checkbox', class: 'sel-toggle-input' }) as HTMLInputElement;
-    sound.checked = settings().soundOn;
-    sound.addEventListener('change', () => setSetting('soundOn', sound.checked));
-    return h('div', 'sel-settings-row',
-      h('label', 'sel-settings', sound, h('span', 'sel-toggle'), h('span', 'sel-settings-label', 'SOUND')),
-      h('label', 'sel-settings', input, h('span', 'sel-toggle'), h('span', 'sel-settings-label', 'OIL SPILLS & HISS')),
+    const toggle = (key: 'oilEffects' | 'soundOn' | 'fairMode', label: string, title?: string) => {
+      const input = h('input', { type: 'checkbox', class: 'sel-toggle-input' }) as HTMLInputElement;
+      input.checked = settings()[key];
+      input.addEventListener('change', () => setSetting(key, input.checked));
+      return { input, el: h('label', { class: 'sel-settings', title }, input, h('span', 'sel-toggle'), h('span', 'sel-settings-label', label)) };
+    };
+    const sound = toggle('soundOn', 'SOUND');
+    const oil = toggle('oilEffects', 'OIL SPILLS & HISS');
+    const fair = toggle('fairMode', 'FAIR MODE', 'The human player feels Jev\'s 0.3 s reaction delay instead of 0.05 s');
+    const minds = mindSwitch(GLOBAL_MINDS, (g) => GLOBAL_LABEL[g], (g) => setSetting('minds', g), 'Global minds');
+    this.syncSettings = () => {
+      const s = settings();
+      sound.input.checked = s.soundOn;
+      oil.input.checked = s.oilEffects;
+      fair.input.checked = s.fairMode;
+      minds.set(s.minds);
+    };
+    this.syncSettings();
+    return h('div', 'sel-settings-block',
+      h('div', 'sel-minds-global', h('span', 'sel-settings-label', 'MINDS'), minds.el),
+      h('div', 'sel-settings-row', sound.el, oil.el, fair.el),
     );
   }
 
   show(setup?: MatchSetup): void {
     if (setup) {
       this.base = setup;
-      setup.fighters.forEach((f, i) => { this.cards[i].setup = { ...f }; this.cards[i].render(); });
+      setup.fighters.forEach((f, i) => { this.cards[i].setup = { ...f }; });
     }
     this.el.classList.remove('bc-hidden');
+    this.renderCards();
     this.validate();
+    this.probeLocal(true);
+  }
+
+  /** Pick a corner's mind (at most one YOU: the other corner goes back to its previous mind). */
+  pick(corner: Corner, p: CornerPick): void {
+    const fighters = pickMind([this.cards[0].setup, this.cards[1].setup], corner, p);
+    this.cards.forEach((c, i) => { c.setup = fighters[i]; });
+    this.renderCards();
+    this.probeLocal();
+  }
+
+  private renderCards(): void {
+    for (const c of this.cards) c.render();
+  }
+
+  /** Re-read the LOCAL model's health while a corner has LOCAL (no call otherwise). */
+  private probeLocal(force = false): void {
+    if (!this.visible || this.probing) return;
+    const g = settings().minds;
+    if (!this.cards.some((c) => effectiveMind(c.setup, g) === 'local')) return;
+    const now = performance.now();
+    if (!force && now - this.localAt < LOCAL_PROBE_MS) return;
+    this.probing = true;
+    probeLocalHealth()
+      .then((health) => { this.localHealth = health; })
+      .finally(() => {
+        this.probing = false;
+        this.localAt = performance.now();
+        this.renderCards();
+      });
+  }
+
+  /** The live status line under a corner's mind picker. */
+  private mindStatus(m: CornerPick): { cls: string; text: string; hint: string | null } {
+    if (m === 'house') return { cls: '', text: 'RULES ONLY · NO NETWORK CALLS', hint: null };
+    if (m === 'you') {
+      const delay = settings().fairMode ? 'FAIR MODE · JEV\'S 0.30 S DELAY' : `${Math.round(PLAYER_REACTION_DELAY_S * 1000)} MS INPUT DELAY`;
+      return { cls: 'ok', text: `WASD + MOUSE · ${delay}`, hint: 'CLICK THE CAGE TO TAKE CONTROL · H SHOWS THE KEYS' };
+    }
+    if (m === 'jev') {
+      const link = sharedJevLink();
+      if (link.offline) return { cls: 'bad', text: 'CLOUD · LAST CALL FAILED', hint: 'THE HOUSE MIND FIGHTS UNTIL JEV ANSWERS AGAIN' };
+      return { cls: link.status === 'online' ? 'ok' : '', text: link.status === 'online' ? 'CLOUD · ONLINE' : 'CLOUD · TYPESAFE JEV', hint: null };
+    }
+    const line = localStatusLine(this.localHealth);
+    return {
+      cls: line.ok === null ? '' : line.ok ? 'ok' : 'bad',
+      text: line.text,
+      hint: line.ok === false ? `SET UP: ${LOCAL_SETUP_DOC} · THE HOUSE MIND FIGHTS UNTIL IT ANSWERS` : null,
+    };
+  }
+
+  /** The tale of the tape's MIND row. */
+  private mindTape(m: CornerPick): string {
+    if (m === 'local') return `LOCAL · ${this.localHealth?.ok && this.localHealth.model ? this.localHealth.model : 'OPEN SOURCE'}`;
+    return MIND_TAG[m];
   }
 
   hide(): void {
@@ -121,6 +215,10 @@ export class SelectScreen {
     const words = h('span', 'sel-words');
     const temp = h('input', { type: 'range', min: TEMPERAMENT.MIN, max: TEMPERAMENT.MAX, step: TEMPERAMENT.STEP, 'aria-label': 'Temperament' });
     const tempValue = h('b', {});
+    const mindName = h('span', 'sel-skin-name');
+    const mindStatus = h('span', 'sel-mind-line');
+    const mindHint = h('span', 'sel-mind-hint');
+    const minds = mindSwitch(CORNER_PICKS, (p) => PICK_LABEL[p], (p) => this.pick(corner, p), `${CORNER_NAMES[corner]} mind`);
 
     const designButtons = designs.map((d) => {
       const b = h('button', { class: 'sel-design', type: 'button' }, d.name);
@@ -168,6 +266,21 @@ export class SelectScreen {
 
     card.render = () => {
       const d = byId.get(card.setup.design) ?? designs[0];
+      const g = settings().minds;
+      const own = cornerPick(card.setup);
+      const eff = effectiveMind(card.setup, g);
+      const overridden = isOverridden(card.setup, g);
+      minds.set(own, overridden ? eff : null);
+      setText(mindName, overridden ? `${GLOBAL_LABEL[g]} · GLOBAL` : PICK_DETAIL[eff]);
+      const st = this.mindStatus(eff);
+      setText(mindStatus, st.text);
+      mindStatus.className = `sel-mind-line ${st.cls}`;
+      setText(mindHint, st.hint ?? '');
+      toggleClass(mindHint, 'bc-hidden', !st.hint);
+      const you = eff === 'you';
+      toggleClass(card.root, 'is-you', you);
+      (plan as HTMLTextAreaElement).disabled = you; // the player fights to no plan
+      (temp as HTMLInputElement).disabled = you;
       const hands: HandsOption = card.setup.loadout?.design === d.id ? card.setup.loadout.hands : 'stock';
       const t = taleOfTheTape(applyLoadout(d, { design: d.id, hands }));
       const stock = stockHands(d);
@@ -193,6 +306,7 @@ export class SelectScreen {
       }
       setText(skinName, swatchFor(card.setup.skin, d).name.toUpperCase());
       tape.replaceChildren(...[
+        ['MIND', this.mindTape(eff)],
         ['MASS', `${Math.round(t.massKg)} kg`],
         ['HEIGHT', `${t.heightM.toFixed(2)} m`],
         ['PEAK TORQUE', `${Math.round(t.peakTorqueNm)} N·m · ${t.peakJoint}`],
@@ -212,6 +326,7 @@ export class SelectScreen {
     card.root.append(
       h('header', 'sel-corner', CORNER_NAMES[corner]),
       h('div', 'sel-hero', portrait, h('div', 'sel-hero-text', h('div', 'sel-hero-top', kind), name, tagline)),
+      h('div', 'sel-label', 'MIND ', mindName), minds.el, h('div', 'sel-mind-status', mindStatus, mindHint),
       designRow,
       h('div', 'sel-label', 'SKIN ', skinName), skinRow,
       h('div', 'sel-label', 'HANDS ', handsName), handsRow,
@@ -229,4 +344,28 @@ export class SelectScreen {
     setText(el, `${n} / ${PLAN_MAX_WORDS} WORDS`);
     toggleClass(el, 'over', n > PLAN_MAX_WORDS);
   }
+}
+
+/** A row of one-choice buttons: `on` is the chosen value; `forced` shows a value a global override puts in its place. */
+function mindSwitch<T extends string>(values: readonly T[], label: (v: T) => string, onPick: (v: T) => void, aria: string) {
+  const buttons = values.map((v) => {
+    const b = h('button', { class: 'sel-mind', type: 'button', 'aria-pressed': 'false' }, label(v)) as HTMLButtonElement;
+    b.addEventListener('click', () => {
+      b.blur(); // a focused button would take the next Space or Enter
+      onPick(v);
+    });
+    return { v, b };
+  });
+  const el = h('div', { class: 'sel-minds', role: 'group', 'aria-label': aria }, ...buttons.map((x) => x.b));
+  return {
+    el,
+    set(on: T, forced: T | null = null): void {
+      for (const { v, b } of buttons) {
+        toggleClass(b, 'on', v === on);
+        toggleClass(b, 'overridden', forced !== null && v === on);
+        toggleClass(b, 'forced', v === forced);
+        b.setAttribute('aria-pressed', String(v === on));
+      }
+    },
+  };
 }

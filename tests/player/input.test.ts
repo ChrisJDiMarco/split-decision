@@ -64,7 +64,7 @@ describe('player input: held keys never stick', () => {
   });
 
   it('lets go on window blur', () => {
-    down('ControlLeft');
+    down('KeyG');
     expect(held).toEqual(['guard']);
     win.dispatchEvent(new Event('blur'));
     expect(held).toEqual([]);

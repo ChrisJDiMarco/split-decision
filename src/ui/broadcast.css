@@ -274,3 +274,41 @@
   .fight-bar { grid-template-columns: minmax(220px, 320px) auto minmax(220px, 320px); }
   .ticker { width: calc(100% - 40px); bottom: auto; top: 110px; }
 }
+
+/* ---------------------------------------------------------------- minds + player mode */
+/* Walkout: which mind fights each corner, under the tale of the tape. */
+.tape-minds { padding-top: 8px; border-top: 1px solid var(--hair); }
+.tape-minds .l, .tape-minds .r { font: 700 13px/1 var(--mono); letter-spacing: 0.08em; color: var(--gold); }
+
+/* In-fight MINDS control (click only), under the camera bug. */
+.mind-switch { position: absolute; top: 40px; right: 22px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: auto; }
+.ms-chip {
+  cursor: pointer; font: 600 10px/1 var(--mono); letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase;
+  background: var(--glass); border: 1px solid var(--hair); padding: 5px 8px;
+}
+.ms-chip b { color: var(--ink); font-weight: 600; }
+.ms-chip:hover { border-color: var(--hair-strong); }
+.ms-pop { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--glass-strong); border: 1px solid var(--hair-strong); }
+.ms-row { display: flex; align-items: center; gap: 4px; }
+.ms-k { width: 44px; font: 700 10px/1 var(--mono); letter-spacing: 0.14em; color: var(--dim); }
+.ms-k.c0 { color: var(--red); }
+.ms-k.c1 { color: var(--blue); }
+.ms-opt {
+  cursor: pointer; font: 800 12px/1 var(--cond); letter-spacing: 0.1em; color: var(--dim); background: transparent;
+  border: 1px solid var(--hair-strong); padding: 5px 7px;
+}
+.ms-opt:hover { color: var(--ink); }
+.ms-opt.on { color: var(--ink); background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.4); }
+.ms-opt.forced { color: #120c00; background: var(--gold); border-color: var(--gold); }
+.ms-you { font: 600 10px/1 var(--mono); letter-spacing: 0.1em; color: var(--ink); }
+.density-off .mind-switch { display: none; }
+
+/* Player mode: the player HUD brings your panel and the opponent's MIND + body, so the broadcast's
+   corner stacks step aside; its fight bar, ticker and camera bug stay. */
+.key-hints.player-hints { display: none; }
+.player-mode .key-hints.spectator-hints { display: none; }
+.player-mode .key-hints.player-hints { display: block; }
+.player-mode .bc-hud .corner-stack { display: none; }
+.replaying .player-hud, .player-hud.ph-off { opacity: 0; transition: opacity 0.3s ease; }
+.player-hud { transition: opacity 0.3s ease; }
+.player-mode.density-clean .key-hints.player-hints, .player-mode.density-off .key-hints.player-hints { display: none; }

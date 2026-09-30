@@ -22,10 +22,11 @@ describe('player keymap', () => {
   it('held actions ignore modifiers and every default key is swallowed', () => {
     const map = fresh();
     expect(heldActionFor(map, 'KeyW')).toBe('move_forward');
-    expect(heldActionFor(map, 'ControlLeft')).toBe('guard');
+    expect(heldActionFor(map, 'KeyG')).toBe('guard');
+    expect(heldActionFor(map, 'ControlLeft')).toBeNull();
     expect(heldActionFor(map, 'KeyC')).toBe('clinch');
     expect(heldActionFor(map, 'KeyQ')).toBeNull();
-    for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyZ', 'KeyX', 'Tab', 'Space', 'KeyV', 'KeyH', 'KeyC']) {
+    for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyZ', 'KeyX', 'Tab', 'Space', 'KeyV', 'KeyH', 'KeyC', 'KeyG']) {
       expect(isBoundCode(map, code)).toBe(true);
     }
     expect(chordOf('ShiftLeft', true)).toBe('ShiftLeft');
@@ -58,6 +59,35 @@ describe('player keymap', () => {
     const mem = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
     expect(saveKeymap(rebind(fresh(), 'feint', 'KeyG'), mem)).toBe(true);
     expect(loadKeymap(mem).feint).toEqual(['KeyG']);
+  });
+
+  it('never binds Ctrl, Alt or Cmd (browser and OS shortcuts)', () => {
+    const all = Object.values(fresh()).flat();
+    expect(all.some((b) => /Control|Alt|Meta/.test(b))).toBe(false);
+    expect(rebind(fresh(), 'guard', 'ControlLeft').guard).toEqual(['KeyG']);
+    expect(rebind(fresh(), 'jab', 'Shift+AltLeft').jab).toEqual(['Mouse0']);
+    // The host's own keys stay free in player mode (main.ts T/L/N, the broadcast's O/I, P replay, M mute).
+    for (const code of ['KeyT', 'KeyL', 'KeyN', 'KeyO', 'KeyI', 'KeyP', 'KeyM']) expect(isBoundCode(fresh(), code)).toBe(false);
+  });
+
+  it('migrates a saved keymap that still guards on Ctrl', () => {
+    // Saved before the move: every action stored, guard on both Ctrl keys.
+    const old = { ...fresh(), guard: ['ControlLeft', 'ControlRight'] };
+    const migrated = mergeKeymap(JSON.parse(JSON.stringify(old)));
+    expect(migrated.guard).toEqual(['KeyG']);
+    expect(heldActionFor(migrated, 'KeyG')).toBe('guard');
+    // G was already rebound to feint: guard takes the first free fallback, feint keeps G.
+    const taken = mergeKeymap({ ...old, feint: ['KeyG'] });
+    expect(taken.feint).toEqual(['KeyG']);
+    expect(taken.guard).toEqual(['KeyY']);
+    expect(pressActionFor(taken, 'KeyG', false)).toBe('feint');
+    // A Ctrl binding next to a good one: only the Ctrl binding goes.
+    expect(mergeKeymap({ guard: ['ControlLeft', 'KeyV'], toggle_camera: ['KeyK'] }).guard).toEqual(['KeyV']);
+    // Defaults filled in beside saved rebinds keep their Shift chords (low kick R, head kick Shift+R).
+    const partial = mergeKeymap({ jab: ['KeyJ'] });
+    expect(partial.low_kick).toEqual(['KeyR']);
+    expect(partial.head_kick).toEqual(['Shift+KeyR']);
+    expect(partial.uppercut).toEqual(['Shift+Mouse0']);
   });
 
   it('labels bindings for the hints', () => {

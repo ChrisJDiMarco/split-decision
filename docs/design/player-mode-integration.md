@@ -33,7 +33,7 @@ Footwork is relative to the opponent (lock-on): the camera angle never changes w
 | Q / E | lead hook / rear hook | `hook` + `Intent.hand` |
 | F / R / Shift+R | front kick / low kick / head kick | as named |
 | Z / X | tornado kick / spinning backfist | as named (falls back until the flashy build) |
-| Ctrl (hold) | guard | `guard` |
+| G (hold) | guard (moved off Ctrl, see "Integrated in the main game") | `guard` |
 | C (hold) | clinch | `clinch` |
 | Space | slip and counter; kip-up while down | `sidestep_counter` for 0.9 s; `getupStyle: 'kip_up'` |
 | Tab | feint | `feint` for 0.6 s |
@@ -152,3 +152,58 @@ Shake: the chase camera has its own `CameraShake`, fed by `player.onFrame` (hits
 - A released key always lets go, even while input is disabled (KO, break), with Cmd held, or with focus in a text field, and releasing Cmd releases everything (macOS drops those keyups). The host doesn't need to clear keys around `setEnabled`.
 - Referee breaks (`SimEvent` `'break'` / `'fight'`, being added to the protocol by another agent) make the body obey the referee over any intent. Player input can stay enabled through a break; for clearer feedback, show BREAK in the player HUD and `setEnabled(false)` until `'fight'`.
 - One human per fight. Local two-player would need gamepad input (`navigator.getGamepads`) mapped into the same driver.
+
+## Integrated in the main game (2026-09-29)
+
+Built with the mind picker. Chris asked for "a toggle for either robot or global to turn on or off Jev and turn on or off local open-source jev".
+
+### Minds
+
+Each corner is fought by one of four minds:
+
+| Pick | What decides | Stored as |
+|---|---|---|
+| JEV | cloud Jev through `/api/jev` | `FighterSetup.mind` absent or `'jev'` |
+| LOCAL | an open-source Jev-compatible model on this Mac through `/api/local-jev` (docs/design/local-mind.md) | `mind: 'local'` |
+| HOUSE | the House Mind rules, no network | `mind: 'house'` |
+| YOU | the player | `controller: 'player'` (the corner's `mind` is kept, so dropping YOU restores it) |
+
+- **Select screen**: a JEV / LOCAL / HOUSE / YOU row on each corner card. Only one corner can be YOU; picking YOU in one corner puts the other back on the mind it had before. Under each row is a live status line. JEV shows the link's state (no call is made for it). LOCAL reads `/api/local-jev/health`: READY with the model and latency, or NOT RUNNING with the reason and a pointer to `docs/design/local-mind.md`. It is re-read every 5 s, but only while a corner has LOCAL. HOUSE reads "no network calls". YOU shows the input delay. A YOU corner greys out its plan and temperament. The tale of the tape on the card and in the walkout has a MIND row.
+- **Global MINDS setting** (`src/core/settings.ts`, `settings().minds`): PER CORNER (default), ALL JEV, ALL LOCAL or ALL HOUSE. It overrides every corner except YOU. The overridden pick is shown struck through and the forced mind in gold. Like the other settings it is saved in the browser and synced across tabs.
+- **In the fight**: the MINDS chip under the camera bug (top right, click only) opens the global row and a row for each corner. A change hot swaps the brains with `Brain.setSource()` without restarting the fight. The MIND panel badge follows (`HOUSE`, `LOCAL OFFLINE → HOUSE`, ...). YOU is fixed for the fight. A per-corner change carries into REMATCH.
+- **FAIR MODE** (setting, off by default): the YOU corner leaves `reactionDelayS` unset, so it feels Jev's 0.3 s. `finalizeSetup()` (`src/ui/mind-picks.ts`) applies it at every fight start, including rematches. A setup with no YOU comes back as the same object, so JEV v JEV starts exactly as before.
+
+Checked in a browser: ALL HOUSE made 0 network calls. LOCAL with no model made one failed `/api/local-jev` call, then went to the House Mind with health polls only and no `/api/jev` call. JEV v JEV had the same setup keys as before, Jev answering at about 250-350 ms, the director camera and the old hints.
+
+### Player mode wiring (`src/main.ts`)
+
+- The YOU corner gets no Brain. `minds()` looks brains up by corner, and the player's corner is `null`. `PlayerMode` is created when the world is ready (`buildPlayer`) with `fightBar: false`. It is fed `onFrame(msg, opponentBrain.latest)` and updated after `arena.update` and just before `post.render()`.
+- `playerHostState()` (`src/player/host.ts`, pure and tested) decides input and camera every frame. Input is on only in the live fight: not in the walkout, the break between rounds, the KO, the decision, a replay or while the sim is paused. The camera is the director in the walkout, replays and the winner card, and the player's own choice (V) in the fight and the KO. The player HUD hides behind the winner card. Going back to select disposes the player.
+- Camera handoff: `broadcast.camera.setExternal(on)` goes to `CameraRig.setExternal()`. The director keeps running, but `rig.apply` is skipped while the chase camera drives. Handing the camera back eases from wherever the chase lens is.
+- HUD: in player mode (`.player-mode` on `#hud`) both broadcast corner stacks are hidden. The player HUD has your panel and the opponent's MIND + body panel. The broadcast's fight bar, ticker, camera bug and MINDS chip stay.
+- Referee breaks: `PlayerMode` reads `RobotTelemetry.referee` every frame. During a break a band shows BREAK with what to do, and input waits for FIGHT. The exception is a downed fighter: it keeps input, so Space can still pick the kip-up. FIGHT! flashes only when the referee called it; a KO also ends a break, and no flash shows then.
+
+### Keys
+
+Player mode swallows the keys it binds, so with a YOU corner the host keys move to keys it does not use:
+
+| Action | Spectating (no YOU) | Player mode |
+|---|---|---|
+| slow motion | S or T | T |
+| render quality | Q or L | L |
+| new fight (reselect) | R or N | N |
+| free orbit camera | C or O | O (when the director has the camera) |
+| HUD density | H or I | I |
+| replay / mute | P / M | P / M |
+| chase or broadcast camera | none | V |
+| key sheet | none | H |
+
+The on-screen hints switch to `V camera · H keys · P replay · T slow-mo · M mute · N new fight` in player mode. The host shortcuts ignore Ctrl, Alt and Cmd combinations.
+
+**Guard moved off Ctrl to G (hold).** Ctrl+Tab, Ctrl+W, Ctrl+Space and Ctrl+click are browser and OS shortcuts. Ctrl, Alt and Cmd can no longer be bound at all (`validBinding`), since they turn the other game keys into shortcuts. Saved keymaps are migrated on load: Ctrl bindings are dropped, and an action left empty gets its default back. If a saved rebind already uses that key, the action gets the first free fallback key (G, Y, U, J, K).
+
+### Open
+
+- Hit-stop still freezes the player's controls for its length on the player's own landed strikes. Not filtered yet (the `warp.onEvents` filter from step 2); decide once it has been felt.
+- The opponent panel is still titled "JEV MIND" for LOCAL and HOUSE; the badge and chip carry the real mind (`src/ui/hud/mind-panel.ts`).
+- Real pointer lock and feel in Chrome (outside the embedded pane) still need Chris's hands.

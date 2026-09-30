@@ -10,7 +10,7 @@
 //             controller can throw again.
 //   footwork  WASD is a vector relative to the opponent (Intent.move). Until control consumes
 //             move, it maps onto the footwork tactics (see footworkTactic).
-//   defence   Ctrl held = guard, C held = clinch, Space = slip (sidestep_counter for SLIP_HOLD_S),
+//   defence   G held = guard, C held = clinch, Space = slip (sidestep_counter for SLIP_HOLD_S),
 //             Tab = feint. Space while down asks for a kip-up (getupStyle).
 import type { Intent, MoveVector, Tactic, TargetZone } from '../core/protocol';
 import {

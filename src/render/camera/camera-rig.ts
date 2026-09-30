@@ -31,6 +31,8 @@ interface ControlLimits {
 
 export class CameraRig {
   free = false;
+  /** Another camera (player mode's chase camera) drives the stage camera; apply() leaves it alone. */
+  external = false;
   private pos = new THREE.Vector3();
   private target = new THREE.Vector3();
   private fov: number;
@@ -58,6 +60,22 @@ export class CameraRig {
     Object.assign(c, limits);
   }
 
+  /**
+   * Hand the stage camera to another driver (on) or take it back (off). Taking it back eases from
+   * wherever the other camera left the lens, not from the last director pose.
+   */
+  setExternal(on: boolean): void {
+    if (on === this.external) return;
+    this.external = on;
+    if (on) return;
+    this.lastShake.set(0, 0, 0);
+    this.pos.copy(this.stage.camera.position);
+    this.target.copy(this.stage.controls.target);
+    this.fov = this.stage.camera.fov;
+    this.initialised = true;
+    this.setFree(this.free);
+  }
+
   /** Physics-frame point → world. */
   toWorld(p: Vec3, out = new THREE.Vector3()): THREE.Vector3 {
     this.stage.physicsRoot.updateMatrixWorld();
@@ -65,6 +83,7 @@ export class CameraRig {
   }
 
   apply(shot: DirectorOutput | null, dt: number, shakePhysics: Vec3, punch: PunchFx | null = null): void {
+    if (this.external) return;
     const cam = this.stage.camera;
     const controls = this.stage.controls;
     cam.position.sub(this.lastShake);

@@ -1,15 +1,27 @@
-// Player settings, persisted per browser. Physics never reads these: they only switch
-// presentation (effects and sounds), so a setting can never change a fight's outcome.
+// Player settings, persisted per browser. Physics never reads these. Most only switch presentation
+// (effects and sounds); MINDS picks which mind decides for every non-player corner, and FAIR MODE
+// gives a human player Jev's reaction delay.
 
 export interface Settings {
   /** Hydraulic oil spray, puddles and the leak hiss. Leaks still cost pressure either way. */
   oilEffects: boolean;
   /** Master sound. Off by default while Chris watches other things during test runs. */
   soundOn: boolean;
+  /**
+   * The global MINDS override: 'corner' (default) fights each corner's own pick; 'jev', 'local' or
+   * 'house' puts every corner that is not the human player on that mind. Changing it mid-fight hot
+   * swaps the minds (Brain.setSource).
+   */
+  minds: GlobalMinds;
+  /** A human player feels Jev's reaction delay (MatchSetup.reactionDelayS) instead of the snappy player delay. */
+  fairMode: boolean;
 }
 
+export type GlobalMinds = 'corner' | 'jev' | 'local' | 'house';
+export const GLOBAL_MINDS: readonly GlobalMinds[] = ['corner', 'jev', 'local', 'house'];
+
 const STORAGE_KEY = 'split-decision.settings.v1';
-const DEFAULTS: Settings = { oilEffects: false, soundOn: false };
+const DEFAULTS: Settings = { oilEffects: false, soundOn: false, minds: 'corner', fairMode: false };
 
 type Listener = (s: Readonly<Settings>) => void;
 const listeners = new Set<Listener>();
@@ -31,6 +43,8 @@ function pick(p: Partial<Settings>): Partial<Settings> {
   const out: Partial<Settings> = {};
   if (typeof p.oilEffects === 'boolean') out.oilEffects = p.oilEffects;
   if (typeof p.soundOn === 'boolean') out.soundOn = p.soundOn;
+  if (typeof p.minds === 'string' && (GLOBAL_MINDS as readonly string[]).includes(p.minds)) out.minds = p.minds;
+  if (typeof p.fairMode === 'boolean') out.fairMode = p.fairMode;
   return out;
 }
 

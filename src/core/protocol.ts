@@ -123,15 +123,20 @@ export type SimEvent =
 /**
  * Referee break events (src/physics/systems/referee.ts). 'break': someone went down, the standing
  * fighter is sent to a neutral spot and throws nothing; again with both corners if it becomes a
- * double knockdown. 'fight': everyone has been fully up for the grace period, fighting resumes.
- * A KO during a break ends it without a 'fight' (the 'ko' event says it all).
- * Not yet part of SimEvent: src/ui/ticker-feed.ts fromEvent() switches over every SimEvent kind with
- * no default, so a new kind fails the type check there. Until it gets a default branch the referee
- * logs these in SimContext.referee.log and the frame carries RobotTelemetry.referee.
+ * double knockdown. 'fight': everyone is back up and steady and the fighter at the neutral spot has
+ * got there (reason 'room'); or the referee stopped waiting for that: no progress toward the spot
+ * ('stalled') or too long a wait ('timeout'). A KO during a break ends it without a 'fight' (the 'ko'
+ * event says it all).
+ * Published as RefereeTelemetry.events (RefereeLogEvent, numbered by seq), not in SimEvent:
+ * src/ui/ticker-feed.ts fromEvent() switches over every SimEvent kind with no default, so a new kind
+ * fails the type check there. Once it has a `default: return null`, these can join SimEvent.
  */
 export type RefereeEvent =
   | { kind: 'break'; down: Corner[] }
-  | { kind: 'fight'; breakS: number };
+  | { kind: 'fight'; breakS: number; reason?: 'room' | 'stalled' | 'timeout' };
+
+/** A referee event as logged and published: numbered in order this fight (seq 0, 1, ...), with its sim time. */
+export type RefereeLogEvent = RefereeEvent & { seq: number; time: number };
 
 export type JointState = 'ok' | 'degraded' | 'limp' | 'seized';
 
@@ -153,6 +158,11 @@ export interface RefereeTelemetry {
   role?: 'down' | 'neutral' | 'hold';
   neutral?: Vec3; // role 'neutral': the spot he was sent to (world, z = 0)
   breakS?: number; // seconds since the break started
+  /**
+   * Referee events since the previous frame, oldest first (both corners' telemetry carry the same
+   * events: they are match-level; read one corner, or de-duplicate by seq).
+   */
+  events?: RefereeLogEvent[];
 }
 
 export interface Gaze {
@@ -287,7 +297,7 @@ export interface WorldMeta {
 }
 
 export type MainToWorker =
-  | { type: 'init'; setup: MatchSetup }
+  | { type: 'init'; setup: MatchSetup; balance?: 'legacy' | 'dcm' } // balance: preview override (?balance=dcm)
   | { type: 'intent'; corner: Corner; intent: Intent; issuedAtTick: number }
   | { type: 'release' } // drop the robots from the gantry: fight starts
   | { type: 'pause'; paused: boolean }

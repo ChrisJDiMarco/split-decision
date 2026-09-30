@@ -235,9 +235,17 @@ export interface FighterSetup {
    * mode' leaves it unset so the human feels Jev's delay too.
    */
   reactionDelayS?: number;
+  /**
+   * Which mind decides for this corner when it is not the player: cloud Jev (default), a LOCAL
+   * open-source Jev-compatible model, or the HOUSE rules. Kept while the corner is the player so
+   * picking the mind back restores it. The global MINDS setting (src/core/settings.ts) overrides it.
+   */
+  mind?: FighterMind;
 }
 
 export type FighterController = 'jev' | 'player';
+/** Same values as the brain's MindSource (src/brain/types.ts). */
+export type FighterMind = 'jev' | 'local' | 'house';
 
 export interface MatchSetup {
   fighters: [FighterSetup, FighterSetup];

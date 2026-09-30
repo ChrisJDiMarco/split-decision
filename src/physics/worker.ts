@@ -4,6 +4,7 @@
 import loadMujoco from '@mujoco/mujoco';
 import type { MainToWorker, WorkerToMain, WorldMeta } from '../core/protocol';
 import type { MatchSetup } from '../core/types';
+import { CONTROL } from './control/balance/config';
 import { buildContext } from './runtime';
 import type { SimContext } from './sim-context';
 import { SYSTEMS } from './systems';
@@ -163,6 +164,11 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
   try {
     switch (msg.type) {
       case 'init':
+        // Preview of the in-progress balance engine (?balance=dcm on the page); read when controllers are built.
+        if (msg.balance) {
+          CONTROL.balance = msg.balance;
+          CONTROL.inertialize = msg.balance === 'dcm';
+        }
         await init(msg.setup);
         break;
       case 'reset':

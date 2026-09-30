@@ -21,6 +21,13 @@ const WARN = 0.65;
 const CRIT = 0.85;
 const HIT_MARKER_S = 0.45;
 const HURT_S = 0.35;
+/** The FIGHT! flash when a referee break ends. */
+const FIGHT_FLASH_S = 0.9;
+const BREAK_TEXT: Record<'down' | 'neutral' | 'hold', [string, string]> = {
+  down: ['BREAK', 'GET UP · SPACE KIP-UP'],
+  neutral: ['BREAK', 'GIVE HIM ROOM · WAIT FOR FIGHT'],
+  hold: ['BREAK', 'WAIT FOR FIGHT'],
+};
 const HINT_GROUPS: Array<[string, ActionId[]]> = [
   ['MOVE', ['move_forward', 'move_back', 'move_left', 'move_right']],
   ['HANDS', ['jab', 'cross', 'hook_lead', 'hook_rear', 'uppercut', 'overhand']],
@@ -55,6 +62,8 @@ export class PlayerHud {
   private marker: HTMLElement;
   private hurt: HTMLElement;
   private prompt: HTMLElement;
+  private breakBand: HTMLElement;
+  private fightT = 0;
   private hints: HTMLElement;
   private hintRows = new Map<ActionId, HTMLElement>();
   private markerT = 0;
@@ -89,7 +98,8 @@ export class PlayerHud {
     this.hurt = h('div', 'ph-hurt');
     this.prompt = h('div', 'ph-prompt', h('b', {}, 'CLICK'), ' to take control · ', h('b', {}, 'H'), ' keys · ', h('b', {}, 'ESC'), ' releases the mouse');
     this.hints = this.buildHints();
-    this.el = h('div', 'player-hud', this.hurt, fightBar ? this.fightBar.el : null, this.reticle, this.marker, mine, this.opp.el, this.prompt, this.hints);
+    this.breakBand = h('div', 'ph-break hidden');
+    this.el = h('div', 'player-hud', this.hurt, fightBar ? this.fightBar.el : null, this.reticle, this.marker, this.breakBand, mine, this.opp.el, this.prompt, this.hints);
   }
 
   setNames(names: readonly [string, string], subs: readonly [string, string]): void {
@@ -118,6 +128,20 @@ export class PlayerHud {
 
   setLocked(locked: boolean): void {
     toggleClass(this.prompt, 'hidden', locked);
+  }
+
+  /** The referee's break: a BREAK band with what to do (null: fighting; `fight` flashes FIGHT! as it ends). */
+  setBreak(role: 'down' | 'neutral' | 'hold' | null, fight = false): void {
+    if (role) {
+      const [title, sub] = BREAK_TEXT[role];
+      this.breakBand.replaceChildren(h('b', {}, title), h('span', {}, sub));
+      this.fightT = 0;
+    } else if (fight) {
+      this.breakBand.replaceChildren(h('b', {}, 'FIGHT!'));
+      this.fightT = FIGHT_FLASH_S;
+    }
+    toggleClass(this.breakBand, 'hidden', !role && !fight);
+    toggleClass(this.breakBand, 'fight', !role && fight);
   }
 
   setCamera(label: string): void {
@@ -172,6 +196,10 @@ export class PlayerHud {
         ...driver.buffer.map((t) => h('span', 'chip ph-queued', tacticLabel(t))),
       ];
       this.buffer.replaceChildren(...(chips.length ? chips : [h('span', 'ph-empty', 'BUFFER EMPTY')]));
+    }
+    if (this.fightT > 0) {
+      this.fightT = Math.max(0, this.fightT - dt);
+      if (this.fightT === 0) toggleClass(this.breakBand, 'hidden', true);
     }
     this.markerT = Math.max(0, this.markerT - dt);
     this.hurtT = Math.max(0, this.hurtT - dt);

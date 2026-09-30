@@ -16,6 +16,7 @@ import type { Stage } from '../render/stage';
 import { buildSubjects, indexWorld, type WorldIndex } from '../ui/scene-bridge';
 import type { MindView } from '../ui/minds';
 import { ChaseCamera, type ChaseSubjects } from './chase-camera';
+import { breakRoleOf, inputAllowed, type BreakRole } from './host';
 import { PlayerDriver, type SelfState } from './driver';
 import { PlayerHud } from './hud';
 import { PlayerInput } from './input';
@@ -37,7 +38,10 @@ export interface PlayerModeOptions {
   camera?: PlayerCamera;
   /** Draw the player HUD's own fight bar (off when the broadcast's is on screen). Default true. */
   fightBar?: boolean;
+  /** The opponent's mind as the fight bar tags it: 'JEV' (default), 'LOCAL', 'HOUSE'. */
+  oppLabel?: string;
 }
+
 
 /** Input-to-motion probes (ms): press → the telemetry frame showing it, on the main thread. */
 export interface PlayerStats {
@@ -65,6 +69,9 @@ export class PlayerMode {
   private oppMind: MindView | null = null;
   private capturing: ActionId | null = null;
   private enabled = true;
+  /** The referee's break (RobotTelemetry.referee): input waits for FIGHT, except a downed fighter's get-up. */
+  private breakRole: BreakRole = null;
+  private fightCalled = false;
   private moveProbe: { t: number; forward: number; strafe: number; checked: boolean } | null = null;
   private lastLatency: number | null = null;
 
@@ -78,7 +85,7 @@ export class PlayerMode {
       onResetKeys: () => this.applyKeymap(resetKeymap()),
     }, opts.fightBar ?? true);
     opts.hudRoot.append(this.hud.el);
-    this.hud.setNames([opts.designs[0].name, opts.designs[1].name], opts.corner === 0 ? ['YOU', 'JEV'] : ['JEV', 'YOU']);
+    this.setOpponentLabel(opts.oppLabel ?? 'JEV');
     this.hud.setKeymap(this.keymap, null);
     this.input = new PlayerInput(opts.stage.renderer.domElement, this.keymap, {
       onPress: (a, t) => this.onPress(a, t),
@@ -104,6 +111,7 @@ export class PlayerMode {
   onFrame(frame: FrameMsg, oppMind: MindView | null): void {
     this.latest = frame;
     this.oppMind = oppMind;
+    this.onReferee(frame.telemetry[this.corner]);
     this.chase.onEvents(frame.events);
     this.hud.onEvents(frame.events);
     this.checkMoveProbe(frame.telemetry);
@@ -113,6 +121,47 @@ export class PlayerMode {
   /** Turn player input on or off (off between rounds, during replays, after a KO). */
   setEnabled(on: boolean): void {
     this.enabled = on;
+    this.applyInput();
+  }
+
+  get isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /** The referee's current break role for this fighter (null: no break). */
+  get refereeBreak(): BreakRole {
+    return this.breakRole;
+  }
+
+  /** The opponent's mind changed (a hot swap): retag the fight bar. */
+  setOpponentLabel(label: string): void {
+    const o = this.opts;
+    this.hud.setNames([o.designs[0].name, o.designs[1].name], o.corner === 0 ? ['YOU', label] : [label, 'YOU']);
+  }
+
+  /** Show or hide the player HUD (the host hides it behind the winner card). */
+  setHudVisible(on: boolean): void {
+    this.hud.el.classList.toggle('ph-off', !on);
+  }
+
+  /**
+   * Referee breaks (docs/design/player-mode-integration.md, "Known limits"): the body obeys the
+   * referee over any intent, so input pauses until FIGHT for clear feedback. A downed fighter keeps
+   * its input, so Space can still pick the kip-up while it gets up.
+   */
+  private onReferee(me: RobotTelemetry): void {
+    const role = breakRoleOf(me);
+    // FIGHT! only when the referee called it: a KO also ends a break, with no 'fight' event.
+    if (me.referee?.events?.some((e) => e.kind === 'fight')) this.fightCalled = true;
+    if (role === this.breakRole) return;
+    if (role !== null && this.breakRole === null) this.fightCalled = false; // a new break
+    this.breakRole = role;
+    this.hud.setBreak(role, role === null && this.fightCalled);
+    this.applyInput();
+  }
+
+  private applyInput(): void {
+    const on = inputAllowed(this.enabled, this.breakRole);
     this.input.enabled = on;
     if (!on) this.driver.clear();
   }
@@ -134,7 +183,7 @@ export class PlayerMode {
     if (subjects) this.chase.update(dt, subjects);
     const tel = this.latest?.telemetry ?? null;
     this.hud.update(dt, tel, this.oppMind, this.driver.view());
-    this.hud.setLocked(this.input.locked || this.input.lockRefused || this.hud.hintsOpen());
+    this.hud.setLocked(this.input.locked || this.input.lockRefused || this.hud.hintsOpen() || !this.input.enabled); // no prompt while input waits
     const oppPoint = subjects ? ([subjects.opp[0], subjects.opp[1], Math.max(0.5, subjects.oppHeadZ - 0.4)] as Vec3) : null;
     this.hud.placeReticle(oppPoint, this.opts.stage.physicsRoot, this.opts.stage.camera, this.chase.active && !!tel && !tel[this.corner === 0 ? 1 : 0].down);
   }
@@ -155,14 +204,14 @@ export class PlayerMode {
       if (open && this.input.locked) document.exitPointerLock();
       return;
     }
-    if (!this.enabled) return;
+    if (!this.input.enabled) return;
     this.driver.press(action, t, this.self());
     this.flush();
   }
 
   /** Ask the driver for an intent and send it if it changed. */
   private flush(): void {
-    if (!this.enabled || !this.latest) return;
+    if (!this.input.enabled || !this.latest) return;
     const intent = this.driver.update(performance.now() / 1000, this.self());
     if (!intent) return;
     this.stats.sends++;

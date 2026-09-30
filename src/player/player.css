@@ -65,3 +65,15 @@
   .player-hud .corner-stack { width: 250px; }
   .player-hud .corner-stack.ph-opp .mind { display: none; }
 }
+
+/* referee break band (RobotTelemetry.referee): BREAK with what to do, then FIGHT! */
+.ph-break {
+  position: absolute; left: 50%; top: 24%; transform: translateX(-50%) skewX(var(--skew));
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 22px;
+  background: var(--glass-strong); border-top: 3px solid var(--amber); transition: opacity 0.2s ease;
+}
+.ph-break b { font: 800 34px/1 var(--cond); letter-spacing: 0.2em; color: var(--amber); }
+.ph-break span { font: 600 11px/1 var(--mono); letter-spacing: 0.14em; color: var(--ink); }
+.ph-break.fight { border-top-color: var(--gold); }
+.ph-break.fight b { color: var(--gold); }
+.ph-break.hidden { opacity: 0; }

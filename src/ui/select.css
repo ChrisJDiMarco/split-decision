@@ -106,3 +106,33 @@
 .sel-toggle-input:focus-visible + .sel-toggle { outline: 2px solid #f3c33b; outline-offset: 2px; }
 
 .sel-settings-row { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+
+/* Mind picker: JEV | LOCAL | HOUSE | YOU per corner, and the global MINDS override under FIGHT */
+.sel-minds { display: flex; flex-wrap: wrap; gap: 5px; }
+.sel-mind {
+  cursor: pointer; border: 1px solid var(--hair-strong); background: transparent; color: var(--dim); padding: 6px 10px;
+  font: 800 13px/1 var(--cond); letter-spacing: 0.12em; transition: all 0.12s ease; pointer-events: auto;
+}
+.sel-mind:hover { color: var(--ink); border-color: rgba(255, 255, 255, 0.35); }
+.sel-mind.on { color: var(--ink); background: var(--corner, #3a3a3a); border-color: var(--corner, #3a3a3a); }
+.sel-mind.overridden { background: transparent; color: var(--dim); text-decoration: line-through; border-style: dashed; }
+.sel-mind.forced { color: #120c00; background: var(--gold); border-color: var(--gold); }
+.sel-mind:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.sel-mind-status { display: flex; flex-direction: column; gap: 3px; min-height: 13px; }
+.sel-mind-line { font: 600 10px/1.3 var(--mono); letter-spacing: 0.1em; color: var(--dim); }
+.sel-mind-line.ok { color: var(--ink); }
+.sel-mind-line.ok::before { content: '● '; color: #58d68d; }
+.sel-mind-line.bad { color: var(--amber); }
+.sel-mind-line.bad::before { content: '● '; color: var(--hot); }
+.sel-mind-hint { font: 500 9px/1.35 var(--mono); letter-spacing: 0.06em; color: var(--dim); }
+.sel-card.is-you .sel-plan, .sel-card.is-you input[type='range'] { opacity: 0.35; }
+
+.sel-settings-block { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.sel-minds-global { display: flex; align-items: center; gap: 10px; margin-top: 10px; pointer-events: auto; }
+.sel-minds-global .sel-settings-label { font: 600 11px/1 var(--mono); letter-spacing: 0.12em; color: var(--dim); }
+.sel-minds-global .sel-mind.on { background: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.35); }
+.sel-minds-global .sel-mind.on:not(:first-child) { color: #120c00; background: var(--gold); border-color: var(--gold); }
+/* The card scrolls rather than squashing its rows (the mind picker made it taller). */
+.sel-card > * { flex-shrink: 0; }
+.sel-settings-block { padding: 8px 14px 10px; background: rgba(5, 5, 6, 0.7); border: 1px solid var(--hair); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); pointer-events: auto; }
+.sel-settings-block .sel-settings { margin-top: 8px; }

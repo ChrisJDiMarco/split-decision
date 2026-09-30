@@ -10,6 +10,7 @@ import './select.css';
 import type { SimEvent, WorkerToMain, WorldMeta, RobotTelemetry } from '../core/protocol';
 import type { Corner, MatchSetup, RobotDesign } from '../core/types';
 import { BroadcastAudio } from '../audio/broadcast-audio';
+import { GLOBAL_MINDS, onSettingsChange, setSetting, settings } from '../core/settings';
 import { CameraRig } from '../render/camera/camera-rig';
 import { Director, type DirectorMode } from '../render/camera/director';
 import { PunchIn, constrainPunch } from '../render/camera/punch-in';
@@ -30,6 +31,8 @@ import { MATCH, RoundClock, formatClock } from './round-clock';
 import { buildAudioScene, buildSubjects, indexWorld, type WorldIndex } from './scene-bridge';
 import { Scorecard } from './scorecard';
 import { SelectScreen, defaultPlan } from './select-screen';
+import { CORNER_NAMES } from './skins';
+import { FIGHTER_MINDS, GLOBAL_LABEL, MIND_TAG, PICK_LABEL, effectiveMind, finalizeSetup, isOverridden, pickMind, playerCornerOf } from './mind-picks';
 import { taleOfTheTape } from './tale';
 import { TickerFeed } from './ticker-feed';
 import * as THREE from 'three/webgpu';
@@ -48,6 +51,8 @@ export interface BroadcastOptions {
   onPhase?(phase: FightPhase, round: number): void;
   /** Events crossed during replay playback (for VFX re-fire). */
   onReplayEvents?(events: SimEvent[], speed: number): void;
+  /** A corner's mind was changed from the in-fight MINDS control (hot swap its brain). */
+  onMinds?(setup: MatchSetup): void;
   initialSetup?: MatchSetup;
   root?: HTMLElement; // defaults to #hud
   roundSeconds?: number; // default 120
@@ -72,7 +77,18 @@ export interface Broadcast {
   clock(): { round: number; rounds: number; remainingS: number };
   replay(): boolean; // start a manual replay; false if there's nothing to show
   replaying(): boolean;
-  camera: { toggleFree(): boolean; isFree(): boolean; director: Director; shake(amount: number): void; punch: PunchIn };
+  camera: {
+    toggleFree(): boolean;
+    isFree(): boolean;
+    director: Director;
+    shake(amount: number): void;
+    punch: PunchIn;
+    /**
+     * Another camera (player mode's chase camera) drives the lens: the director keeps running (so a
+     * cut back is instant and replays work) but its pose is not applied until this is turned off.
+     */
+    setExternal(on: boolean): void;
+  };
   audio: { start(): Promise<void>; setMuted(muted: boolean): void; isMuted(): boolean };
   showSelect(): void;
   dispose(): void;
@@ -156,8 +172,12 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
   const overlays = new Overlays();
   let corners: [CornerPanel, CornerPanel] = [new CornerPanel(0, designs[0]), new CornerPanel(1, designs[1])];
   const camBug = h('div', 'cam-bug');
-  const hints = h('div', 'key-hints', h('kbd', {}, 'C'), 'camera ', h('kbd', {}, 'P'), 'replay ', h('kbd', {}, 'H'), 'hud ', h('kbd', {}, 'M'), 'mute');
-  hud.append(fightBar.el, corners[0].el, corners[1].el, ticker.el, camBug, hints);
+  const hints = h('div', 'key-hints spectator-hints', h('kbd', {}, 'C'), 'camera ', h('kbd', {}, 'P'), 'replay ', h('kbd', {}, 'H'), 'hud ', h('kbd', {}, 'M'), 'mute');
+  // Player mode swallows C, H, S, Q and R (they are player keys), so the host keys move (main.ts: T, L, N).
+  const playerHints = h('div', 'key-hints player-hints', h('kbd', {}, 'V'), 'camera ', h('kbd', {}, 'H'), 'keys ', h('kbd', {}, 'P'), 'replay ',
+    h('kbd', {}, 'T'), 'slow-mo ', h('kbd', {}, 'M'), 'mute ', h('kbd', {}, 'N'), 'new fight');
+  const mindSwitch = buildMindSwitch();
+  hud.append(fightBar.el, corners[0].el, corners[1].el, ticker.el, camBug, mindSwitch.el, hints, playerHints);
   const select = new SelectScreen({ designs: Object.values(DESIGNS), initial: setup, onFight: (s) => startMatch(s) });
   root.append(hud, calloutLayer, overlays.el, select.el);
 
@@ -183,6 +203,8 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
 
   function adoptSetup(s: MatchSetup): void {
     setup = s;
+    toggleClass(root!, 'player-mode', playerCornerOf(s) !== -1);
+    mindSwitch.render();
     designs = [getDesign(s.fighters[0].design), getDesign(s.fighters[1].design)];
     names = [designs[0].name, designs[1].name];
     fightBar.setFighters(names, [`${designs[0].bodyType} · ${s.fighters[0].skin}`, `${designs[1].bodyType} · ${s.fighters[1].skin}`]);
@@ -202,7 +224,9 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     minds = [null, null];
   }
 
-  function startMatch(s: MatchSetup): void {
+  function startMatch(picked: MatchSetup): void {
+    // A YOU corner gets the player's reaction delay now (FAIR MODE: Jev's), so a rematch follows the setting too.
+    const s = finalizeSetup(picked, settings().fairMode);
     // Called from the FIGHT click, so the AudioContext may start. Never block the match on it:
     // resume() can stay pending forever without a user gesture.
     audio.start().catch((err: unknown) => console.warn('[broadcast] audio unavailable', err));
@@ -218,6 +242,10 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
 
   function beginIntro(): void {
     overlays.showTape([taleOfTheTape(designs[0]), taleOfTheTape(designs[1])]);
+    // Which mind fights each corner, under the stats.
+    const g = settings().minds;
+    overlays.el.querySelector('.tape-mid')?.append(h('div', 'stat-table tape-minds',
+      h('div', 'l', MIND_TAG[effectiveMind(setup.fighters[0], g)]), h('div', 'k', 'MIND'), h('div', 'r', MIND_TAG[effectiveMind(setup.fighters[1], g)])));
     audio.swell(0.5);
   }
 
@@ -402,7 +430,7 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     corners[0].update(tel?.[0] ?? null, minds[0]);
     corners[1].update(tel?.[1] ?? null, minds[1]);
     fightBar.setClock(clock.round, clock.rounds, clock.label(), clockState());
-    const bug = rig.free ? 'FREE ORBIT' : director.shot.kind.replace('_', ' ');
+    const bug = rig.external ? 'CHASE' : rig.free ? 'FREE ORBIT' : director.shot.kind.replace('_', ' ');
     if (bug !== camBugText) {
       camBugText = bug;
       camBug.replaceChildren(rig.free ? h('b', {}, bug) : h('span', {}, 'CAM · ', h('b', {}, bug)));
@@ -421,16 +449,74 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     return { poses: latest.poses, telemetry: latest.telemetry, time: latest.time, replaying: false };
   }
 
+  // ---------------------------------------------------------------- in-fight MINDS control
+  /**
+   * A small click-only control under the camera bug: the global MINDS override and each corner's own
+   * mind, hot swapped mid-fight (main.ts calls Brain.setSource). YOU is fixed for the fight.
+   */
+  function buildMindSwitch() {
+    const chip = h('button', { class: 'ms-chip', type: 'button', 'aria-expanded': 'false' }) as HTMLButtonElement;
+    const pop = h('div', 'ms-pop bc-hidden');
+    const el = h('div', 'mind-switch', chip, pop);
+    const option = (label: string, on: boolean, forced: boolean, pick: () => void) => {
+      const b = h('button', { class: `ms-opt${on ? ' on' : ''}${forced ? ' forced' : ''}`, type: 'button', 'aria-pressed': String(on) }, label) as HTMLButtonElement;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        b.blur(); // a focused button would take the next Space (the player's slip)
+        pick();
+      });
+      return b;
+    };
+    const render = () => {
+      const g = settings().minds;
+      const minds = ([0, 1] as Corner[]).map((c) => PICK_LABEL[effectiveMind(setup.fighters[c], g)]);
+      chip.replaceChildren('MINDS · ', h('b', {}, g === 'corner' ? `${minds[0]} v ${minds[1]}` : GLOBAL_LABEL[g]));
+      const rows = [
+        h('div', 'ms-row', h('span', 'ms-k', 'ALL'), ...GLOBAL_MINDS.map((x) => option(GLOBAL_LABEL[x], x === g, false, () => setSetting('minds', x)))),
+        ...([0, 1] as Corner[]).map((c) => {
+          const f = setup.fighters[c];
+          const head = h('span', `ms-k c${c}`, CORNER_NAMES[c].replace(/ CORNER$/, ''));
+          if (f.controller === 'player') return h('div', 'ms-row', head, h('span', 'ms-you', 'YOU · FIXED FOR THIS FIGHT'));
+          const own = f.mind ?? 'jev';
+          const over = isOverridden(f, g);
+          return h('div', 'ms-row', head, ...FIGHTER_MINDS.map((m) => option(PICK_LABEL[m], m === own && !over, over && m === g, () => setCornerMind(c, m))));
+        }),
+      ];
+      pop.replaceChildren(...rows);
+    };
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      chip.blur();
+      const open = pop.classList.contains('bc-hidden');
+      toggleClass(pop, 'bc-hidden', !open);
+      chip.setAttribute('aria-expanded', String(open));
+    });
+    render();
+    return { el, render };
+  }
+
+  function setCornerMind(c: Corner, m: (typeof FIGHTER_MINDS)[number]): void {
+    if (setup.fighters[c].controller === 'player') return; // YOU is not hot swapped
+    setup = { ...setup, fighters: pickMind(setup.fighters, c, m) };
+    mindSwitch.render();
+    opts.onMinds?.(setup);
+  }
+
+  const offSettings = onSettingsChange(() => mindSwitch.render());
+
   // ---------------------------------------------------------------- input
   function onKey(e: KeyboardEvent): void {
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'TEXTAREA' || tag === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.code === 'KeyC') rig.setFree(!rig.free);
-    else if (e.code === 'KeyP') {
+    // C and H are player keys (clinch, key sheet) when a corner is YOU: O and I always work.
+    const spectating = playerCornerOf(setup) === -1;
+    if (e.code === 'KeyO' || (spectating && e.code === 'KeyC')) {
+      if (!rig.external) rig.setFree(!rig.free);
+    } else if (e.code === 'KeyP') {
       if (replayPlayer) finishReplay();
       else if (phase === 'fight' || phase === 'break' || phase === 'over') startReplay(false);
     } else if (e.code === 'Escape' && replayPlayer) finishReplay();
-    else if (e.code === 'KeyH') {
+    else if (e.code === 'KeyI' || (spectating && e.code === 'KeyH')) {
       density = (density + 1) % 3;
       toggleClass(root!, 'density-clean', density === 1);
       toggleClass(root!, 'density-off', density === 2);
@@ -504,6 +590,10 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
       director,
       shake: (amount: number) => shake.add(amount),
       punch,
+      setExternal: (on: boolean) => {
+        if (on && rig.free) rig.setFree(false);
+        rig.setExternal(on);
+      },
     },
     audio: {
       start: () => audio.start(),
@@ -513,6 +603,7 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     showSelect,
     dispose() {
       window.removeEventListener('keydown', onKey);
+      offSettings();
       audio.silence();
       hud.remove();
       calloutLayer.remove();
