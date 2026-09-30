@@ -1,5 +1,5 @@
 // Runtime state shared by the physics systems inside the worker.
-import type { Intent, JointState, RobotTelemetry, SimEvent } from '../core/protocol';
+import type { Intent, JointState, RefereeLogEvent, RobotTelemetry, SimEvent } from '../core/protocol';
 import type { Corner, FighterSetup, MotorSpec, RobotDesign } from '../core/types';
 import type { CompiledRobot } from '../robots/compile-mjcf';
 
@@ -86,6 +86,37 @@ export interface SimContext {
   eqActive: number[]; // mirror of eq_active (the binding cannot read it directly)
   setEqActive: (index: number, on: boolean) => void;
   eqIndex: (name: string) => number;
+  /** Referee break state (src/physics/systems/referee.ts); absent until that system runs. */
+  referee?: RefereeState;
+}
+
+/** What the referee tells one fighter during a break. The tactics hook obeys it over the intent. */
+export interface RefereeOrder {
+  /** Stance frame to walk to (the neutral spot, or a waypoint around the downed fighter); null holds here, facing him. */
+  goal: { x: number; y: number; heading: number } | null;
+}
+
+export type RefereeRole = 'down' | 'neutral' | 'hold';
+
+/**
+ * A referee break: someone is down; no fighting until everyone is back up and steady and the
+ * fighter sent to the neutral spot has got there.
+ */
+export interface RefereeState {
+  active: boolean;
+  since: number; // sim time the break started
+  down: boolean[]; // per corner: went down during this break
+  roles: Array<RefereeRole | null>; // per corner, null outside a break
+  spots: Array<[number, number] | null>; // per corner: neutral spot (world x, y) while role is 'neutral'
+  settled: boolean[]; // per corner, role 'neutral': at his neutral distance, standing (walks again only if it closes)
+  upSince: number[]; // per corner: sim time since which this fighter has been off the canvas and upright
+  readySince: number[]; // per corner: ... and steady on his feet (ready to fight)
+  waitSince: number; // everyone upright for GRACE_S since this sim time (-1: not yet); FIGHT waits on room from here
+  best: number[]; // per corner, role 'neutral': the most room he has made since waitSince (m)
+  progressAt: number[]; // per corner: sim time he last made STALL_GAIN_M more room
+  orders: Array<RefereeOrder | null>; // per corner; null = no order, fight on
+  log: RefereeLogEvent[]; // 'break' / 'fight' events this fight (see RefereeEvent)
+  sent: number[]; // per corner: log entries already published in that corner's telemetry
 }
 
 /** A physics-side module. `pre` runs before mj_step, `post` after. Both run every step. */
