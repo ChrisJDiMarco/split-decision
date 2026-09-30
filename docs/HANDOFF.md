@@ -96,6 +96,8 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - 22:40: the spend limit cut off the balance verify/fix/reverify and the referee review. Checkpoint commits: cb91102 (referee on screen, review pending) and 35859cd (balance P0+P1 behind the switch). Retried: balance wvdb51env (resume wf_38bd1af8-d17 with the edited script: CHRIS_BAR, pace stage, no early stop) and referee review wr74od2x9 (resume wf_6c9a10d8-139). If the limit hits again, resume both the same way.
 
+- 23:05: referee review DONE (21fb0fe: the downed fighter covers up while the kip-up question is out; 'Double knockdown' only for real ones). BACK GET-UP: Chris turned the pop-up off the back off, but measured without it a shoved-over HAYMAKER never got up, so with Chris's OK it's back ON (2904a64). Priority for move polish: make the back get-up (getup_back 140_08/140_09) look good on every modern design; FIRECRACKER's is already a PoC move.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
