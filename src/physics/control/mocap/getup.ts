@@ -36,10 +36,11 @@ const FELL_BACK_M = 0.3; // pelvis this far below the clip's after the clip has 
 const FELL_BACK_S = 0.6; // ...for this long: the attempt has failed
 const WRONG_WAY = 0.55; // torso forward-axis z past this the other way: rolled over, not up
 export const MAX_CLIP_TRIES = 3;
-// Chris, 2026-09-29: the pop-up off the back (the CMU 140_08/140_09 'getup_back' clips) isn't
-// working, so it's off for now: a robot on its back (or on a side, where the plan also used those
-// clips) gets up with the face-down/side clips or the scripted get-up. Flip to re-enable.
-export const BACK_CLIP_GETUPS = false;
+// The pop-up off the back (the CMU 140_08/140_09 'getup_back' clips, also used lying on a side).
+// Chris turned it off (2026-09-29) because it looked wrong, then back on once measured: without it a
+// robot on its back mostly can't get up (HAYMAKER shoved over stayed down, tests/referee/break.test.ts).
+// Move polish (docs/design/move-polish.md) is meant to fix how it looks. false = side clip, then scripted.
+export const BACK_CLIP_GETUPS = true;
 const backClip = (id: string): boolean => id.startsWith('getup_back');
 const STAND_FLAT = 0.85; // sole up-axis z
 const STAND_FOOT_M = 0.035;
