@@ -86,6 +86,9 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
   - LOCAL decisions are recorded with source 'jev'.
 - Chris's localhost settings currently say MINDS = ALL LOCAL (neither agent claims to have set it; possibly Chris did). Ask him; don't change it.
 
+- Referee break DONE (a9ad5fb; its one-line tactics.ts hook lands with the balance commit). Running: `referee-presentation` (wf_6c9a10d8-139). It adds brain holds with no Jev calls during a break, muted openings, real break/fight events, ticker lines, MIND panel and broadcast BREAK/FIGHT!, camera framing, the KO count fix for failed rises, and NEUTRAL_M set to 2.2 m.
+- Running: `cover-art-16x9` (wf_4671f6c2-d73), a Steam-style cover made with fal openai/gpt-image-2, output in docs/art/cover/.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
