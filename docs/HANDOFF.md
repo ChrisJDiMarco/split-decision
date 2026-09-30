@@ -77,6 +77,8 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 - PREVIEW SWITCH (20:55, uncommitted: 3 small edits in src/main.ts, src/physics/worker.ts, src/core/protocol.ts): http://localhost:5297/?balance=dcm runs the in-progress balance engine with a yellow "PREVIEW · NEW BALANCE ENGINE" badge; the default stays legacy. Commit it together with the integration build's main.ts changes.
 - SETTINGS WATCH: an integration-build test left the shared localStorage setting `minds: "local"`, so every tab runs LOCAL OFFLINE → HOUSE. After that build finishes, reset `minds` to 'corner' if it's still 'local'.
 
+- REORDER (Chris, 21:00): the preview walking isn't mocap, and he wants human mocap footwork first. The balance script is edited to run P1 → verify → P5 (motion-matched mocap footwork) → P3 → P2 → P4 → judge. When p1:build's result is in the journal, stop wqstz2k1x and relaunch the script with resumeFromRunId wf_38bd1af8-d17; p1 replays from cache.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
