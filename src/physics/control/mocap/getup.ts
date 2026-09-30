@@ -36,6 +36,11 @@ const FELL_BACK_M = 0.3; // pelvis this far below the clip's after the clip has 
 const FELL_BACK_S = 0.6; // ...for this long: the attempt has failed
 const WRONG_WAY = 0.55; // torso forward-axis z past this the other way: rolled over, not up
 export const MAX_CLIP_TRIES = 3;
+// Chris, 2026-09-29: the pop-up off the back (the CMU 140_08/140_09 'getup_back' clips) isn't
+// working, so it's off for now: a robot on its back (or on a side, where the plan also used those
+// clips) gets up with the face-down/side clips or the scripted get-up. Flip to re-enable.
+export const BACK_CLIP_GETUPS = false;
+const backClip = (id: string): boolean => id.startsWith('getup_back');
 const STAND_FLAT = 0.85; // sole up-axis z
 const STAND_FOOT_M = 0.035;
 const STAND_UPRIGHT = -0.1; // torso up-axis z: not hanging head-down off the hips
@@ -201,9 +206,14 @@ export class ClipGetUp {
     if (!GETUP_PLAN[this.r.design.id] && !ClipGetUp.force) return false;
     const { label, downSide, orient } = lyingLabel(s);
     const forced = ClipGetUp.force ? this.set.lib.moves.find((m) => m.id === ClipGetUp.force)?.label : undefined;
+    // Back clips off: the plan's back/side entries are all 'getup_back' clips, so fromPlan skips them
+    // and the side clip below is used (measured: PYLON on its back up in 4.6 s; the scripted get-up
+    // never rose, so it stays the last resort).
     let pick = forced ? null : this.fromPlan(orient);
     if (!pick) {
-      const any = this.choose(forced ?? label, downSide) ?? this.choose(label === 'getup_side' ? 'getup_back' : 'getup_side', downSide);
+      const own = BACK_CLIP_GETUPS || forced || label !== 'getup_back' ? this.choose(forced ?? label, downSide) : null;
+      const alt = label === 'getup_side' ? (BACK_CLIP_GETUPS ? 'getup_back' : null) : 'getup_side';
+      const any = own ?? (alt ? this.choose(alt, downSide) : null);
       if (any) pick = { ...any, opts: forced ? { ...ClipGetUp.opts } : { ...OPTION_SETS.plain }, key: `${any.move.id}|${any.mirror}|plain` };
     }
     if (!pick) return false;
@@ -229,7 +239,7 @@ export class ClipGetUp {
   private fromPlan(orient: LyingOrientation): { move: Move; mirror: boolean; opts: ClipOptions; key: string } | null {
     for (const e of GETUP_PLAN[this.r.design.id]?.[orient] ?? []) {
       const key = `${e.id}|${e.mirror}|${e.opts}`;
-      if (this.failed.has(key)) continue;
+      if (this.failed.has(key) || (!BACK_CLIP_GETUPS && backClip(e.id))) continue;
       const move = this.set.lib.moves.find((m) => m.id === e.id);
       if (!move || !this.limbsAllow(move, e.mirror)) continue;
       return { move, mirror: e.mirror, opts: { ...OPTION_SETS[e.opts] }, key };
