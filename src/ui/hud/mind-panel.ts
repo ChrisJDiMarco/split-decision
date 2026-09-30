@@ -3,7 +3,7 @@
 // armed-reflex, plan (setup → payoff, or a plain combo) and read lines each keep a fixed one-line
 // slot (empty or not), so the panel's height never changes and the tactic list above never jumps.
 import { h, meter, setFill, setText, toggleClass } from '../dom';
-import { armedLine, comboLine, gambleLine, planLine, readLine, seesLine, tacticLabel, topTactics, type MindView } from '../minds';
+import { armedLine, comboLine, gambleLine, mindChip, offlineBadge, planLine, readLine, seesLine, tacticLabel, topTactics, type MindView } from '../minds';
 
 const ROWS = 5;
 
@@ -14,6 +14,7 @@ export class MindPanel {
   private rows: Row[] = [];
   private target: HTMLElement;
   private latency: HTMLElement;
+  private badge: HTMLElement;
   private reason: HTMLElement;
   private gamble: HTMLElement;
   private armed: HTMLElement;
@@ -25,9 +26,10 @@ export class MindPanel {
 
   constructor() {
     this.latency = h('span', 'chip latency', '— ms');
+    this.badge = h('span', 'badge-offline', 'JEV OFFLINE · HOUSE MIND');
     const head = h('div', 'panel-head',
       h('div', 'panel-title', 'JEV ', h('em', {}, 'MIND')),
-      h('div', {}, this.latency, h('span', 'badge-offline', 'JEV OFFLINE · HOUSE MIND')),
+      h('div', {}, this.latency, this.badge),
     );
     const list = h('div', 'tactics');
     for (let i = 0; i < ROWS; i++) {
@@ -57,7 +59,9 @@ export class MindPanel {
   update(mind: MindView | null): void {
     toggleClass(this.el, 'waiting', !mind);
     if (!mind) return;
-    toggleClass(this.el, 'offline', mind.source === 'fallback');
+    const badge = offlineBadge(mind);
+    toggleClass(this.el, 'offline', badge !== null);
+    if (badge) setText(this.badge, badge);
     const ranked = topTactics(mind.tacticProbs, ROWS);
     const key = ranked.map((r) => `${r.tactic}:${r.p.toFixed(3)}`).join('|') + mind.tactic;
     if (key !== this.lastKey) {
@@ -75,8 +79,7 @@ export class MindPanel {
     const commit = mind.oppCommit;
     this.read.set(commit ?? 0, commit === null ? '—' : `${Math.round(commit * 100)}%`);
     this.aggression.set(mind.aggression);
-    const src = mind.source === 'local' ? 'LOCAL RULE' : mind.source === 'jev' ? 'JEV' : 'HOUSE';
-    setText(this.latency, mind.latencyMs === null ? src : `${src} · ${Math.round(mind.latencyMs)} ms`);
+    setText(this.latency, mindChip(mind));
     setText(this.reason, mind.reason ? `${mind.mode ? mind.mode.toUpperCase() + ' · ' : ''}${mind.reason}` : '');
     const gamble = gambleLine(mind) ?? seesLine(mind) ?? (mind.getupStyle === 'kip_up' ? 'GET-UP: KIP-UP' : null);
     setText(this.gamble, gamble ?? '');

@@ -2,6 +2,8 @@
 // 1.5-4 Hz, immediate on interrupts), turns the answer's distributions into an Intent,
 // and hands it to onIntent(corner, intent, issuedAtTick); the worker applies it after the
 // fixed reaction delay. If Jev is unreachable the House Mind fights instead.
+// The mind is switchable per fighter (setSource): 'jev' (cloud), 'local' (an open-source model on
+// this Mac, same wire format, via /api/local-jev) or 'house' (the House Mind, no network at all).
 import type { GetupStyle, Intent, Tactic, WorldMeta } from '../core/protocol';
 import type { Corner, FighterSetup, RobotDesign } from '../core/types';
 import { DESIGNS } from '../robots/designs';
@@ -10,6 +12,7 @@ import { houseGetupStyle, houseMind, kipAppetite, obviousDecision, type RuleDeci
 import type { JevResult } from './jev-client';
 import { readyCombos } from './limbs';
 import { JevLink } from './link';
+import { sharedLocalLink } from './local-link';
 import { FightMemory } from './memory';
 import { FightObserver } from './observer';
 import { decide, decideGambles, parseAnswers, parseExtras } from './policy';
@@ -22,7 +25,7 @@ import { coarseKey, makeFighterContext, readSituation, type FighterContext, type
 import { BrainStatsTracker } from './stats';
 import { designCombos, styleOf } from './style';
 import { isFlashy, TACTIC_INFO } from './tactics';
-import type { BrainDecision, BrainFrame, BrainStats, CommitMode, DecisionSource, DistanceBand, GambleView, JevStatus, MatchClock } from './types';
+import type { BrainDecision, BrainFrame, BrainStats, CommitMode, DecisionSource, DistanceBand, GambleView, JevStatus, MatchClock, MindLinkStatus, MindSource } from './types';
 
 export const MAX_IN_FLIGHT = 2;
 export const MIN_REQUEST_GAP_S = 0.1; // sim seconds between two queries, even on interrupts
@@ -52,6 +55,8 @@ export interface BrainOptions {
   onDecision?: (d: BrainDecision) => void;
   designs?: Record<string, RobotDesign>;
   link?: JevLink; // share one link between both fighters so the request budget is global
+  localLink?: JevLink; // the LOCAL mind's link (default: the page-wide /api/local-jev link)
+  source?: MindSource; // which mind decides (default 'jev')
   roundLengthS?: number;
   rounds?: number;
 }
@@ -80,7 +85,11 @@ function resolveDesign(meta: WorldMeta, corner: Corner, designs: Record<string, 
 
 export class Brain {
   readonly corner: Corner;
+  /** The cloud Jev link. */
   readonly link: JevLink;
+  /** The LOCAL mind's link (touched only while the source is 'local'). */
+  readonly localLink: JevLink;
+  private mind: MindSource;
   private readonly fc: FighterContext;
   private readonly opts: BrainOptions;
   private readonly stats = new BrainStatsTracker();
@@ -114,6 +123,8 @@ export class Brain {
     this.opts = opts;
     this.corner = opts.corner;
     this.link = opts.link ?? sharedJevLink();
+    this.localLink = opts.localLink ?? sharedLocalLink();
+    this.mind = opts.source ?? 'jev';
     const other: Corner = opts.corner === 0 ? 1 : 0;
     this.fc = makeFighterContext(opts.corner, resolveDesign(opts.meta, opts.corner, designs), resolveDesign(opts.meta, other, designs), opts.fighter);
     this.observer = new FightObserver(opts.corner);
@@ -130,6 +141,53 @@ export class Brain {
   stop() {
     this.active = false;
     this.generation++;
+    this.inFlight = 0;
+  }
+
+  // ------------------------------------------------------------ mind source
+
+  /** Which mind decides: 'jev', 'local' or 'house'. */
+  get source(): MindSource { return this.mind; }
+
+  /**
+   * Hot swap the mind between decisions. Answers still in flight from the old mind are dropped on
+   * arrival (never applied), and the new mind decides on the next frame.
+   */
+  setSource(s: MindSource) {
+    if (s === this.mind) return;
+    this.mind = s;
+    this.generation++;
+    this.inFlight = 0;
+    if (this.getupStyle === null) this.getupAsked = false; // a get-up question the old mind never answered
+    this.seq.abort(); // the old mind's combination: the new mind decides from here
+    this.planOrigin = null;
+    this.pendingTrigger = 'mind_swap';
+  }
+
+  /** The model link the current source uses; null for the House Mind. */
+  private get line(): JevLink | null {
+    return this.mind === 'jev' ? this.link : this.mind === 'local' ? this.localLink : null;
+  }
+
+  /** No model to ask: the House Mind decides (chosen, or the chosen model is unreachable). */
+  private get offline(): boolean {
+    const l = this.line;
+    return !l || l.offline;
+  }
+
+  private canSend(): boolean {
+    const l = this.line;
+    return !!l && l.canSend();
+  }
+
+  /** The mind link as the HUD shows it. */
+  get linkStatus(): MindLinkStatus {
+    if (this.mind === 'house') return { kind: 'house', label: 'HOUSE' };
+    const l = this.line as JevLink;
+    const name = this.mind === 'jev' ? 'JEV' : 'LOCAL';
+    if (l.offline) return { kind: 'offline', label: `${name} OFFLINE → HOUSE` };
+    if (this.mind === 'jev') return { kind: 'jev', label: 'JEV' };
+    return { kind: 'local', label: l.model ? `LOCAL · ${l.model}` : 'LOCAL' };
   }
 
   /** Forget the fight so far (new round or reset). Stays stopped until start(). */
@@ -162,12 +220,14 @@ export class Brain {
     const s = this.situation;
     const r = s ? freshRead(s.me, s.time) : null;
     const read = r ? readHud(r) : null;
-    const key = `${this.history.length}|${plan ? `${plan.step}:${plan.read ?? ''}:${plan.payoff.join()}` : '-'}|${read ?? ''}`;
-    if (this.latestView?.key !== key) this.latestView = { key, d: { ...d, plan, read } };
+    const link = this.linkStatus;
+    const key = `${this.history.length}|${plan ? `${plan.step}:${plan.read ?? ''}:${plan.payoff.join()}` : '-'}|${read ?? ''}|${link.label}`;
+    if (this.latestView?.key !== key) this.latestView = { key, d: { ...d, plan, read, link } };
     return this.latestView.d;
   }
   get decisions(): readonly BrainDecision[] { return this.history; }
-  get source(): DecisionSource { return this.link.offline ? 'fallback' : 'jev'; }
+  /** 'fallback' while the House Mind decides (source 'house', or the chosen model offline), else 'jev'. */
+  get decisionSource(): DecisionSource { return this.offline ? 'fallback' : 'jev'; }
   get jevStatus(): JevStatus { return this.link.status; }
   get statsSnapshot(): BrainStats { return this.stats.snapshot(this.inFlight); }
   get inFlightCount(): number { return this.inFlight; }
@@ -188,8 +248,15 @@ export class Brain {
     }
     if (clock) this.clock = clock;
     if (!this.active) return;
+    this.line?.poll(); // an offline LOCAL link re-probes its health when due (no-op for Jev, HOUSE and online links)
     this.startTime ??= frame.time;
     if (interrupts.length && this.pendingTrigger === null) this.pendingTrigger = interrupts[0];
+    if (this.seq.active && this.mind === 'local' && this.planOrigin?.source === 'fallback' && !this.offline) {
+      // The local model is back: it takes over from the House Mind's combination (Jev keeps its old behaviour).
+      this.seq.abort();
+      this.planOrigin = null;
+      this.pendingTrigger ??= 'mind_online';
+    }
     if (this.seq.active) {
       // A combination is running: the fighter is committed to it; no cadence questions until it ends.
       const out = this.seq.update(s, interrupts, this.fc.design);
@@ -207,23 +274,23 @@ export class Brain {
     const trigger = this.pendingTrigger ?? 'cadence';
     const obvious = obviousDecision(this.fc, s, this.opts.seed);
     // Down: ask Jev once per knockdown whether to try a kip-up (a one-question call).
-    if (s.me.down && !this.getupAsked && !this.link.offline && this.kipPossible(s)) {
-      if (this.inFlight >= MAX_IN_FLIGHT || !this.link.canSend()) return;
+    if (s.me.down && !this.getupAsked && !this.offline && this.kipPossible(s)) {
+      if (this.inFlight >= MAX_IN_FLIGHT || !this.canSend()) return;
       this.queryGetup(s, trigger);
       return;
     }
-    if (obvious && !this.link.offline) {
+    if (obvious && !this.offline) {
       this.stats.settledLocal++;
       this.emitRule(obvious, 'local', s, trigger);
       return;
     }
-    // Offline, the House Mind owns every tick (obvious ones included), so the HUD shows it.
-    if (this.link.offline && (obvious || !this.link.canSend())) {
+    // Offline (or the House Mind chosen), the House Mind owns every tick (obvious ones included), so the HUD shows it.
+    if (this.offline && (obvious || !this.canSend())) {
       this.stats.fallbackDecisions++;
       this.emitRule(obvious ?? houseMind(this.fc, s, this.opts.seed), 'fallback', s, trigger);
       return;
     }
-    if (this.inFlight >= MAX_IN_FLIGHT || !this.link.canSend()) return; // stay due; retry next frame
+    if (this.inFlight >= MAX_IN_FLIGHT || !this.canSend()) return; // stay due; retry next frame
     this.query(s, trigger);
   }
 
@@ -282,7 +349,7 @@ export class Brain {
     this.inFlight++;
     this.stats.requests++;
     this.schedule(s);
-    this.link.send(state, qs.questions).then(
+    (this.line as JevLink).send(state, qs.questions).then(
       (res) => this.onAnswer(req, res),
       () => this.onFailure(req),
     );
@@ -298,15 +365,15 @@ export class Brain {
     this.inFlight++;
     this.stats.requests++;
     this.schedule(s);
-    this.link.send(state, qs.questions).then(
+    (this.line as JevLink).send(state, qs.questions).then(
       (res) => this.onGetupAnswer(req, res),
       () => this.onFailure(req),
     );
   }
 
   private onGetupAnswer(req: PendingRequest, res: JevResult) {
+    if (req.gen !== this.generation) return; // stopped, reset or mind swapped since: never applied
     this.inFlight--;
-    if (req.gen !== this.generation) return;
     this.stats.recordAnswer(res.latencyMs, res.inputTokens, res.outputTokens);
     const now = this.situation;
     if (!now || !now.me.down) { this.stats.droppedStale++; return; }
@@ -321,8 +388,8 @@ export class Brain {
   }
 
   private onAnswer(req: PendingRequest, res: JevResult) {
+    if (req.gen !== this.generation) return; // stopped, reset or mind swapped since: never applied
     this.inFlight--;
-    if (req.gen !== this.generation) return;
     this.stats.recordAnswer(res.latencyMs, res.inputTokens, res.outputTokens);
     const now = this.situation;
     if (req.tick <= this.lastAppliedTick) { this.stats.droppedSuperseded++; return; }
@@ -335,7 +402,7 @@ export class Brain {
     try {
       parsed = parseAnswers(res, req.qs);
     } catch (e) {
-      this.link.markFailed(e);
+      (this.line ?? this.link).markFailed(e);
       this.onFailure(req, false);
       return;
     }
@@ -399,8 +466,8 @@ export class Brain {
 
   /** Jev failed (the link is now offline): the House Mind takes this decision immediately. */
   private onFailure(req: PendingRequest, decrement = true) {
-    if (decrement) this.inFlight--;
     if (req.gen !== this.generation) return;
+    if (decrement) this.inFlight--;
     this.stats.errors++;
     const s = this.situation;
     if (!s || !this.active) return;

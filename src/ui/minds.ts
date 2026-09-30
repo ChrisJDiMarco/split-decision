@@ -4,6 +4,12 @@
 
 export type MindSource = 'jev' | 'local' | 'fallback';
 
+/** Which mind the fighter runs, as the badge shows it (the brain's MindLinkStatus). */
+export interface MindLink {
+  kind: 'jev' | 'local' | 'house' | 'offline'; // 'offline': the chosen model is unreachable, the House Mind fights
+  label: string; // 'JEV', 'LOCAL · decider-4b', 'HOUSE', 'LOCAL OFFLINE → HOUSE'
+}
+
 export interface MindView {
   source: MindSource; // 'fallback' shows the JEV OFFLINE · HOUSE MIND badge
   tactic: string; // the chosen tactic
@@ -23,6 +29,24 @@ export interface MindView {
   onOpening?: Readonly<Record<string, string | undefined>> | null; // pre-armed reflex: opening → move
   plan?: MindPlan | null; // the setup → payoff combination running, step by step
   read?: string | null; // his answer to the last feint, while fresh: 'HE BIT: COVERED HIGH'
+  link?: MindLink; // which mind decides (absent: JEV, or JEV OFFLINE on fallback)
+}
+
+/**
+ * The latency chip: '<mind> · 265 ms', '<mind> · RULE' for a tick settled by a code rule,
+ * 'HOUSE' for the House Mind. <mind> is the link label (JEV, LOCAL · decider-4b).
+ */
+export function mindChip(mind: MindView): string {
+  const name = mind.link && mind.link.kind !== 'offline' ? mind.link.label : 'JEV';
+  if (mind.source === 'fallback' || mind.link?.kind === 'house') return 'HOUSE';
+  if (mind.source === 'local') return `${name} · RULE`;
+  return mind.latencyMs === null ? name : `${name} · ${Math.round(mind.latencyMs)} ms`;
+}
+
+/** The offline badge text, or null when a model (or the chosen House Mind) is deciding. */
+export function offlineBadge(mind: MindView): string | null {
+  if (mind.link) return mind.link.kind === 'offline' ? mind.link.label : null;
+  return mind.source === 'fallback' ? 'JEV OFFLINE · HOUSE MIND' : null;
 }
 
 /** A setup → payoff plan as the MIND panel shows it (the brain's PlanView). */

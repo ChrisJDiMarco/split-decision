@@ -5,6 +5,18 @@ import type { PlanView } from './sequencer';
 /** Where a decision came from. 'local' = an obvious tick settled by a code rule, no Jev call. */
 export type DecisionSource = 'jev' | 'local' | 'fallback';
 
+/**
+ * Which mind a fighter runs: 'jev' (TypeSafe's cloud Jev via /api/jev), 'local' (an open-source
+ * Jev-compatible model on this Mac via /api/local-jev) or 'house' (the House Mind rules, no network).
+ */
+export type MindSource = 'jev' | 'local' | 'house';
+
+/** The mind link as the HUD shows it: 'offline' = the chosen model is unreachable and the House Mind fights. */
+export type MindLinkKind = 'jev' | 'local' | 'house' | 'offline';
+
+/** e.g. { kind: 'local', label: 'LOCAL · decider-4b' }, { kind: 'offline', label: 'LOCAL OFFLINE → HOUSE' }. */
+export interface MindLinkStatus { kind: MindLinkKind; label: string }
+
 /** How firmly the fighter commits, from Jev's confidence in the tactic. */
 export type CommitMode = 'commit' | 'probe' | 'guard';
 
@@ -56,6 +68,8 @@ export interface BrainDecision {
   plan?: PlanView | null;
   /** The read of his answer to this fighter's last feint, while fresh ("HE BIT: COVERED HIGH"). */
   read?: string | null;
+  /** The mind link at read-out time (JEV, LOCAL · model, HOUSE, or X OFFLINE → HOUSE). */
+  link?: MindLinkStatus;
 }
 
 /** An opening move (or creative gamble) the fighter went for. */

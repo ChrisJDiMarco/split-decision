@@ -183,7 +183,9 @@ describe('fallback', () => {
     expect(hits.n).toBe(1);
     expect(link.status).toBe('offline');
     expect(link.lastErrorStatus).toBe(503);
-    expect(h.brain.source).toBe('fallback');
+    expect(h.brain.decisionSource).toBe('fallback');
+    expect(h.brain.source).toBe('jev');
+    expect(h.brain.linkStatus).toEqual({ kind: 'offline', label: 'JEV OFFLINE → HOUSE' });
     // A combination the House Mind throws commits it for its steps (sequenced, no re-decisions), and
     // these static frames never show the body throwing, so each step runs to its timeout.
     expect(h.intents.length).toBeGreaterThan(6);
