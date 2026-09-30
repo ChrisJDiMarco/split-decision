@@ -481,6 +481,60 @@ export class Gait {
     if (this.skillSide) this.feet[this.skillSide].place = place;
   }
 
+  // ---------------------------------------------------------------- balance engine (CONTROL.balance = 'dcm')
+  // The engine (balance/index.ts) plans every footstep and flies every swing itself; the gait keeps
+  // the foot state machine: which foot is planted where, swinging, or lent to a kick.
+
+  /** Per-tick upkeep: plant air feet that touched down, re-plant soles that slid. */
+  maintain(s: Sense): void {
+    this.landAirFeet(s);
+    this.trackSlip(s);
+  }
+
+  /** The engine lifts `side` now toward `target`, `swing` seconds in the air. */
+  engineStep(side: Side, target: FootPlace, swing: number, lift: number): boolean {
+    if (this.phase !== 'double' || !this.bothPlanted()) return false;
+    const f = this.feet[side];
+    f.target = target;
+    f.lift = lift;
+    f.dur = swing;
+    f.t = 0;
+    f.startZ = 0;
+    f.lifted = false;
+    f.lead = 0;
+    f.phase = 'swing';
+    this.phase = 'single';
+    this.swingSide = side;
+    this.walking = false;
+    this.held = null;
+    this.dynamicStep = false;
+    return true;
+  }
+
+  /** The engine saw the swinging `side` touch down: planted where it actually is. */
+  engineTouchdown(side: Side, s: Sense): void {
+    this.plant(side, s);
+    this.phase = 'double';
+    this.swingSide = null;
+    this.stepsTaken++;
+  }
+
+  /** A kick's weight shift is done: the leg is the skill's (the engine decides when). */
+  grantSkillLeg(): void {
+    const side = this.skillSide;
+    if (this.phase !== 'shift' || !side) return;
+    const f = this.feet[side];
+    f.lifted = false;
+    f.phase = 'skill';
+    this.skillReady = true;
+    this.phase = 'skill';
+  }
+
+  /** Seconds a kick's weight shift may take before it is abandoned (the skill's request). */
+  shiftLimit(): number {
+    return this.shiftMax;
+  }
+
   // ---------------------------------------------------------------- update
 
   /**

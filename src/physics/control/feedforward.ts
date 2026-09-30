@@ -29,12 +29,34 @@ export function jointInfo(r: RobotRuntime, dofJnt: ArrayLike<number>): JointInfo
   });
 }
 
-/** Servo gain actually in force (the motor system scales kp for limp and seized joints). */
+/** Servo gain actually in force (the motor system scales kp for limp and seized joints, and by
+ *  the balance engine's per-joint gain scale). */
 export function effectiveKp(r: RobotRuntime, index: number): number {
   const j = r.joints[index];
   if (j.state === 'limp') return 0;
-  return j.state === 'seized' ? j.kp * 3 : j.kp;
+  if (j.state === 'seized') return j.kp * 3;
+  const scale = r.mem.gainScale as Float64Array | undefined;
+  return scale ? j.kp * scale[index] : j.kp;
 }
+
+/** Servo damping actually in force, over kp (for the velocity feed-forward's target shift). */
+function kdOverKp(r: RobotRuntime, index: number, kp: number): number {
+  const j = r.joints[index];
+  const scale = r.mem.dampScale as Float64Array | undefined;
+  return (j.kd * (scale && j.state === 'ok' ? scale[index] : 1)) / kp;
+}
+
+/** Options of the balance engine's feed-forward (the legacy path passes none). */
+export interface GroundForce {
+  /** Horizontal ground force on the robot, N (split between the feet by their load share). */
+  force: [number, number];
+  /** Keep 10% of the available torque and ±0.35 rad of target shift as headroom (the servo keeps
+   *  some spring and its implicit damping). */
+  headroom: boolean;
+}
+
+const HEADROOM_TORQUE = 0.9;
+const MAX_FF_SHIFT_RAD = 0.35;
 
 /**
  * Adds the gravity / ground-reaction feed-forward to `targets` (radians) in place.
@@ -42,7 +64,7 @@ export function effectiveKp(r: RobotRuntime, index: number): number {
  */
 export function applyGravityFeedforward(
   v: Views, r: RobotRuntime, joints: readonly JointInfo[], loads: Record<Side, FootLoad>,
-  mass: number, targets: Float64Array, gain = 1,
+  mass: number, targets: Float64Array, gain = 1, ground?: GroundForce,
 ): void {
   const fzL = loads.l.share * mass * GRAVITY;
   const fzR = loads.r.share * mass * GRAVITY;
@@ -59,11 +81,20 @@ export function applyGravityFeedforward(
         const dy = load.cop[1] - v.xanchor[a + 1];
         // axis · ((p − anchor) × (0, 0, fz)) = fz · (axis_x·dy − axis_y·dx)
         tau -= fz * (v.xaxis[a] * dy - v.xaxis[a + 1] * dx);
+        if (ground) {
+          // The horizontal part of the planned ground force, at the COP on the canvas:
+          // axis · (r × F) with r = (dx, dy, −anchor_z), F = (fx, fy, 0).
+          const share = load.share;
+          const fx = ground.force[0] * share, fy = ground.force[1] * share;
+          const dz = -v.xanchor[a + 2];
+          tau -= v.xaxis[a] * (-dz * fy) + v.xaxis[a + 1] * (dz * fx) + v.xaxis[a + 2] * (dx * fy - dy * fx);
+        }
       }
     }
-    const avail = r.joints[ji.index].availableTorque;
+    const avail = r.joints[ji.index].availableTorque * (ground?.headroom ? HEADROOM_TORQUE : 1);
     const t = Math.max(-avail, Math.min(avail, tau * gain));
-    targets[ji.index] += t / kp;
+    const shift = t / kp;
+    targets[ji.index] += ground?.headroom ? Math.max(-MAX_FF_SHIFT_RAD, Math.min(MAX_FF_SHIFT_RAD, shift)) : shift;
   }
 }
 
@@ -81,7 +112,7 @@ export function addVelocityFeedforward(r: RobotRuntime, targets: Float64Array, q
     if (kp <= 0) continue;
     const j = r.joints[i];
     const v = Math.max(-j.motor.noLoadSpeedRadS, Math.min(j.motor.noLoadSpeedRadS, qd[i]));
-    targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, (j.kd * v) / kp));
+    targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, kdOverKp(r, i, kp) * v));
   }
 }
 
@@ -124,7 +155,7 @@ export class VelocityFeedforward {
       this.prev[i] = targets[i];
       const kp = effectiveKp(r, i);
       if (kp <= 0 || this.hold[i]) continue;
-      const shift = (j.kd * this.rate[i]) / kp;
+      const shift = kdOverKp(r, i, kp) * this.rate[i];
       targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, shift));
     }
   }

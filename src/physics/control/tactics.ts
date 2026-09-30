@@ -7,7 +7,7 @@
 //   reflex     counterIfLunge is armed in advance and fires here, without a brain round trip,
 //              the moment the opponent's windup crosses REFLEX_WINDUP inside striking range
 //   aggression faster footwork, shorter windups (the skill runner), shorter pauses between strikes
-import type { Intent, Tactic, TargetZone } from '../../core/protocol';
+import type { Intent, MoveVector, Tactic, TargetZone } from '../../core/protocol';
 import { APOTHEM } from '../../core/arena-spec';
 import type { SimContext } from '../sim-context';
 import { canUse, TACTIC_SKILL } from './abilities';
@@ -29,6 +29,11 @@ const SWEET_SPOT = 0.6; // where in a skill's range the feet aim
 const THROW_ZONE = 0.85; // walking in, throw once this far into the range (not at its very edge)
 const FEINT_AT = 0.6; // a feint is pulled at this fraction of its windup
 const MAX_HOLD_S = { defense: 3, grapple: 2.5 } as const;
+// Intent.move (player mode): a velocity request in the opponent-locked frame.
+const MOVE_DEADBAND = 0.05; // |move| under this plants the feet
+const MOVE_LOOKAHEAD_S = 0.8; // the goal is where the stance would be this far ahead at the asked speed
+const MOVE_SAFE_SPEED = 0.25; // × √(g·z_c): the design's safe walking speed at |move| = 1
+const MOVE_MIN_RANGE_M = 0.45; // walking at him never plans the stance closer than this (COM to COM)
 
 /**
  * TODO(control-build): safe fallbacks for the fighter-intelligence tactics until the control build
@@ -63,6 +68,11 @@ export class TacticRunner {
 
   /** Without an intent (no brain attached) the robot is left to whoever drives it directly. */
   update(ctx: SimContext, s: Sense, env: SkillEnv): void {
+    this.c.moveSpeed = null;
+    // REFEREE BREAK HOOK (src/physics/systems/referee.ts): while a fighter is down, the referee's
+    // order beats the intent (brain or player alike): no new blows or reflexes, a blow still in its
+    // windup is pulled, the feet go to the neutral spot (or hold). r.intent itself is left untouched.
+    if (this.refereeBreak(ctx, env)) return;
     const intent = this.c.r.intent;
     const opp = this.c.opp;
     if (!opp || !intent) return;
@@ -70,8 +80,65 @@ export class TacticRunner {
     const aggression = intent.aggression;
     this.c.timing = { ...this.c.timing, swing: 0.3 * (1.2 - 0.4 * aggression) * (this.c.r.design.abilities.includes('sprint') ? 0.85 : 1) };
     this.trackCooldown(ctx, aggression);
-    if (this.reflex(ctx, s, env, intent, dist)) return;
-    this.run(ctx, s, env, intent.tactic, intent.target, aggression, dist, false);
+    if (!this.reflex(ctx, s, env, intent, dist)) this.run(ctx, s, env, intent.tactic, intent.target, aggression, dist, false);
+    // Player mode: the footwork follows Intent.move; the tactic only picked the strike or defence.
+    if (intent.move) this.followMove(s, intent.move, dist);
+  }
+
+  /**
+   * Intent.move (docs/design/player-mode-integration.md): the vector is a velocity request in the
+   * opponent-locked frame (forward = straight at him, strafe = to this fighter's own right, counter-
+   * clockwise around him seen from above), scaled to the design's safe walking speed; {0, 0} plants
+   * the feet where they are. It becomes a stance goal the asked speed would reach shortly; the
+   * balance engine owns the footholds and may slow or refuse any step (a saturated gyro, a bad leg,
+   * a strike under way).
+   */
+  private followMove(s: Sense, m: MoveVector, dist: number): void {
+    const mag = Math.min(1, Math.hypot(m.forward, m.strafe));
+    if (mag < MOVE_DEADBAND) {
+      this.c.goal = null;
+      return;
+    }
+    const o = this.c.opp!.com;
+    const ux = (o[0] - s.com[0]) / Math.max(1e-6, dist), uy = (o[1] - s.com[1]) / Math.max(1e-6, dist);
+    const speed = mag * MOVE_SAFE_SPEED * (9.81 / s.omega0); // √(g·z_c) = g / ω₀
+    const k = (speed * MOVE_LOOKAHEAD_S) / Math.hypot(m.forward, m.strafe);
+    // Forward along the line to him, strafe to this fighter's right (−y of its facing): (uy, −ux).
+    let dx = (m.forward * ux + m.strafe * uy) * k;
+    let dy = (m.forward * uy - m.strafe * ux) * k;
+    const cur = this.c.gait.bothPlanted() ? this.c.gait.currentFrame() : { x: s.com[0], y: s.com[1], heading: 0 };
+    // Never plan the stance into him.
+    const along = dx * ux + dy * uy;
+    const room = dist - MOVE_MIN_RANGE_M;
+    if (along > room) {
+      const cut = along - Math.max(0, room);
+      dx -= ux * cut;
+      dy -= uy * cut;
+    }
+    let x = cur.x + dx, y = cur.y + dy;
+    const rr = Math.hypot(x, y);
+    if (rr > ARENA_LIMIT_M) {
+      x *= ARENA_LIMIT_M / rr;
+      y *= ARENA_LIMIT_M / rr;
+    }
+    this.c.goal = { x, y, heading: Math.atan2(o[1] - y, o[0] - x) };
+    this.c.moveSpeed = speed;
+  }
+
+  /** Referee break hook (see update): obeys the referee's order; true while there is one. */
+  private refereeBreak(ctx: SimContext, env: SkillEnv): boolean {
+    const order = ctx.referee?.orders[this.c.r.corner];
+    if (!order) return false;
+    const run = this.c.skills.run;
+    // A guard may stay up; a clinch lets go; anything else is pulled only while still in its windup.
+    if (run && (run.def.kind === 'grapple' || (run.phase === 'windup' && run.def.kind !== 'defense'))) this.c.skills.cancel(env, run.def.kind === 'grapple');
+    this.c.goal = order.goal;
+    // Nothing from before the break carries over into FIGHT (a pulled feint, a sidestep, a latched reflex).
+    this.feint = false;
+    this.latched = false;
+    this.sidestepUntil = -1;
+    this.wasActive = this.c.skills.active();
+    return true;
   }
 
   /** The runner just finished a skill: pause before the next one. */
@@ -148,7 +215,8 @@ export class TacticRunner {
     if (dist > lo + throwAt * (hi - lo) || dist < lo) return this.goalAt(s, lo + sweet * (hi - lo), 0);
     this.still();
     if (!now && ctx.time < this.nextStrikeAt) return;
-    if (this.c.gait.phase !== 'double' || !this.c.gait.bothPlanted() || !this.c.readyToStrike()) return;
+    const ready = def.kind === 'leg' ? this.c.readyToKick() : this.c.readyToStrike();
+    if (this.c.gait.phase !== 'double' || !this.c.gait.bothPlanted() || !ready) return;
     this.c.startSkill(def, zone === 'weapon' ? def.defaultZone : zone, aggression);
   }
 
@@ -213,9 +281,28 @@ export class TacticRunner {
     this.c.goal = null;
   }
 
-  /** Stand `d` from the opponent's COM, rotated `turn` around it, facing it, inside the cage. */
+  /**
+   * Where the opponent stands: its COM, or on the balance engine its COM moved by the part of its
+   * DCM lead (ċ/ω₀) along the line between the two, where its approach or retreat carries it. Two
+   * fighters walking in plan against where the other will stop, not where it was, so neither walks
+   * into the other and backs off again. (Across the line it is left out: a stepping opponent's
+   * sway would swing the bearing.)
+   */
+  private oppPoint(s: Sense): readonly number[] {
+    const opp = this.c.opp!;
+    if (!this.c.engine) return opp.com;
+    const dx = s.com[0] - opp.com[0], dy = s.com[1] - opp.com[1];
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-6) return opp.com;
+    const ux = dx / d, uy = dy / d;
+    const w = Math.sqrt(9.81 / Math.max(0.3, opp.com[2]));
+    const lead = (opp.vel[0] * ux + opp.vel[1] * uy) / w;
+    return [opp.com[0] + ux * lead, opp.com[1] + uy * lead, opp.com[2]];
+  }
+
+  /** Stand `d` from the opponent, rotated `turn` around it, facing it, inside the cage. */
   private goalAt(s: Sense, d: number, turn: number): void {
-    const o = this.c.opp!.com;
+    const o = this.oppPoint(s);
     const ang = Math.atan2(s.com[1] - o[1], s.com[0] - o[0]) + turn;
     let x = o[0] + Math.cos(ang) * d;
     let y = o[1] + Math.sin(ang) * d;
@@ -229,3 +316,4 @@ export class TacticRunner {
 }
 
 const clampRange = (d: number): number => Math.max(0.85, Math.min(1.4, d));
+

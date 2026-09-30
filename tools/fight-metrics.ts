@@ -16,12 +16,20 @@
 //                               strikes that hit the head
 //   fights                      length, how they end, 'down' KOs that followed a self-inflicted fall
 //   health                      blow-ups, control cost per robot per physics step
+//   balance (§8 of docs/design/balance-engine.md)
+//                               self-falls split by activity (stepping, standing, striking,
+//                               kicking, rising), falls per 50 punches and per 10 kicks, torso
+//                               rate below/above 3 Hz, tilt peak, pelvis height std, planned-COP
+//                               jump per tick, DCM error, planted-leg servos at their limit, gyro
+//                               saturation in footwork and free momentum at touchdown
+//                               (tests/balance/recorder.ts; SD_BALANCE=legacy|dcm picks the path)
 //
 // usage:
 //   npx tsx tools/fight-metrics.ts [--seconds 120] [--seeds 1,2,3] [--designs bruiser,striker,goliath]
 //                                  [--jobs 3] [--out file.json]      every ordered matchup, in parallel
 //   npx tsx tools/fight-metrics.ts --pairs savate:haymaker,firecracker:pylon [--seconds 90] [--seeds 1,2]
 //   npx tsx tools/fight-metrics.ts --fight <red> <blue> <seconds> <seed> [--json] [--log]
+//   any of the above with --balance legacy|dcm (the balance path the fights run on)
 import loadMujoco from '@mujoco/mujoco';
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -34,6 +42,7 @@ import { buildContext } from '../src/physics/runtime';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
 import { compileWorld } from '../src/physics/world';
+import { activityOf, BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
 
 const INTENT_EVERY_S = 0.5;
 const SELF_KD_IMPULSE_NS = 20;
@@ -58,6 +67,7 @@ interface ImpactRec {
 
 interface FallRec {
   t: number;
+  activity: string; // stepping, standing, striking, kicking, rising, victory
   selfStrict: boolean;
   selfLoose: boolean;
   maxHitNs: number; // biggest opponent impact on this fighter in the window
@@ -95,9 +105,11 @@ interface FighterReport {
   captureSteps: number;
   gyroSatMean: number;
   gyroSatMax: number;
+  balance: BalanceMetrics;
 }
 
 export interface FightReport {
+  balancePath: string;
   red: string;
   blue: string;
   seed: number;
@@ -147,6 +159,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   ctx.released = true;
 
   const ctl = ctx.robots.map((r) => controllerOf(r)!);
+  const recorders = [new BalanceRecorder(ctx, 0, 0.3), new BalanceRecorder(ctx, 1, 0.3)];
   const impacts: ImpactRec[] = [];
   const timeline: string[] = [];
   const falls: FallRec[][] = [[], []];
@@ -213,11 +226,11 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
           if (f.getupAt !== null && f.refellAt === null && ctx.time - f.getupAt <= SOLID_S) f.refellAt = ctx.time;
         }
         falls[c].push({
-          t: ctx.time, selfStrict: strictHit <= SELF_KD_IMPULSE_NS, selfLoose: looseHit <= SELF_KD_IMPULSE_NS, maxHitNs: strictHit,
+          t: ctx.time, activity: activityOf(history[c], ctx.time), selfStrict: strictHit <= SELF_KD_IMPULSE_NS, selfLoose: looseHit <= SELF_KD_IMPULSE_NS, maxHitNs: strictHit,
           doing, gyroPeak, getupAt: null, refellAt: null, outcome: 'censored', solid: null,
         });
         if (current[c]) closeStrike(c);
-        timeline.push(`${stamp()}s  ${name(c)} DOWN${strictHit <= SELF_KD_IMPULSE_NS ? ' (self)' : ` (hit ${strictHit.toFixed(0)} N·s)`} doing ${doing.join(',')} gyro ${gyroPeak.toFixed(2)}`);
+        timeline.push(`${stamp()}s  ${name(c)} DOWN${strictHit <= SELF_KD_IMPULSE_NS ? ' (self)' : ` (hit ${strictHit.toFixed(0)} N·s)`} ${activityOf(history[c], ctx.time)}, doing ${doing.join(',')} gyro ${gyroPeak.toFixed(2)}`);
         return;
       }
       case 'getup': {
@@ -248,6 +261,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
       break;
     }
     for (const s of systems) s.post?.(ctx);
+    for (const rec of recorders) rec.sample(ctx);
     for (const e of ctx.events) onEvent(e);
     ctx.events.length = 0;
 
@@ -364,6 +378,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
       captureSteps: ctl[c].gait.captureSteps,
       gyroSatMean: sat[c].n ? sat[c].sum / sat[c].n : 0,
       gyroSatMax: sat[c].max,
+      balance: recorders[c].result(),
     };
   });
   const landedAll = strikes.flat().filter((s) => s.landed);
@@ -371,6 +386,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   const lastFall = koCorner !== null ? falls[koCorner][falls[koCorner].length - 1] : undefined;
   blocks.sort((a, b) => a - b);
   return {
+    balancePath: process.env.SD_BALANCE ?? 'default',
     red, blue, seed, seconds, length, end, koCorner,
     koAfterSelfFall: end === 'down' && !!lastFall?.selfStrict,
     firstLanded,
@@ -456,6 +472,20 @@ export function summarize(fights: FightReport[]): string {
       bySkill.set(k, b);
     }
   }
+  // Balance (§8): self-falls by activity, falls per strike, smoothness and effort.
+  const byActivity = new Map<string, number>();
+  for (const { x } of fs) for (const fl of x.falls) if (fl.selfStrict) byActivity.set(fl.activity, (byActivity.get(fl.activity) ?? 0) + 1);
+  const stepStand = (byActivity.get('stepping') ?? 0) + (byActivity.get('standing') ?? 0);
+  let punches = 0, punchFalls = 0, kicks = 0, kickFalls = 0;
+  for (const { x } of fs) {
+    for (const [id, st] of Object.entries(x.strikes.byId)) {
+      if (['front_kick', 'low_kick', 'head_kick'].includes(id)) { kicks += st.thrown; kickFalls += st.falls; }
+      else { punches += st.thrown; punchFalls += st.falls; }
+    }
+  }
+  const bm = fs.map(({ x }) => x.balance).filter(Boolean);
+  const avg = (k: keyof BalanceMetrics) => bm.reduce((a, m) => a + (m[k] as number), 0) / Math.max(1, bm.length);
+  const worst = (k: keyof BalanceMetrics) => bm.reduce((a, m) => Math.max(a, m[k] as number), 0);
   const selfDoing = new Map<string, number>();
   for (const { x } of fs) for (const fl of x.falls) if (fl.selfStrict) for (const d of fl.doing) selfDoing.set(`${x.design}.${d}`, (selfDoing.get(`${x.design}.${d}`) ?? 0) + 1);
   const ok = (pass: boolean) => (pass ? 'PASS' : 'FAIL');
@@ -475,6 +505,18 @@ export function summarize(fights: FightReport[]): string {
     'per strike (thrown / landed / falls within 1 s):',
     ...[...bySkill].sort().map(([k, v]) => `  ${k.padEnd(22)} ${v.thrown} / ${v.landed} / ${v.falls}`),
     `self falls by activity: ${[...selfDoing].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`,
+    'balance (docs/design/balance-engine.md §8):',
+    `  self-falls by activity (strict, per fighter per 2 min): ${[...byActivity].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${perTwoMin(v).toFixed(2)} (${v})`).join(', ') || 'none'}`,
+    `  self-falls while stepping or standing   ${stepStand}   target 0   ${ok(stepStand === 0)}`,
+    `  falls per 50 punches / per 10 kicks      ${((50 * punchFalls) / Math.max(1, punches)).toFixed(1)} (${punchFalls}/${punches}) / ${((10 * kickFalls) / Math.max(1, kicks)).toFixed(1)} (${kickFalls}/${kicks})   target <= 1 / <= 1`,
+    `  torso rate below / above 3 Hz            ${avg('torsoRateLow').toFixed(2)} / ${avg('torsoRateHigh').toFixed(2)} rad/s RMS`,
+    `  tilt peak beyond lean                    mean ${avg('tiltPeakDeg').toFixed(1)}°, worst ${worst('tiltPeakDeg').toFixed(1)}°`,
+    `  pelvis height std (no skill running)     ${avg('pelvisStdCm').toFixed(2)} cm`,
+    `  planned-COP jump per tick                worst ${worst('copJumpCm').toFixed(1)} cm, p99 ${avg('copJumpP99Cm').toFixed(1)} cm`,
+    `  DCM error RMS                            ${avg('dcmErrCm').toFixed(1)} cm`,
+    `  planted-leg servo at limit (no skill)    ${pct(avg('servoLimitShare'))}`,
+    `  gyro saturation (no skill) / at touchdown free   ${avg('gyroSatFootwork').toFixed(2)} / ${avg('reserveAtTouchdown').toFixed(2)}`,
+    `  single support inside 2 m                ${pct(avg('singleInside2'))}`,
   ];
   return lines.join('\n');
 }
@@ -502,6 +544,8 @@ async function runChild(red: string, blue: string, seconds: number, seed: number
 }
 
 async function main(): Promise<void> {
+  const balance = arg('balance', '');
+  if (balance) process.env.SD_BALANCE = balance; // the fight children read it at load
   const fi = process.argv.indexOf('--fight');
   if (fi >= 0) {
     const [red = 'bruiser', blue = 'striker', secs = '120', seed = '1'] = process.argv.slice(fi + 1, fi + 5);

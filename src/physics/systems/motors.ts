@@ -52,13 +52,17 @@ export const motorSystem: SimSystem = {
     const biasprm = model.actuator_biasprm;
     for (const r of ctx.robots) {
       let draw = 0;
+      // Per-joint gain and damping scales the balance engine writes each control tick (stance
+      // ankles soften so the feed-forward, not position error, sets the centre of pressure).
+      const gainScale = r.mem.gainScale as Float64Array | undefined;
+      const dampScale = r.mem.dampScale as Float64Array | undefined;
       for (let i = 0; i < r.joints.length; i++) {
         const j = r.joints[i];
         const qdot = data.qvel[j.dadr];
         const omega = Math.abs(qdot);
         // Back-EMF only limits a motor that drives along its velocity. When the servo is braking
         // (commanded torque opposes motion, e.g. a collapsing knee) full torque is available.
-        const tauCmd = j.kp * (r.targets[i] - data.qpos[j.qadr]) - j.kd * qdot;
+        const tauCmd = j.kp * (gainScale ? gainScale[i] : 1) * (r.targets[i] - data.qpos[j.qadr]) - j.kd * (dampScale ? dampScale[i] : 1) * qdot;
         const braking = tauCmd * qdot < 0;
         const speedFactor = braking ? 1 : Math.max(0, 1 - omega / j.motor.noLoadSpeedRadS);
         const healthFactor = j.state === 'limp' ? 0 : 0.25 + 0.75 * j.health;
@@ -71,10 +75,10 @@ export const motorSystem: SimSystem = {
         forcerange[j.act * 2 + 1] = avail;
 
         // A limp joint loses its servo entirely; a seized one locks up stiff.
-        const kpScale = j.state === 'limp' ? 0 : j.state === 'seized' ? 3 : 1;
+        const kpScale = j.state === 'limp' ? 0 : j.state === 'seized' ? 3 : gainScale ? gainScale[i] : 1;
         gainprm[j.act * 10] = j.kp * kpScale;
         biasprm[j.act * 10 + 1] = -j.kp * kpScale;
-        biasprm[j.act * 10 + 2] = -j.kd * (j.state === 'limp' ? 0.15 : 1);
+        biasprm[j.act * 10 + 2] = -j.kd * (j.state === 'limp' ? 0.15 : dampScale && j.state !== 'seized' ? dampScale[i] : 1);
 
         // A seized gearbox locks where it jammed; worn gears wander within their lash.
         if (j.state === 'seized') {

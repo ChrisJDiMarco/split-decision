@@ -88,6 +88,13 @@ export interface FootSense {
   flat: number; // foot up-axis z: 1 flat
 }
 
+/** One leg as a whole (the thigh's subtree): what a swinging leg carries of the COM's motion. */
+export interface LegSense {
+  mass: number;
+  com: Vec3;
+  vel: Vec3;
+}
+
 export interface Sense {
   time: number;
   pelvisPos: Vec3;
@@ -105,6 +112,7 @@ export interface Sense {
   feet: Record<Side, FootSense>;
   fists: Record<Side, Vec3>; // fist body origins, world
   waistPitch: number; // measured, rad
+  legs: Record<Side, LegSense>;
 }
 
 function footSense(v: Views, body: number, shin: number, geo: HumanoidGeometry, side: Side): FootSense {
@@ -159,6 +167,10 @@ export function sense(ctx: SimContext, r: RobotRuntime, geo: HumanoidGeometry, i
     feet: { l: footSense(v, ids.foot.l, ids.shin.l, geo, 'l'), r: footSense(v, ids.foot.r, ids.shin.r, geo, 'r') },
     fists: { l: readVec(v.xpos, ids.fist.l), r: readVec(v.xpos, ids.fist.r) },
     waistPitch: waistPitchOf(r, v),
+    legs: {
+      l: { mass: ctx.model.body_subtreemass[ids.thigh.l], com: readVec(v.subtreeCom, ids.thigh.l), vel: readVec(v.subtreeLinvel, ids.thigh.l) },
+      r: { mass: ctx.model.body_subtreemass[ids.thigh.r], com: readVec(v.subtreeCom, ids.thigh.r), vel: readVec(v.subtreeLinvel, ids.thigh.r) },
+    },
   };
 }
 

@@ -31,12 +31,18 @@ const GUARD_LEAD = 0.5; // lead fist reach, fraction of arm reach
 const GUARD_REAR = 0.36;
 const WAIST_PITCH = 0.06;
 
-export function stanceFor(geo: HumanoidGeometry): StanceParams {
+/** Stance proportions a caller may override (the balance engine widens the stance). */
+export interface StanceOptions {
+  widthFraction?: number; // lateral half-width, × hip offset
+  halfLengthPerLeg?: number; // stagger, × leg length
+}
+
+export function stanceFor(geo: HumanoidGeometry, opts: StanceOptions = {}): StanceParams {
   const L = geo.legLength;
   const leg = geo.legs.l;
   const hipY = Math.abs(leg.hip[1]);
-  const halfLength = HALF_LENGTH_PER_LEG * L;
-  const halfWidth = hipY * WIDTH_FRACTION;
+  const halfLength = (opts.halfLengthPerLeg ?? HALF_LENGTH_PER_LEG) * L;
+  const halfWidth = hipY * (opts.widthFraction ?? WIDTH_FRACTION);
   const span = LEG_EXTENSION * L;
   const vertical = Math.sqrt(Math.max(0.1, span * span - halfLength * halfLength));
   const pelvisHeight = leg.soleDepth + vertical - leg.hip[2];

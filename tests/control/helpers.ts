@@ -171,7 +171,8 @@ export function robotMass(ctx: SimContext, r: RobotRuntime): number {
   return ctx.model.body_subtreemass[r.rootBody];
 }
 
-export const HUMANOIDS = ['bruiser', 'striker', 'goliath'] as const;
+/** Every humanoid on the roster: the iron-age three and the modern four. */
+export const HUMANOIDS = ['bruiser', 'striker', 'goliath', 'firecracker', 'savate', 'haymaker', 'pylon'] as const;
 
 /**
  * A lone robot: robot 0 released on the canvas, robot 1 parked far away on its gantry with its

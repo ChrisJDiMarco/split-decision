@@ -42,6 +42,14 @@ const ZONE_PART: Record<string, string> = {
   head: 'head', torso: 'torso', left_arm: 'forearm_l', right_arm: 'forearm_r', left_leg: 'shin_l', right_leg: 'shin_r', weapon: 'torso',
 };
 
+/**
+ * Stabilisation input (the balance engine sets r.mem.gazeStabilize = true on its path): between
+ * saccades the neck counter-turns the torso's own yaw since the fixation, so the head stays locked on
+ * its target in the world while the hips and chest turn under it (a still head that tracks its target
+ * is the cheapest cue of competence). The fixation itself is still this system's.
+ */
+export const GAZE_STABILIZE_KEY = 'gazeStabilize';
+
 export interface GazeCommand {
   yaw: number; // neck yaw relative to the torso, rad
   pitch: number; // neck pitch, rad, + looks down (used only where a neck_pitch joint exists)
@@ -56,6 +64,7 @@ interface GazeState {
   oppBodies: Record<string, number>;
   fists: [number, number];
   fixYaw: number;
+  fixTorsoYaw: number; // torso world yaw when the fixation was taken (stabilisation)
   cmd: GazeCommand;
   nextSaccadeT: number;
   mode: GazeMode;
@@ -101,6 +110,7 @@ function stateOf(ctx: SimContext, r: RobotRuntime): GazeState | null {
     oppBodies,
     fists: [fl.body, fr.body],
     fixYaw: r.targets[neck],
+    fixTorsoYaw: torsoYaw(ctx.data.xmat as Float64Array, torso.body),
     cmd: { yaw: r.targets[neck], pitch: 0 },
     nextSaccadeT: 0,
     mode: 'scan',
@@ -225,6 +235,7 @@ function decide(ctx: SimContext, r: RobotRuntime, st: GazeState, dt: number): vo
   // Saccades: a new mode or a big error snaps at once; a small one waits out the fixation dwell.
   if (mode !== st.mode || err > SACCADE_DEG * DEG || (err > MICRO_DEG * DEG && ctx.time >= st.nextSaccadeT)) {
     st.fixYaw = yaw;
+    st.fixTorsoYaw = torsoYaw(xmat, st.torso);
     st.nextSaccadeT = ctx.time + DWELL_MIN_S + DWELL_SPAN_S * hash01(ctx.tick + r.corner * 7919);
   }
   st.mode = mode;
@@ -241,7 +252,7 @@ export const gazeSystem: SimSystem = {
       const head = r.parts.get('head');
       if (head && !head.attached) continue;
       if (ctx.tick % UPDATE_EVERY_TICKS === 0) decide(ctx, r, st, ctx.dt * UPDATE_EVERY_TICKS);
-      r.targets[st.neck] = st.cmd.yaw;
+      r.targets[st.neck] = r.mem[GAZE_STABILIZE_KEY] === true ? stabilized(ctx, st) : st.cmd.yaw;
       if (st.pitch >= 0) r.targets[st.pitch] = st.cmd.pitch;
     }
   },
@@ -251,6 +262,16 @@ export const gazeSystem: SimSystem = {
     out.gaze = { point: [st.point[0], st.point[1], st.point[2]], mode: st.mode, lock: r.koReason ? 0 : st.lock };
   },
 };
+
+function torsoYaw(xmat: Float64Array, torso: number): number {
+  return Math.atan2(xmat[torso * 9 + 3], xmat[torso * 9]);
+}
+
+/** The fixation held in the world: the neck takes back the torso's yaw since it was taken. */
+function stabilized(ctx: SimContext, st: GazeState): number {
+  const d = torsoYaw(ctx.data.xmat as Float64Array, st.torso) - st.fixTorsoYaw;
+  return clamp(st.cmd.yaw - Math.atan2(Math.sin(d), Math.cos(d)), st.range[0], st.range[1]);
+}
 
 /** Test/metrics hook: the gaze command and the neck's current tracking error (rad). */
 export function gazeProbe(ctx: SimContext, r: RobotRuntime): { mode: GazeMode; cmd: GazeCommand; neckErr: number; desiredYaw: number } | null {
