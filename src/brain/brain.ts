@@ -302,6 +302,9 @@ export class Brain {
     if (s.me.down && !this.getupAsked && !this.offline && this.kipPossible(s)) {
       if (this.inFlight >= MAX_IN_FLIGHT || !this.canSend()) return;
       this.queryGetup(s, trigger);
+      // A knockdown is a referee break: while the question is out, the body must not keep the
+      // pre-knockdown intent (its combo, its armed reflex). Cover up; the get-up style stays undecided.
+      if (this.onBreak && obvious) this.emitRule({ ...obvious, reason: 'down: getting up' }, 'local', s, trigger);
       return;
     }
     if (obvious && !this.offline) {

@@ -24,6 +24,16 @@ describe('ticker', () => {
     expect(feed.ingest([fight], null, 20).map((i) => i.text)).toEqual(['FIGHT!']);
   });
 
+  test('the standing man falling after the first is back up is not a double knockdown', () => {
+    const feed = new TickerFeed(NAMES);
+    // The break's union says both went down, the referee's live roles: Savate down, Haymaker sent away.
+    const t = (corner: 0 | 1, role: RefereeTelemetry['role']) => ({ corner, referee: { break: true, role }, parts: [], battery: 1, gyroHealth: 0, gyroSaturation: 0 }) as unknown as RobotTelemetry;
+    const tel = [t(0, 'down'), t(1, 'neutral')];
+    expect(feed.ingest([brk([0, 1])], tel, 14).map((i) => i.text)).toEqual(['Referee sends Haymaker to a neutral corner']);
+    const both = [t(0, 'down'), t(1, 'down')];
+    expect(feed.ingest([brk([0, 1])], both, 15).map((i) => i.text)).toEqual(['Double knockdown']);
+  });
+
   test('a fall, the break and FIGHT in order, nothing twice', () => {
     const feed = new TickerFeed(NAMES);
     const lines = feed.ingest([{ kind: 'fall', corner: 1 }, brk([1])], null, 5).map((i) => i.text);

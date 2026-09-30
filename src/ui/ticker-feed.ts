@@ -62,7 +62,7 @@ export class TickerFeed {
   ingest(events: readonly SimEvent[], telemetry: readonly RobotTelemetry[] | null, time: number): TickerItem[] {
     const out: TickerItem[] = [];
     for (const ev of events) {
-      const item = this.fromEvent(ev, time);
+      const item = this.fromEvent(ev, time, telemetry);
       if (item) out.push(item);
     }
     if (telemetry) for (const t of telemetry) out.push(...this.fromTelemetry(t, time));
@@ -76,7 +76,7 @@ export class TickerFeed {
     return true;
   }
 
-  private fromEvent(ev: SimEvent, time: number): TickerItem | null {
+  private fromEvent(ev: SimEvent, time: number, telemetry: readonly RobotTelemetry[] | null = null): TickerItem | null {
     const n = this.names;
     switch (ev.kind) {
       case 'impact': {
@@ -113,8 +113,12 @@ export class TickerFeed {
       }
       // Referee breaks (src/physics/systems/referee.ts): a knockdown stops the fight, FIGHT restarts it.
       case 'break': {
-        if (ev.down.length >= 2) return { text: 'Double knockdown', level: 'alert', corner: null, time };
-        const standing: Corner = ev.down[0] === 0 ? 1 : 0;
+        // ev.down is everyone down in this break so far: when the standing man falls after the first
+        // one is back up, it lists both, but the referee now sends the first one away (its live roles say so).
+        const roles = telemetry?.filter((t) => t.referee?.role === 'down').map((t) => t.corner);
+        const down = roles?.length ? roles : ev.down;
+        if (down.length >= 2) return { text: 'Double knockdown', level: 'alert', corner: null, time };
+        const standing: Corner = down[0] === 0 ? 1 : 0;
         return { text: `Referee sends ${n[standing]} to a neutral corner`, level: 'info', corner: standing, time };
       }
       case 'fight':

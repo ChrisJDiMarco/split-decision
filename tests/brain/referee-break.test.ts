@@ -159,6 +159,25 @@ describe('brain during a referee break', () => {
     expect(b.decisions.some((d) => d.source === 'jev' && /^down: (going for the kip-up|safe get-up)/.test(d.reason ?? ''))).toBe(true);
   });
 
+  test('while the kip-up question is out, the downed fighter covers up at once: no pre-knockdown combo or reflex', async () => {
+    const sc = scene('savate', 'haymaker');
+    const b = rig(sc, 'jev', true);
+    await b.run(0, 1, standing);
+    for (const resolve of b.pending.splice(0)) resolve();
+    await flush();
+    const n = b.intents.length;
+    b.brain.onFrame(fallFrame(1, 0, { down: true, upright: 0.1, moveRisk: { ...RISK }, referee: OFF }, { referee: OFF }));
+    await flush();
+    expect(b.pending).toHaveLength(1); // the kip-up question, unanswered
+    const held = b.intents.slice(n);
+    expect(held).toHaveLength(1);
+    expect(held[0].intent).toMatchObject({ tactic: 'guard', aggression: BREAK_AGGRESSION });
+    expect(held[0].intent.onOpening).toBeUndefined();
+    expect(held[0].intent.combo).toBeUndefined();
+    expect(held[0].intent.getupStyle).toBeUndefined(); // undecided until Jev answers
+    expect(b.decisions.at(-1)!.reason).toBe('down: getting up');
+  });
+
   test('an answer asked before the knockdown is never applied during the break', async () => {
     const sc = scene('savate', 'haymaker');
     const b = rig(sc, 'jev', true);
