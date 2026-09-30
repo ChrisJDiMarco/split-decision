@@ -98,6 +98,8 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - 23:05: referee review DONE (21fb0fe: the downed fighter covers up while the kip-up question is out; 'Double knockdown' only for real ones). BACK GET-UP: Chris turned the pop-up off the back off, but measured without it a shoved-over HAYMAKER never got up, so with Chris's OK it's back ON (2904a64). Priority for move polish: make the back get-up (getup_back 140_08/140_09) look good on every modern design; FIRECRACKER's is already a PoC move.
 
+- RING IQ (Chris, 23:15): "no awareness of the distance ... their arm length and effective range for strikes". Spec: docs/design/ring-iq.md. BALANCE-ENGINE AGENTS (P5 footwork, pace stage) must implement its body rules: edge/pocket/outside zones, enter WITH a strike, step out after combos, predict the meeting point, no walking into guard contact. The mind side (range facts for Jev/House) is running now as `range-awareness-mind`.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
