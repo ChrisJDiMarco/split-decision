@@ -79,6 +79,13 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - REORDER (Chris, 21:00): the preview walking isn't mocap, and he wants human mocap footwork first. The balance script is edited to run P1 → verify → P5 (motion-matched mocap footwork) → P3 → P2 → P4 → judge. When p1:build's result is in the journal, stop wqstz2k1x and relaunch the script with resumeFromRunId wf_38bd1af8-d17; p1 replays from cache.
 
+- DONE 21:15: local mind bridge (50a298d) and the mind picker + player mode in the main game (7643b20, which includes the ?balance=dcm preview switch). LOCAL needs `ollama pull hf.co/Mapika/decider-4b-GGUF:Q4_K_M` (2.71 GB, Apache-2.0), waiting for Chris's OK; then run `npx tsx tests/brain/live-local.ts`. Follow-ups:
+  - The opponent panel still says 'JEV MIND' for LOCAL/HOUSE.
+  - Hit-stop briefly freezes player input on their own hits.
+  - The key sheet can't open during the walkout or a break.
+  - LOCAL decisions are recorded with source 'jev'.
+- Chris's localhost settings currently say MINDS = ALL LOCAL (neither agent claims to have set it; possibly Chris did). Ask him; don't change it.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
