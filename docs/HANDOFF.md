@@ -74,6 +74,9 @@ Everything is on disk. Commit each build's files only after checking them. Resum
 
 Uncommitted work in progress: src/physics/control/** + src/physics/control/balance/ + tests/balance + tools/balance-drills.ts (balance engine), src/physics/systems/referee.ts + tests/referee + tools/referee-check.ts (referee), server/** + src/brain/** (local mind). Balance-engine drill logs: tests/balance/.out/.
 
+- PREVIEW SWITCH (20:55, uncommitted: 3 small edits in src/main.ts, src/physics/worker.ts, src/core/protocol.ts): http://localhost:5297/?balance=dcm runs the in-progress balance engine with a yellow "PREVIEW · NEW BALANCE ENGINE" badge; the default stays legacy. Commit it together with the integration build's main.ts changes.
+- SETTINGS WATCH: an integration-build test left the shared localStorage setting `minds: "local"`, so every tab runs LOCAL OFFLINE → HOUSE. After that build finishes, reset `minds` to 'corner' if it's still 'local'.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
