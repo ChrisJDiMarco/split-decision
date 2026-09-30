@@ -17,6 +17,8 @@ Chris's vision, captured 2026-09-29. The order below is the build order; later i
 - **Offline move optimisation** on the CPU (SAMCON-style) for signature moves per robot, stored as parameters.
 - **Look loop**: for each robot, render the model at the reference image's angle, have a vision critic score the differences, fix the kit, repeat until the model matches the concept art.
 
+- **Parked by Chris (2026-09-29): local and in-browser minds.** Julia 1 (Apache 2.0, 144M) runs in the browser at about 16 ms per decision, but it ranks low and is overconfident. Mapika Decider 2B is the stronger local candidate. Plan: an offline eval on about 500 outcome-labelled fight states (Julia 1 vs Decider 2B vs Kev), then temperature scaling, then maybe a fine-tune on our own non-Jev data. Details: `docs/research/11-julia-1.md`. Downloads need Chris's OK.
+
 ## Workshop and upgrades
 
 Every upgrade is a slot with real mass, power and heat (`docs/design/loadouts-and-workshop.md`).
