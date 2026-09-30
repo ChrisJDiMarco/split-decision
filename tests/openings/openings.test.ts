@@ -71,7 +71,10 @@ describe('openings from real MuJoCo states', () => {
     expect(during.has('off_balance') || after.has('off_balance')).toBe(true);
     expect(after.has('gyro_saturated')).toBe(true);
     expect(r1.down).toBe(true);
-    expect(after.has('rising')).toBe(true);
+    // Down or rising is no target: the referee holds the fight, so 'rising' (and every opening on a
+    // downed man) is muted while his break runs (refereeMute; its unit test is in referee-mute.test.ts).
+    expect(sim.ctx.referee?.active).toBe(true);
+    expect(after.has('rising')).toBe(false);
     // Down, standing flashy moves are impossible; the kip-up still has a price.
     const risk = tel(sim, 1).moveRisk!;
     expect(risk.tornado_kick).toBe(1);

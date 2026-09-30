@@ -143,15 +143,43 @@ function strikeTarget(t: Tactic, fc: FighterContext, s: Situation): TargetZone {
   return weakestZone(fc, s, HEAD_STRIKES.has(t) || t === 'jab' || t === 'cross' ? 'head' : 'torso');
 }
 
+/** Aggression while the referee holds the fight: guard up, nothing thrown. */
+export const BREAK_AGGRESSION = 0.2;
+
+/**
+ * This fighter's role in a referee break (RobotTelemetry.referee, src/physics/systems/referee.ts),
+ * or null while they fight: 'down' on the canvas or rising, 'neutral' sent to a neutral spot, 'hold'
+ * back up and waiting for FIGHT.
+ * A knockdown counts as a break from its first frame: the controller flags the fall a control tick or
+ * two before the referee's next update, so a telemetry frame can carry `down` (and the 'fall' event)
+ * without `referee.break` yet. Treating that frame as a break keeps it from sending a model question
+ * that the break would then throw away (the downed man's kip-up question with it).
+ */
+export function breakRole(s: Pick<Situation, 'me' | 'opp'>): 'down' | 'neutral' | 'hold' | null {
+  const refereed = s.me.referee !== undefined || s.opp.referee !== undefined;
+  const knockdown = refereed && (s.me.down || s.opp.down);
+  if (!s.me.referee?.break && !s.opp.referee?.break && !knockdown) return null;
+  return s.me.referee?.role ?? (s.me.down ? 'down' : s.opp.down ? 'neutral' : 'hold');
+}
+
 /**
  * Settles an obvious tick locally, or returns null when the call deserves Jev.
- * Obvious: I'm down (the body is getting up), or the opponent is far and not a threat.
+ * Obvious: I'm down (the body is getting up), the referee holds the fight (a break: the body obeys
+ * him over any intent, so nothing is worth a question), or the opponent is far and not a threat.
  */
 export function obviousDecision(fc: FighterContext, s: Situation, seed = 0): RuleDecision | null {
   const counterIfLunge: Tactic = 'sidestep_counter';
   if (s.me.down) {
     const getupStyle = houseGetupStyle(fc, s, seed);
     return { tactic: 'guard', target: 'torso', aggression: 0.2, counterIfLunge, reason: getupStyle === 'kip_up' ? 'down: try a kip-up' : 'down: cover up while the body gets up', getupStyle };
+  }
+  const role = breakRole(s);
+  if (role) {
+    // No reflex armed, no counter thrown: 'guard' as the lunge answer only covers up.
+    const hold = (tactic: Tactic, reason: string): RuleDecision => ({ tactic, target: 'torso', aggression: BREAK_AGGRESSION, counterIfLunge: 'guard', reason });
+    if (role === 'down') return hold('guard', 'down: getting up');
+    if (role === 'neutral') return hold('hold_range', 'referee break: neutral corner');
+    return hold('guard', 'referee break: waiting for FIGHT');
   }
   if (s.band === 'far' && s.geometry.oppApproachSpeed < 1.5) {
     return { tactic: 'close_distance', target: weakestZone(fc, s, 'head'), aggression: baseAggression(s), counterIfLunge, reason: 'far apart, no threat: close the distance' };
@@ -177,9 +205,9 @@ function houseTree(fc: FighterContext, s: Situation, seed: number): RuleDecision
   const pack = (tactic: Tactic, aggression: number, reason: string, target?: TargetZone): RuleDecision =>
     ({ tactic, target: target ?? strikeTarget(tactic, fc, s), aggression, counterIfLunge, reason });
 
-  if (s.oppPhase === 'down') {
-    return close ? pack(finisher(fc), 1, 'opponent down: finish') : pack('close_distance', 0.9, 'opponent down: get there');
-  }
+  // Never jump on a downed man: the referee sends the standing fighter away until he is up (a break
+  // settles this tick in obviousDecision; this covers telemetry without the referee's view).
+  if (s.oppPhase === 'down') return pack('hold_range', BREAK_AGGRESSION, 'opponent down: give him room', 'torso');
   const gamble = houseGamble(fc, s, seed, agg);
   if (gamble) {
     const why = gamble.opening ? `opening (${gamble.opening.replace(/_/g, ' ')})` : 'creative gamble';

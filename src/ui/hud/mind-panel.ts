@@ -1,9 +1,14 @@
-// JEV MIND panel: the fighter's live tactic distribution (top 5), chosen target, the READ
-// on the opponent, aggression and latency, with a HOUSE MIND badge on fallback. The opening,
-// armed-reflex, plan (setup → payoff, or a plain combo) and read lines each keep a fixed one-line
-// slot (empty or not), so the panel's height never changes and the tactic list above never jumps.
+// MIND panel (titled with the mind really deciding: JEV, LOCAL or HOUSE): the fighter's live tactic
+// distribution (top 5), chosen target, the READ on the opponent, aggression and latency, with an
+// offline badge on fallback. The opening, armed-reflex, plan (setup → payoff, or a plain combo) and
+// read lines each keep a fixed one-line slot (empty or not), so the panel's height never changes and
+// the tactic list above never jumps. During a referee break the armed slot shows the fighter's part
+// in it (BREAK · NEUTRAL CORNER, BREAK · WAITING, DOWN · GETTING UP) and the intent is tagged as held.
 import { h, meter, setFill, setText, toggleClass } from '../dom';
-import { armedLine, comboLine, gambleLine, mindChip, offlineBadge, planLine, readLine, seesLine, tacticLabel, topTactics, type MindView } from '../minds';
+import {
+  armedLine, comboLine, gambleLine, HELD_BY_REFEREE, mindChip, mindTitle, offlineBadge, planLine, readLine, refereeLine, seesLine, tacticLabel, topTactics,
+  type MindReferee, type MindView,
+} from '../minds';
 
 const ROWS = 5;
 
@@ -23,12 +28,15 @@ export class MindPanel {
   private read = meter('READ · COMMITTING', 'read');
   private aggression = meter('AGGRESSION');
   private lastKey = '';
+  private who: HTMLElement;
 
-  constructor() {
+  /** `mindName`: the mind picked for this corner ('JEV', 'LOCAL', 'HOUSE'), until its first decision says. */
+  constructor(mindName = '') {
     this.latency = h('span', 'chip latency', '— ms');
     this.badge = h('span', 'badge-offline', 'JEV OFFLINE · HOUSE MIND');
+    this.who = h('span', 'mind-who', mindName ? `${mindName} ` : '');
     const head = h('div', 'panel-head',
-      h('div', 'panel-title', 'JEV ', h('em', {}, 'MIND')),
+      h('div', 'panel-title', this.who, h('em', {}, 'MIND')),
       h('div', {}, this.latency, this.badge),
     );
     const list = h('div', 'tactics');
@@ -56,9 +64,14 @@ export class MindPanel {
     this.el = h('div', 'panel mind', head, list, rows);
   }
 
-  update(mind: MindView | null): void {
+  /** `ref`: this fighter's referee view (RobotTelemetry.referee), null or absent outside a break. */
+  update(mind: MindView | null, ref: MindReferee | null = null): void {
     toggleClass(this.el, 'waiting', !mind);
     if (!mind) return;
+    const who = mindTitle(mind);
+    if (who) setText(this.who, `${who} `);
+    const onBreak = refereeLine(ref);
+    toggleClass(this.el, 'on-break', onBreak !== null);
     const badge = offlineBadge(mind);
     toggleClass(this.el, 'offline', badge !== null);
     if (badge) setText(this.badge, badge);
@@ -80,12 +93,16 @@ export class MindPanel {
     this.read.set(commit ?? 0, commit === null ? '—' : `${Math.round(commit * 100)}%`);
     this.aggression.set(mind.aggression);
     setText(this.latency, mindChip(mind));
-    setText(this.reason, mind.reason ? `${mind.mode ? mind.mode.toUpperCase() + ' · ' : ''}${mind.reason}` : '');
+    const reason = mind.reason ? `${mind.mode ? mind.mode.toUpperCase() + ' · ' : ''}${mind.reason}` : '';
+    setText(this.reason, onBreak ? `${HELD_BY_REFEREE}${reason ? ` · ${reason}` : ''}` : reason);
+    toggleClass(this.reason, 'held', onBreak !== null);
     const gamble = gambleLine(mind) ?? seesLine(mind) ?? (mind.getupStyle === 'kip_up' ? 'GET-UP: KIP-UP' : null);
     setText(this.gamble, gamble ?? '');
     toggleClass(this.gamble, 'taken', !!mind.gamble || mind.getupStyle === 'kip_up');
-    const armed = armedLine(mind);
+    // During a break nothing is armed (the brain holds): the slot shows the fighter's part in the break.
+    const armed = onBreak ?? armedLine(mind);
     setText(this.armed, armed ?? '');
+    toggleClass(this.armed, 'ref', onBreak !== null);
     this.armed.title = armed ?? '';
     const plain = comboLine(mind);
     const plan = planLine(mind) ?? (plain ? `COMBO: ${plain}` : null);

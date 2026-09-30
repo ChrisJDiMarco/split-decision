@@ -111,6 +111,16 @@ export class TickerFeed {
         this.lastCage[ev.corner] = time;
         return { text: `${n[ev.corner]} slammed into the cage`, level: 'hit', corner: ev.corner, time };
       }
+      // Referee breaks (src/physics/systems/referee.ts): a knockdown stops the fight, FIGHT restarts it.
+      case 'break': {
+        if (ev.down.length >= 2) return { text: 'Double knockdown', level: 'alert', corner: null, time };
+        const standing: Corner = ev.down[0] === 0 ? 1 : 0;
+        return { text: `Referee sends ${n[standing]} to a neutral corner`, level: 'info', corner: standing, time };
+      }
+      case 'fight':
+        return { text: 'FIGHT!', level: 'alert', corner: null, time };
+      default:
+        return null;
     }
   }
 

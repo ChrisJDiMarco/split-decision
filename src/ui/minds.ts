@@ -140,3 +140,34 @@ export function topTactics(probs: Record<string, number>, n = 5): RankedTactic[]
 export function tacticLabel(tactic: string): string {
   return tactic.replace(/_/g, ' ').toUpperCase();
 }
+
+/**
+ * The mind that is really deciding, for the panel title: 'JEV', 'LOCAL' or 'HOUSE' (the House Mind
+ * also when the chosen model is offline: the badge says which one). Null before any decision.
+ */
+export function mindTitle(mind: MindView | null): string | null {
+  if (!mind) return null;
+  const kind = mind.link?.kind;
+  if (kind === 'house' || kind === 'offline' || mind.source === 'fallback') return 'HOUSE';
+  return kind === 'local' ? 'LOCAL' : 'JEV';
+}
+
+/** The referee's view of one fighter, as the MIND panel reads it (RobotTelemetry.referee). */
+export interface MindReferee {
+  break: boolean;
+  role?: 'down' | 'neutral' | 'hold';
+}
+
+const REFEREE_LINE: Record<'down' | 'neutral' | 'hold', string> = {
+  down: 'DOWN · GETTING UP',
+  neutral: 'BREAK · NEUTRAL CORNER',
+  hold: 'BREAK · WAITING',
+};
+
+/** 'BREAK · NEUTRAL CORNER', 'BREAK · WAITING' or 'DOWN · GETTING UP' during a referee break, else null. */
+export function refereeLine(ref: MindReferee | null | undefined): string | null {
+  return ref?.break ? REFEREE_LINE[ref.role ?? 'hold'] : null;
+}
+
+/** The body obeys the referee over the brain's intent during a break: the tag on the intent line. */
+export const HELD_BY_REFEREE = 'HELD BY REFEREE';

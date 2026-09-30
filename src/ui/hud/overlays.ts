@@ -1,9 +1,10 @@
-// Full-screen broadcast moments: tale of the tape, round cards, the KO band, the replay
-// treatment (letterbox, bug, progress) and the winner card.
+// Full-screen broadcast moments: tale of the tape, round cards, the referee's break banner, the KO
+// band, the replay treatment (letterbox, bug, progress) and the winner card.
 import type { Corner } from '../../core/types';
 import { h, setFill } from '../dom';
 import type { CornerStats } from '../scorecard';
 import { portraitUrl } from '../skins';
+import type { BreakBanner } from '../referee-view';
 import type { Tale } from '../tale';
 
 export interface WinnerInfo {
@@ -57,6 +58,7 @@ export class Overlays {
   private ko: HTMLElement | null = null;
   private winner: HTMLElement | null = null;
   private replay: { root: HTMLElement; fill: HTMLElement } | null = null;
+  private brk: { root: HTMLElement; count: HTMLElement; title: HTMLElement; sub: HTMLElement; key: string } | null = null;
 
   constructor() {
     this.el = h('div', 'bc-layer overlays');
@@ -66,6 +68,7 @@ export class Overlays {
     this.el.replaceChildren();
     this.tape = this.ko = this.winner = null;
     this.replay = null;
+    this.brk = null;
   }
 
   showTape(tales: readonly [Tale, Tale]): void {
@@ -84,10 +87,34 @@ export class Overlays {
     this.tape = null;
   }
 
-  roundCard(title: string, sub: string, ms: number): void {
-    const el = h('div', 'round-card', h('h1', {}, title), h('p', {}, sub));
+  roundCard(title: string, sub: string, ms: number, cls = ''): void {
+    const el = h('div', `round-card${cls ? ` ${cls}` : ''}`, h('h1', {}, title), sub ? h('p', {}, sub) : null);
     this.el.append(el);
     setTimeout(() => el.remove(), ms);
+  }
+
+  /** The referee's break banner with the count; updated in place (null hides it). */
+  setBreak(b: BreakBanner | null): void {
+    if (!b) {
+      this.brk?.root.remove();
+      this.brk = null;
+      return;
+    }
+    if (!this.brk) {
+      const count = h('b', 'ref-count', '');
+      const title = h('div', 'ref-title', '');
+      const sub = h('div', 'ref-sub', '');
+      const root = h('div', 'ref-banner', h('div', 'ref-clock', count, h('span', {}, 'COUNT')), h('div', 'ref-text', title, sub));
+      this.brk = { root, count, title, sub, key: '' };
+      this.el.append(root);
+    }
+    const key = `${b.count}|${b.title}|${b.sub}|${b.corner}`;
+    if (key === this.brk.key) return;
+    this.brk.key = key;
+    this.brk.count.textContent = String(b.count);
+    this.brk.title.textContent = b.title;
+    this.brk.sub.textContent = b.sub;
+    this.brk.root.className = `ref-banner${b.corner === null ? ' both' : ` c${b.corner}`}`;
   }
 
   showKO(loser: Corner, reason: string, when: string): void {

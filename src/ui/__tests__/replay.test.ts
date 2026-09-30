@@ -82,6 +82,20 @@ describe('KO replay highlight', () => {
     expect(eventsBetween(frames, p.start, p.end)).toContain(frames[frameIndexAt(frames, 20)].events[0]);
   });
 
+  test('a down-count KO through failed rises replays the knockdown that started the count', () => {
+    // blow at 20 s, knockdown at 20.5 s; failed rises fall again at 27 s and 33 s (no blow); the count
+    // runs through them (damage/ko.ts), so the KO lands 20 s after the knockdown
+    const koT = 40.5;
+    const b = new ReplayBuffer();
+    for (let i = 0; i <= Math.round((koT + 2.8) * 60); i++) {
+      const ev = i === 1200 ? [impact(420)] : i === 1230 || i === 1620 || i === 1980 ? [fall] : [];
+      b.push(frame(i / 60, ev));
+    }
+    const hl = findKoHighlight(b.snapshot(), 1, koT, 'down')!;
+    expect(hl.time).toBeCloseTo(20, 5);
+    expect(hl.pos).toEqual([1, 2, 3]);
+  });
+
   test('a head KO replays the head coming off, not an earlier knockdown', () => {
     const detach: SimEvent = { kind: 'detach', corner: 1, part: 'head', debrisBody: 9, pos: [0, 0, 2], vel: [0, 0, 1] };
     const frames = [frame(0), frame(1, [impact(300)]), frame(1.2, [fall]), frame(4, [detach]), frame(5)];

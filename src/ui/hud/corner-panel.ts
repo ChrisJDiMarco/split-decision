@@ -1,4 +1,4 @@
-// One corner's stack: JEV MIND on top, damage silhouette + power/heat/gyro meters below.
+// One corner's stack: the MIND panel (JEV / LOCAL / HOUSE) on top, damage silhouette + power/heat/gyro meters below.
 import type { RobotTelemetry } from '../../core/protocol';
 import type { Corner, RobotDesign } from '../../core/types';
 import { h, meter, setText, toggleClass } from '../dom';
@@ -18,7 +18,7 @@ function level(m: { el: HTMLElement }, warn: boolean, crit: boolean): void {
 
 export class CornerPanel {
   readonly el: HTMLElement;
-  private mind = new MindPanel();
+  private mind: MindPanel;
   private silhouette: DamageSilhouette;
   private battery = meter('BATTERY');
   private heat = meter('HEAT');
@@ -29,7 +29,9 @@ export class CornerPanel {
   private hasGyro: boolean;
   private hasHyd: boolean;
 
-  constructor(corner: Corner, design: RobotDesign) {
+  /** `mindName`: the mind picked for this corner (JEV, LOCAL, HOUSE), shown until its first decision. */
+  constructor(corner: Corner, design: RobotDesign, mindName = '') {
+    this.mind = new MindPanel(mindName);
     this.silhouette = new DamageSilhouette(design);
     this.hasGyro = !!design.gyro;
     this.hasHyd = !!design.hydraulics?.length;
@@ -47,7 +49,7 @@ export class CornerPanel {
   }
 
   update(t: RobotTelemetry | null, mind: MindView | null): void {
-    this.mind.update(mind);
+    this.mind.update(mind, t?.referee ?? null);
     if (!t) return;
     this.silhouette.update(t);
     this.battery.set(t.battery);

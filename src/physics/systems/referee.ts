@@ -24,8 +24,12 @@ import type { Corner } from '../../core/types';
 import type { HumanoidController } from '../control/controller';
 import type { RefereeOrder, RefereeState, RobotRuntime, SimContext, SimSystem } from '../sim-context';
 
-/** Neutral distance, COM to COM: well outside every strike (the longest reach is ~1.0 m) and the reflex range (1.35 m). */
-export const NEUTRAL_M = 2.5;
+/**
+ * Neutral distance, COM to COM: well outside every strike (the longest reach is ~1.0 m) and the
+ * reflex range (1.35 m), and short enough that the slow backward walk gets there in a few seconds
+ * ("a bit of space", not the far side of the cage).
+ */
+export const NEUTRAL_M = 2.2;
 /** Back up and steady this long before FIGHT. */
 export const GRACE_S = 1.0;
 /** FIGHT once the fighter sent to the neutral spot is within this of its distance. */
@@ -62,12 +66,12 @@ export function refereeState(ctx: SimContext): RefereeState {
 const controller = (r: RobotRuntime) => r.mem.control as HumanoidController | undefined;
 
 /** On the canvas, in the scripted get-up, or still rising out of the crouch. */
-function isDown(r: RobotRuntime): boolean {
+export function isDown(r: RobotRuntime): boolean {
   const c = controller(r);
   return r.down || !!c?.getUp.active || !!c?.rising;
 }
 
-function upright(ctx: SimContext, r: RobotRuntime): number {
+export function upright(ctx: SimContext, r: RobotRuntime): number {
   const torso = r.parts.get('torso') ?? r.parts.get('chassis');
   return ctx.data.xmat[(torso ? torso.body : r.rootBody) * 9 + 8];
 }
@@ -76,6 +80,14 @@ function upright(ctx: SimContext, r: RobotRuntime): number {
 function steady(r: RobotRuntime): boolean {
   const c = controller(r);
   return !c || c.readyToStrike();
+}
+
+/**
+ * Up and steady right now, the referee's test for FIGHT: off the canvas, done rising, torso upright
+ * and balanced enough to strike. The KO count (damage/ko.ts) resets only after this has held.
+ */
+export function upAndSteady(ctx: SimContext, r: RobotRuntime): boolean {
+  return !isDown(r) && upright(ctx, r) >= UPRIGHT_MIN && steady(r);
 }
 
 function comXY(ctx: SimContext, r: RobotRuntime): P2 {
@@ -259,9 +271,13 @@ export const refereeSystem: SimSystem = {
   },
 };
 
-/** Logs a break / fight event; it goes out in the next telemetry of each corner (RefereeTelemetry.events). */
+/**
+ * Logs a break / fight event. It goes out once in this frame's SimEvent list (ctx.events) and in the
+ * next telemetry of each corner (RefereeTelemetry.events); a consumer reads one or the other.
+ */
 function emit(ctx: SimContext, st: RefereeState, e: RefereeEvent): void {
   st.log.push({ ...e, seq: st.log.length, time: ctx.time });
+  ctx.events.push({ ...e });
 }
 
 function corners(flags: boolean[]): Corner[] {

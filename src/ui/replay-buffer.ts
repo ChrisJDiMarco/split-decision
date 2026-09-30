@@ -170,19 +170,27 @@ export function findHighlight(frames: readonly ReplayFrame[], fromT = -Infinity,
 
 /** The blow behind a knockdown lands at most this long before the fall registers. */
 const KNOCKDOWN_BLOW_S = 1.5;
+/** A down-count KO lands KO_DOWN_S after the count starts, give or take a frame. */
+const COUNT_SLACK_S = 0.25;
 
 /**
  * The moment that decided a KO. A down-count KO fires long after the knockdown, so it replays the
- * loser's last fall before the KO and the biggest blow that caused it, not the count itself. Any other
+ * knockdown that started the count and the biggest blow that caused it, not the count itself. Any other
  * KO (head off, power, disabled) replays the usual highlight up to the KO.
+ * The count runs through failed rises (damage/ko.ts), and each of those falls again: the knockdown is
+ * the loser's last fall at least KO_DOWN_S before the KO (else his last fall before it).
  */
 export function findKoHighlight(frames: readonly ReplayFrame[], loser: Corner, koTime: number, reason: string): Highlight | null {
   if (reason !== 'down') return findHighlight(frames, -Infinity, koTime);
   let fallT: number | null = null;
+  let countT: number | null = null;
   for (const f of frames) {
     if (f.time > koTime) break;
-    if (f.events.some((e) => e.kind === 'fall' && e.corner === loser)) fallT = f.time;
+    if (!f.events.some((e) => e.kind === 'fall' && e.corner === loser)) continue;
+    fallT = f.time;
+    if (f.time <= koTime - KO_DOWN_S + COUNT_SLACK_S) countT = f.time;
   }
+  fallT = countT ?? fallT;
   if (fallT === null) return findHighlight(frames, -Infinity, koTime);
   let best: Highlight = { time: fallT, pos: null, score: 0 };
   for (const f of frames) {

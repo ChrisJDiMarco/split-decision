@@ -118,7 +118,8 @@ export type SimEvent =
   | { kind: 'fall'; corner: Corner }
   | { kind: 'getup'; corner: Corner }
   | { kind: 'ko'; corner: Corner; reason: 'head' | 'down' | 'power' | 'disabled' }
-  | { kind: 'cage'; corner: Corner; pos: Vec3; speed: number };
+  | { kind: 'cage'; corner: Corner; pos: Vec3; speed: number }
+  | RefereeEvent;
 
 /**
  * Referee break events (src/physics/systems/referee.ts). 'break': someone went down, the standing
@@ -127,9 +128,9 @@ export type SimEvent =
  * got there (reason 'room'); or the referee stopped waiting for that: no progress toward the spot
  * ('stalled') or too long a wait ('timeout'). A KO during a break ends it without a 'fight' (the 'ko'
  * event says it all).
- * Published as RefereeTelemetry.events (RefereeLogEvent, numbered by seq), not in SimEvent:
- * src/ui/ticker-feed.ts fromEvent() switches over every SimEvent kind with no default, so a new kind
- * fails the type check there. Once it has a `default: return null`, these can join SimEvent.
+ * Each goes out once in the frame's SimEvent list (ctx.events: the ticker, broadcast and camera read
+ * it there) and also in RefereeTelemetry.events (RefereeLogEvent, numbered by seq: the player HUD
+ * reads it there). Read one source per consumer, never both.
  */
 export type RefereeEvent =
   | { kind: 'break'; down: Corner[] }

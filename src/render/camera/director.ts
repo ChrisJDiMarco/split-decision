@@ -1,5 +1,7 @@
 // Camera director: picks broadcast shots, holds each for at least MIN_SHOT_S, and cuts
-// on big impacts, detaches and falls. Every cut is planned against the arena's sight lines
+// on big impacts, detaches and falls. During a referee break (a knockdown) the rotation only uses
+// two-shots centred on the downed fighter getting up, with the standing one at his neutral spot in
+// frame; FIGHT cuts back to the wide. Every cut is planned against the arena's sight lines
 // (shot-plan.ts): a shot with no clear variant falls back to the next best kind, and a shot
 // that gets blocked mid-way is cut away from once it has run MIN_SHOT_S. Pure logic
 // (seeded rng), unit-tested.
@@ -30,6 +32,20 @@ const FALLBACK: Partial<Record<ShotKind, ShotKind[]>> = {
   overhead: ['wide', 'cage_low', 'follow'],
   debris: ['follow', 'overhead'],
 };
+
+/**
+ * Referee break rotation: two-shots only (shot-plan checks that both fighters fit), the subject is the
+ * fighter getting up. follow weights its target 0.7 on him and fits the other in; cage_low and wide
+ * frame both from outside the fence.
+ */
+const BREAK_ROTATION: Array<{ kind: ShotKind; weight: number; min: number; max: number }> = [
+  { kind: 'follow', weight: 0.45, min: 3.5, max: 5.5 },
+  { kind: 'cage_low', weight: 0.35, min: 3, max: 4.5 },
+  { kind: 'wide', weight: 0.2, min: 4, max: 6 },
+];
+
+/** What the director reads of the referee (RobotTelemetry.referee). */
+type RefTel = { down: boolean; referee?: { break: boolean; role?: string } };
 
 /** Live rotation: weight and duration range per shot. */
 const ROTATION: Array<{ kind: ShotKind; weight: number; min: number; max: number }> = [
@@ -68,6 +84,8 @@ export class Director {
   private pending: PendingCut | null = null;
   private introQueue: Array<Omit<Shot, 'side'>> = [];
   private prevKind: ShotKind | null = null;
+  /** During a referee break: the fighter getting up (the lower corner on a double knockdown); null while they fight. */
+  private breakDown: Corner | null = null;
 
   constructor(private rng: () => number = Math.random) {
     this.shot = { kind: 'wide', subject: 0, side: 1, anchor: null, focusBody: null, angle: 0 };
@@ -100,8 +118,17 @@ export class Director {
     this.startShot({ kind, subject, anchor: extra.anchor ?? null, focusBody: extra.focusBody ?? null, angle: extra.angle ?? this.rng() * Math.PI * 2 }, this.pickLen(kind));
   }
 
-  /** `tel`: the frame's telemetry, so a ground scramble (striker down) doesn't read as a big hit. */
-  onEvents(events: readonly SimEvent[], tel?: readonly { down: boolean }[] | null): void {
+  /** The fighter the referee is waiting on (a break), or null while they fight. */
+  get breakSubject(): Corner | null {
+    return this.breakDown;
+  }
+
+  /**
+   * `tel`: the frame's telemetry, so a ground scramble (striker down) doesn't read as a big hit, and
+   * the referee's break (who is getting up) steers the rotation.
+   */
+  onEvents(events: readonly SimEvent[], tel?: readonly RefTel[] | null): void {
+    if (tel) this.breakDown = breakSubjectOf(tel, this.breakDown);
     if (this.mode !== 'live') return;
     for (const ev of events) {
       const req = reactionFor(ev, tel);
@@ -156,9 +183,10 @@ export class Director {
     }
     const blocked = canCut && this.blockedFor >= DIRECTOR.BLOCKED_GRACE_S;
     if (this.shotTime < this.shotLen && !blocked) return;
-    const kind = this.pickKind();
-    const subject = pickSubject(s, this.rng);
-    this.startShot({ kind, subject, anchor: null, focusBody: null, angle: this.rng() * 0.6 - 0.3 }, this.pickLen(kind));
+    const onBreak = this.breakDown !== null;
+    const kind = this.pickKind(onBreak ? BREAK_ROTATION : ROTATION);
+    const subject = onBreak ? this.breakDown! : pickSubject(s, this.rng);
+    this.startShot({ kind, subject, anchor: null, focusBody: null, angle: this.rng() * 0.6 - 0.3 }, this.pickLen(kind, onBreak ? BREAK_ROTATION : ROTATION));
   }
 
   private startShot(shot: Omit<Shot, 'side'>, len: number): void {
@@ -170,8 +198,8 @@ export class Director {
     this.cutFlag = true;
   }
 
-  private pickKind(): ShotKind {
-    const options = ROTATION.filter((r) => r.kind !== this.shot.kind);
+  private pickKind(rotation = ROTATION): ShotKind {
+    const options = rotation.filter((r) => r.kind !== this.shot.kind);
     const total = options.reduce((s, r) => s + r.weight, 0);
     let x = this.rng() * total;
     for (const r of options) {
@@ -181,11 +209,25 @@ export class Director {
     return options[options.length - 1].kind;
   }
 
-  private pickLen(kind: ShotKind): number {
-    const r = ROTATION.find((o) => o.kind === kind);
+  private pickLen(kind: ShotKind, rotation = ROTATION): number {
+    const r = rotation.find((o) => o.kind === kind);
     if (!r) return kind === 'debris' ? 3.2 : 3;
     return r.min + this.rng() * (r.max - r.min);
   }
+}
+
+/**
+ * The fighter to frame during a referee break: one in the 'down' role (keeping the current one while
+ * he still is, so a double knockdown does not flip between them), else the one who went down and is
+ * now waiting for FIGHT; null with no break.
+ */
+function breakSubjectOf(tel: readonly RefTel[], current: Corner | null): Corner | null {
+  if (!tel.some((t) => t.referee?.break)) return null;
+  const down = ([0, 1] as Corner[]).filter((c) => tel[c]?.referee?.role === 'down');
+  if (current !== null && (down.includes(current) || !down.length)) return current;
+  if (down.length) return down[0];
+  const neutral = ([0, 1] as Corner[]).find((c) => tel[c]?.referee?.role === 'neutral');
+  return neutral === undefined ? 0 : neutral === 0 ? 1 : 0;
 }
 
 function reactionFor(ev: SimEvent, tel?: readonly { down: boolean }[] | null): { shot: Omit<Shot, 'side'>; priority: number } | null {
@@ -197,6 +239,8 @@ function reactionFor(ev: SimEvent, tel?: readonly { down: boolean }[] | null): {
       return { shot: { ...base, kind: 'cage_low', subject: ev.corner }, priority: 2 };
     case 'ko':
       return { shot: { ...base, kind: 'follow', subject: ev.corner === 0 ? 1 : 0 }, priority: 4 };
+    case 'fight': // the referee restarts it: both men squaring up again
+      return { shot: { ...base, kind: 'wide', subject: 0 }, priority: 1 };
     case 'impact': {
       if (ev.striker === null || ev.victim === null) return null;
       const s = strikeStrength(ev, tel);

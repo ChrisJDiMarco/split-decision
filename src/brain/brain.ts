@@ -8,7 +8,7 @@ import type { GetupStyle, Intent, Tactic, WorldMeta } from '../core/protocol';
 import type { Corner, FighterSetup, RobotDesign } from '../core/types';
 import { DESIGNS } from '../robots/designs';
 import { creativeRoll, gambleAppetite, IMPOSSIBLE_RISK, openingMenu, reflexMenu, riskBand } from './gambles';
-import { houseGetupStyle, houseMind, kipAppetite, obviousDecision, type RuleDecision } from './house-mind';
+import { breakRole, houseGetupStyle, houseMind, kipAppetite, obviousDecision, type RuleDecision } from './house-mind';
 import type { JevResult } from './jev-client';
 import { readyCombos } from './limbs';
 import { JevLink } from './link';
@@ -106,6 +106,8 @@ export class Brain {
   private clock: MatchClock | null = null;
   private startTime: number | null = null;
   private history: BrainDecision[] = [];
+  /** Decisions emitted so far (the history is capped at HISTORY_LEN, so its length stops changing). */
+  private emitted = 0;
   private memory: FightMemory;
   private readonly combos: Tactic[][];
   private lastAggression = 0.5;
@@ -117,6 +119,8 @@ export class Brain {
   /** The decision that started the running plan (its steps copy it for the HUD). */
   private planOrigin: BrainDecision | null = null;
   private latestView: { key: string; d: BrainDecision } | null = null;
+  /** The referee is holding the fight (a break): every tick is settled locally, no model calls. */
+  private onBreak = false;
 
   constructor(opts: BrainOptions) {
     const designs = opts.designs ?? DESIGNS;
@@ -201,6 +205,7 @@ export class Brain {
     this.seq.abort();
     this.planOrigin = null;
     this.latestView = null;
+    this.onBreak = false;
     this.nextDecisionAt = 0;
     this.lastQueryAt = -Infinity;
     this.pendingTrigger = null;
@@ -221,7 +226,7 @@ export class Brain {
     const r = s ? freshRead(s.me, s.time) : null;
     const read = r ? readHud(r) : null;
     const link = this.linkStatus;
-    const key = `${this.history.length}|${plan ? `${plan.step}:${plan.read ?? ''}:${plan.payoff.join()}` : '-'}|${read ?? ''}|${link.label}`;
+    const key = `${this.emitted}|${plan ? `${plan.step}:${plan.read ?? ''}:${plan.payoff.join()}` : '-'}|${read ?? ''}|${link.label}`;
     if (this.latestView?.key !== key) this.latestView = { key, d: { ...d, plan, read, link } };
     return this.latestView.d;
   }
@@ -251,6 +256,8 @@ export class Brain {
     this.line?.poll(); // an offline LOCAL link re-probes its health when due (no-op for Jev, HOUSE and online links)
     this.startTime ??= frame.time;
     if (interrupts.length && this.pendingTrigger === null) this.pendingTrigger = interrupts[0];
+    const onBreak = breakRole(s) !== null;
+    if (onBreak !== this.onBreak) this.refereeEdge(onBreak);
     if (this.seq.active && this.mind === 'local' && this.planOrigin?.source === 'fallback' && !this.offline) {
       // The local model is back: it takes over from the House Mind's combination (Jev keeps its old behaviour).
       this.seq.abort();
@@ -268,6 +275,24 @@ export class Brain {
     const due = this.pendingTrigger !== null || frame.time >= this.nextDecisionAt;
     if (!due || frame.time - this.lastQueryAt < MIN_REQUEST_GAP_S) return;
     this.decideNow(s);
+  }
+
+  /**
+   * The referee stopped the fight (a knockdown) or restarted it. Stopping: a plan or an answer from
+   * before the knockdown is dropped (answers still in flight are never applied), and the break is
+   * settled locally from here. FIGHT: decide at once, so the first intent after it is a fresh one.
+   */
+  private refereeEdge(onBreak: boolean) {
+    this.onBreak = onBreak;
+    if (onBreak) {
+      this.generation++;
+      this.inFlight = 0;
+      this.seq.abort();
+      this.planOrigin = null;
+    }
+    this.pendingTrigger = onBreak ? 'referee_break' : 'referee_fight';
+    this.nextDecisionAt = 0;
+    this.lastQueryAt = -Infinity;
   }
 
   private decideNow(s: Situation) {
@@ -514,6 +539,7 @@ export class Brain {
     this.lastAggression = intent.aggression;
     this.currentTactic = intent.tactic;
     this.history = [...this.history.slice(-(HISTORY_LEN - 1)), d];
+    this.emitted++;
     this.opts.onIntent(this.corner, intent, issuedAtTick);
     this.opts.onDecision?.(d);
   }

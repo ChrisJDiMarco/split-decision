@@ -33,6 +33,7 @@ import { Scorecard } from './scorecard';
 import { SelectScreen, defaultPlan } from './select-screen';
 import { CORNER_NAMES } from './skins';
 import { FIGHTER_MINDS, GLOBAL_LABEL, MIND_TAG, PICK_LABEL, effectiveMind, finalizeSetup, isOverridden, pickMind, playerCornerOf } from './mind-picks';
+import { breakBanner } from './referee-view';
 import { taleOfTheTape } from './tale';
 import { TickerFeed } from './ticker-feed';
 import * as THREE from 'three/webgpu';
@@ -108,6 +109,8 @@ const REPLAY_PUNCH = 0.5;
 const KO_AIM_HEAD_SHARE = 0.4;
 const PHASE_LABEL: Partial<Record<FightPhase, string>> = { intro: 'WALKOUT', break: 'BREAK', ko: 'KO', decision: 'JUDGES', over: 'FINAL' };
 const KO_REASON: Record<string, string> = { head: 'HEAD REMOVED', down: 'DOWN FOR THE COUNT', power: 'POWER FAILURE', disabled: 'DISABLED' };
+/** The FIGHT! card when the referee restarts the fight after a break (the round card's style, shorter). */
+const REF_FIGHT_MS = 1100;
 
 function fallbackSetup(): MatchSetup {
   const ids = Object.keys(DESIGNS);
@@ -170,7 +173,9 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
   const fightBar = new FightBar();
   const ticker = new TickerView(calloutLayer);
   const overlays = new Overlays();
-  let corners: [CornerPanel, CornerPanel] = [new CornerPanel(0, designs[0]), new CornerPanel(1, designs[1])];
+  /** The mind picked for a corner (JEV, LOCAL, HOUSE, YOU): the MIND panel's title until its first decision. */
+  const mindName = (c: Corner) => PICK_LABEL[effectiveMind(setup.fighters[c], settings().minds)];
+  let corners: [CornerPanel, CornerPanel] = [new CornerPanel(0, designs[0], mindName(0)), new CornerPanel(1, designs[1], mindName(1))];
   const camBug = h('div', 'cam-bug');
   const hints = h('div', 'key-hints spectator-hints', h('kbd', {}, 'C'), 'camera ', h('kbd', {}, 'P'), 'replay ', h('kbd', {}, 'H'), 'hud ', h('kbd', {}, 'M'), 'mute');
   // Player mode swallows C, H, S, Q and R (they are player keys), so the host keys move (main.ts: T, L, N).
@@ -195,7 +200,7 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
   };
 
   function rebuildCorners(): void {
-    const fresh: [CornerPanel, CornerPanel] = [new CornerPanel(0, designs[0]), new CornerPanel(1, designs[1])];
+    const fresh: [CornerPanel, CornerPanel] = [new CornerPanel(0, designs[0], mindName(0)), new CornerPanel(1, designs[1], mindName(1))];
     corners[0].el.replaceWith(fresh[0].el);
     corners[1].el.replaceWith(fresh[1].el);
     corners = fresh;
@@ -359,7 +364,11 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     audio.onEvents(fresh);
     applyShake(fresh, 1, telemetry);
     applyPunch(fresh, 1, live, telemetry);
-    for (const e of fresh) if (e.kind === 'ko' && live) onKO(e.corner, e.reason);
+    for (const e of fresh) {
+      if (e.kind === 'ko' && live) onKO(e.corner, e.reason);
+      // The referee restarts the fight after a knockdown (a KO ends a break with no 'fight').
+      else if (e.kind === 'fight' && phase === 'fight') overlays.roundCard('FIGHT!', '', REF_FIGHT_MS, 'ref-fight');
+    }
   }
 
   function applyShake(events: readonly SimEvent[], scale: number, tel: readonly RobotTelemetry[] | null): void {
@@ -430,6 +439,8 @@ export function createBroadcast(stage: Stage, opts: BroadcastOptions): Broadcast
     corners[0].update(tel?.[0] ?? null, minds[0]);
     corners[1].update(tel?.[1] ?? null, minds[1]);
     fightBar.setClock(clock.round, clock.rounds, clock.label(), clockState());
+    // The referee's break banner, live fight only (not in a replay, not over the KO band).
+    overlays.setBreak(phase === 'fight' && frame && !frame.replaying ? breakBanner(frame.telemetry, names) : null);
     const bug = rig.external ? 'CHASE' : rig.free ? 'FREE ORBIT' : director.shot.kind.replace('_', ' ');
     if (bug !== camBugText) {
       camBugText = bug;

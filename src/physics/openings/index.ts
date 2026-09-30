@@ -187,9 +187,23 @@ export function openingsNow(ctx: SimContext, corner: 0 | 1): readonly Opening[] 
   if (st.sees?.tick !== ctx.tick) {
     scanEvents(ctx, st);
     const [a, b] = bodies(ctx, st);
-    st.sees = { tick: ctx.tick, openings: [detectOpenings(a, b, st.stunnedAt[1]), detectOpenings(b, a, st.stunnedAt[0])] };
+    st.sees = { tick: ctx.tick, openings: [refereeMute(ctx, 1, detectOpenings(a, b, st.stunnedAt[1])), refereeMute(ctx, 0, detectOpenings(b, a, st.stunnedAt[0]))] };
   }
   return st.sees.openings[corner];
+}
+
+const NONE: Opening[] = [];
+
+/**
+ * Openings on fighter `him` during a referee break (src/physics/systems/referee.ts), when nothing
+ * may be thrown at him: none at all while he is down on the canvas or rising (the 'down' openings:
+ * a man getting up is not a target), and never 'rising'. Outside a break they pass unchanged.
+ */
+export function refereeMute(ctx: SimContext, him: 0 | 1, openings: Opening[]): Opening[] {
+  const ref = ctx.referee;
+  if (!ref?.active) return openings;
+  if (ref.roles[him] === 'down') return NONE;
+  return openings.includes('rising') ? openings.filter((o) => o !== 'rising') : openings;
 }
 
 /**

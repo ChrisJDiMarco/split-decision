@@ -20,7 +20,8 @@
 //   determinism --determinism runs chosen fights twice in separate processes and compares a
 //               signature of every event and the final state
 //
-// Brains: 'finisher' mirrors the house-mind fallback today ("opponent down: close the distance,
+// Brains: 'finisher' is the old house-mind fallback, kept as the worst case (the House Mind no longer
+// does this; it holds during a break) ("opponent down: close the distance,
 // then a finisher"); 'sparring' is src/physics/control/sparring.ts. A forced knockdown shoves one
 // fighter over at --forced-at seconds (0 = off) and watches the other. 'fence' (forced, finisher
 // after the fall) keeps red on his spawn spot so blue falls between him and the centre (--no-fence skips it).
@@ -44,11 +45,11 @@ import { buildContext } from '../src/physics/runtime';
 import type { RobotRuntime, SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
 import { buildTelemetry } from '../src/physics/systems/telemetry';
+import { NEUTRAL_M } from '../src/physics/systems/referee'; // the neutral distance the rule sends the standing fighter to
 import { compileWorld } from '../src/physics/world';
 
 const INTENT_EVERY_S = 0.5;
 const GRACE_S = 1.0; // fully up this long ends the break (matches the referee rule)
-const NEUTRAL_M = 2.5; // the neutral distance the rule sends the standing fighter to
 const NEUTRAL_TOL_M = 0.15;
 const PIN_M = 0.5; // COM this close to a fence flat: pinned
 const MIN_IMPACT_NS = 4; // the damage model's own event floor
@@ -64,7 +65,7 @@ const REFALL_S = 2; // a fall this soon after FIGHT: he was not really steady
 const ENGAGED_M = 1.3; // re-engaged after FIGHT: this close...
 const RESUME_WATCH_S = 10; // ...watched this long
 const FRAME_STEPS = 33; // telemetry every ~33 ms, as the worker sends frames
-// Mirrors src/brain/tactics.ts FINISHER_ORDER (house-mind's "opponent down: finish").
+// Mirrors src/brain/tactics.ts FINISHER_ORDER (the old house-mind "opponent down: finish").
 const FINISHER_ORDER: readonly Tactic[] = ['rocket_punch', 'hammer_smash', 'head_kick', 'overhand', 'jaw_crush', 'ram', 'hook', 'cross', 'uppercut', 'lunge', 'front_kick', 'low_kick', 'shield_bash', 'jab'];
 
 type Brain = 'finisher' | 'sparring' | 'fence';

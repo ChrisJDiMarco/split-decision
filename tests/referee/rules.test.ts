@@ -39,7 +39,7 @@ beforeEach(() => {
   xmat[8] = xmat[17] = 1; // both torsos upright
   place(0, -0.5);
   place(1, 0.5);
-  ctx = { released: true, tick: 0, time: 0, dt: DT, robots, data: { subtree_com: com, xmat } } as unknown as SimContext;
+  ctx = { released: true, tick: 0, time: 0, dt: DT, robots, events: [], data: { subtree_com: com, xmat } } as unknown as SimContext;
   refereeSystem.init!(ctx);
 });
 
@@ -185,5 +185,21 @@ describe('referee break', () => {
     run(GRACE_S + 0.1);
     expect(tel(1).events!.map((e) => [e.kind, e.seq])).toEqual([['break', 0], ['fight', 1]]); // blue's own cursor
     expect(tel(0).events!.map((e) => [e.kind, e.seq])).toEqual([['fight', 1]]);
+  });
+
+  it('puts each event once in the frame\'s SimEvent list too, as it happens', () => {
+    const events = ctx.events;
+    knockdown(1);
+    expect(events).toEqual([{ kind: 'break', down: [1] }]);
+    place(0, 0.5 - NEUTRAL_M);
+    run(GRACE_S + 0.1);
+    expect(events.map((e) => e.kind)).toEqual(['break', 'fight']);
+    expect(events[1]).toMatchObject({ kind: 'fight', reason: 'room' });
+    expect(events.length).toBe(st().log.length); // one SimEvent per logged event: nothing fires twice
+  });
+
+  it('sends him a bit of space: 2.2 m, still outside every strike and the reflex range', () => {
+    expect(NEUTRAL_M).toBe(2.2);
+    expect(NEUTRAL_M - ROOM_TOL_M).toBeGreaterThan(1.35 + 0.5);
   });
 });
