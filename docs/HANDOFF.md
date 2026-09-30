@@ -61,6 +61,19 @@ Measured on the last run (heavy roster, procedural control, tools/fight-metrics.
 - PARKED (Chris: "save this so we can revisit later"): Julia 1 and the local-mind eval; see docs/research/11-julia-1.md and the roadmap. Don't download any model until Chris revisits.
 - After the balance engine: flashy moves + kip-ups in the body (consume `Intent.onOpening`, replace TODO(control-build) fallbacks), then a live critic.
 
+## If the session ran out of credits mid-build (2026-09-29 ~20:45 ET)
+
+Everything is on disk. Commit each build's files only after checking them. Resume each workflow with its script and run id; completed agents replay from cache, and unfinished ones restart on top of the files already written. Scripts are in ~/.claude/projects/-Users-chrisdimarco-jarvis/35a12cda-55d8-4dbe-b6de-87829408a2a0/workflows/scripts/.
+
+| Build | Script | Run id | State at 20:45 |
+|---|---|---|---|
+| Balance engine | balance-engine-wf_38bd1af8-d17.js | wf_38bd1af8-d17 | p1:build tuning; dcm-v1 drills still FAIL (falls, slow approach, torso buzz); `CONTROL.balance` stays 'legacy' until the gate passes |
+| Give-room referee | give-room-rule-wf_074db92b-250.js | wf_074db92b-250 | build done, verify:referee running |
+| Mind toggles + player in main game | minds-and-player-integration-wf_b27aa470-00c.js | wf_b27aa470-00c | local:bridge running (no downloads) |
+| Move polish (overnight) | move-polish-poc-wf_12353dce-98f.js | wf_34e4f671-4ea | design done; heavy proof waits for bedtime: args {runProof: true} |
+
+Uncommitted work in progress: src/physics/control/** + src/physics/control/balance/ + tests/balance + tools/balance-drills.ts (balance engine), src/physics/systems/referee.ts + tests/referee + tools/referee-check.ts (referee), server/** + src/brain/** (local mind). Balance-engine drill logs: tests/balance/.out/.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
