@@ -5,12 +5,13 @@ import type { ComboPlan, GetupStyle, Opening, Tactic, TargetZone } from '../core
 import { creativeRoll, gambleAppetite, openingMenu, reflexArming, reflexMenu, type MenuItem } from './gambles';
 import { readyCombos } from './limbs';
 import { sampleKip } from './policy';
+import { fitsHere, weaponFit, type StrikeFit } from './ranges';
 import { zoneHealth } from './questions';
 import { mixSeed, rng } from './rng';
 import type { FighterContext, Situation } from './situation';
 import { planOf, setupCombos } from './setups';
 import { designCombos, styleOf } from './style';
-import { abilityTactics, FINISHER_ORDER, isFlashy, isStrike, TACTIC_INFO } from './tactics';
+import { abilityTactics, FINISHER_ORDER, isFlashy, isStrike, TACTIC_INFO, tacticWords } from './tactics';
 
 const RULE_STREAM = 7;
 const GAMBLE_STREAM = 8;
@@ -35,6 +36,16 @@ const REFLEX_BANDS = new Set(['clinch', 'striking range', 'just outside reach'])
 const HEAD_STRIKES = new Set<Tactic>(['head_kick', 'hook', 'overhand', 'uppercut', 'rocket_punch', 'hammer_smash']);
 const LEG_STRIKES = new Set<Tactic>(['low_kick']);
 const DAMAGED_ZONE_HP = 0.7;
+/** How much a strike's range fit weighs in the pick: throw what lands, sometimes step in behind a longer one. */
+const FIT_WEIGHT: Record<StrikeFit, number> = { lands: 1, step: 0.3, close: 0, far: 0, out: 0 };
+/** Short weapons for the clinch, in order of preference (when they land from there). */
+const INSIDE_STRIKES: readonly Tactic[] = ['uppercut', 'hook', 'jaw_crush', 'shield_bash'];
+/** Never from the clinch, whatever the range table says: the leg has no room to rise. */
+const HEAD_KICKS: ReadonlySet<Tactic> = new Set<Tactic>(['head_kick', 'tornado_kick']);
+const NOTHING_BANNED: ReadonlySet<Tactic> = new Set<Tactic>();
+/** At the edge (one step out), a feint this often; otherwise it steps in WITH a strike, at least this aggressive. */
+const EDGE_FEINT = 0.2;
+const EDGE_ENTRY_AGGRESSION = 0.6;
 const CAGE_TRAP_M = 0.6;
 
 export interface RuleDecision {
@@ -84,12 +95,32 @@ function houseGamble(fc: FighterContext, s: Situation, seed: number, aggression:
   if (rng(mixSeed(seed, fc.corner, s.tick, GAMBLE_STREAM))() >= HOUSE_TAKE_OPENING) return null;
   const limit = HOUSE_RISK_PER_APPETITE * appetite * (creative ? 0.5 : 1);
   const menu = openingMenu(fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative, readyCombos(s.me, designCombos(fc.design)).length > 0);
-  const ok = menu.items.filter((i) => i.move !== 'sidestep_counter' || s.oppPhase !== 'neutral').filter((i) => (i.risk ?? 0) < limit);
+  const ok = menu.items
+    .filter((i) => i.move !== 'sidestep_counter' || s.oppPhase !== 'neutral')
+    .filter((i) => (i.risk ?? 0) < limit)
+    .filter((i) => (i.move === 'combo' ? readyCombos(s.me, designCombos(fc.design)).some((c) => opensHere(fc, s, c)) : !isStrike(i.move) || fitsHere(strikeFit(fc, s, i.move))))
+    .filter((i) => s.band !== 'clinch' || !HEAD_KICKS.has(i.move));
   return ok.sort((a, b) => b.weight - a.weight)[0] ?? null;
 }
 
+/** A strike's fit from this gap (ranges.weaponFit): 'out' once damage took it away, null without skill ranges. */
+function strikeFit(fc: FighterContext, s: Situation, t: Tactic): StrikeFit | null {
+  return weaponFit(fc.design, s.range, t);
+}
+
+/** The first strike of a combination or setup (a setup may open with a feint). */
+function opener(steps: readonly Tactic[]): Tactic | undefined {
+  return steps.find((t) => t !== 'combo' && isStrike(t));
+}
+
+/** A combination (or setup) opens with a strike that lands from here or one step in. */
+function opensHere(fc: FighterContext, s: Situation, steps: readonly Tactic[]): boolean {
+  const first = opener(steps);
+  return !first || fitsHere(strikeFit(fc, s, first));
+}
+
 function houseCombo(fc: FighterContext, s: Situation, seed: number, aggression: number): Tactic[] | null {
-  const combos = readyCombos(s.me, designCombos(fc.design));
+  const combos = readyCombos(s.me, designCombos(fc.design)).filter((c) => opensHere(fc, s, c));
   if (!combos.length) return null;
   const appetite = gambleAppetite(styleOf(fc.design), fc.setup.temperament, aggression);
   const u = rng(mixSeed(seed, fc.corner, s.tick, COMBO_RULE_STREAM));
@@ -117,19 +148,37 @@ function circleAway(s: Situation): Tactic {
   return s.geometry.cageBearingRad < 0 ? 'circle_left' : 'circle_right';
 }
 
-function finisher(fc: FighterContext): Tactic {
+/** The biggest shot that fits the gap (lands or one step in); without skill ranges, the biggest one it has. */
+function finisher(fc: FighterContext, s: Situation): Tactic {
   const own = abilityTactics(fc.design);
-  return FINISHER_ORDER.find((t) => own.includes(t)) ?? 'close_distance';
+  return FINISHER_ORDER.find((t) => own.includes(t) && fitsHere(strikeFit(fc, s, t)))
+    ?? FINISHER_ORDER.find((t) => own.includes(t)) ?? 'close_distance';
 }
 
-function pickStrike(fc: FighterContext, s: Situation, u: number): Tactic {
+/** The fighter's strike abilities (bar the lunge and `banned`) whose fit from here is one of `fits` (all of them without skill ranges). */
+function strikesFitting(fc: FighterContext, s: Situation, fits: readonly StrikeFit[], banned = NOTHING_BANNED): Tactic[] {
+  return abilityTactics(fc.design).filter((t) => isStrike(t) && t !== 'lunge' && !banned.has(t)).filter((t) => {
+    const f = strikeFit(fc, s, t);
+    return f === null || fits.includes(f);
+  });
+}
+
+/**
+ * A weighted strike pick: the jab and the strikes that hit what is already hurt weigh more, and each
+ * is scaled by its range fit (FIT_WEIGHT: what lands, now and then a step in behind a longer one).
+ * Null when nothing fits.
+ */
+function pickStrike(fc: FighterContext, s: Situation, u: number, fits: readonly StrikeFit[] = ['lands', 'step'], banned = NOTHING_BANNED): Tactic | null {
   const zones = zoneHealth(fc.oppDesign, s.opp);
   const legHurt = Math.min(zones.get('left_leg') ?? 1, zones.get('right_leg') ?? 1) < DAMAGED_ZONE_HP;
   const headHurt = (zones.get('head') ?? 1) < DAMAGED_ZONE_HP;
-  const strikes = abilityTactics(fc.design).filter((t) => isStrike(t) && t !== 'lunge');
-  if (!strikes.length) return 'close_distance';
-  const w = strikes.map((t) => (t === 'jab' ? 1.5 : 1) * (legHurt && LEG_STRIKES.has(t) ? 2 : 1) * (headHurt && HEAD_STRIKES.has(t) ? 1.5 : 1));
+  const strikes = strikesFitting(fc, s, fits, banned);
+  const w = strikes.map((t) => {
+    const f = strikeFit(fc, s, t);
+    return (t === 'jab' ? 1.5 : 1) * (legHurt && LEG_STRIKES.has(t) ? 2 : 1) * (headHurt && HEAD_STRIKES.has(t) ? 1.5 : 1) * (f ? FIT_WEIGHT[f] : 1);
+  });
   const total = w.reduce((a, b) => a + b, 0);
+  if (total <= 0) return null;
   let acc = 0;
   for (let i = 0; i < strikes.length; i++) {
     acc += w[i];
@@ -211,7 +260,9 @@ function houseTree(fc: FighterContext, s: Situation, seed: number): RuleDecision
   const gamble = houseGamble(fc, s, seed, agg);
   if (gamble) {
     const why = gamble.opening ? `opening (${gamble.opening.replace(/_/g, ' ')})` : 'creative gamble';
-    const combo = gamble.move === 'combo' ? houseCombo(fc, s, seed, 1) ?? readyCombos(s.me, designCombos(fc.design))[0] : undefined;
+    const combo = gamble.move === 'combo'
+      ? houseCombo(fc, s, seed, 1) ?? readyCombos(s.me, designCombos(fc.design)).find((c) => opensHere(fc, s, c))
+      : undefined;
     return {
       ...pack(gamble.move, Math.max(agg, 0.7), `${why}: ${gamble.move.replace(/_/g, ' ')}`, gamble.target ?? undefined),
       ...(combo ? { combo } : {}),
@@ -226,28 +277,67 @@ function houseTree(fc: FighterContext, s: Situation, seed: number): RuleDecision
   if (close && s.geometry.cageGap < CAGE_TRAP_M) return pack(circleAway(s), agg * 0.6, 'trapped on the cage: circle out', 'torso');
   if (s.band === 'clinch') {
     if (has(fc, 'clinch') && u < 0.4) return pack('clinch', agg, 'in close: clinch', 'torso');
-    const inside = (['uppercut', 'hook', 'jaw_crush', 'shield_bash'] as Tactic[]).find((t) => has(fc, t));
+    // Never a head kick in the clinch: only what lands from this close.
+    const inside = INSIDE_STRIKES.find((t) => has(fc, t) && fitsHere(strikeFit(fc, s, t)))
+      ?? (s.range ? pickStrike(fc, s, u, ['lands'], HEAD_KICKS) : null);
     return inside ? pack(inside, agg, 'in close: short strike') : pack('retreat', agg * 0.5, 'in close without tools: back out', 'torso');
   }
+  if (s.range) return rangedTree(fc, s, seed, u, agg, pack);
   if (s.band === 'striking range') {
-    if (s.oppPhase === 'staggered') return pack(finisher(fc), Math.max(agg, 0.85), 'opponent staggered: big shot');
-    const combo = houseCombo(fc, s, seed, agg);
-    if (combo) {
-      const setups = setupCombos(fc.design, s.me, s.opp);
-      if (setups.length && rng(mixSeed(seed, fc.corner, s.tick, SETUP_RULE_STREAM))() < HOUSE_SETUP_RATE) {
-        const pick = setups[0];
-        const comboPlan = planOf(pick);
-        return { ...pack('combo', agg, `set him up: ${pick.why}`, comboPlan.zones[0]), combo: [...pick.steps], comboPlan };
-      }
-      return { ...pack('combo', agg, 'in range: combination', strikeTarget(combo[0], fc, s)), combo };
-    }
-    const strike = pickStrike(fc, s, u);
-    return pack(strike, agg, 'in range: strike');
+    if (s.oppPhase === 'staggered') return pack(finisher(fc, s), Math.max(agg, 0.85), 'opponent staggered: big shot');
+    return throwFromHere(fc, s, seed, u, agg, pack);
   }
   if (s.band === 'just outside reach') {
     if (u < 0.2) return pack('feint', agg * 0.8, 'at the edge: feint to draw him', 'torso');
     if (u < 0.4 && has(fc, 'front_kick')) return pack('front_kick', agg, 'at the edge: long kick', 'torso');
     return pack('close_distance', agg, 'at the edge: step in', 'head');
+  }
+  return pack('close_distance', agg, 'out of range: close in', 'head');
+}
+
+/**
+ * In range: a combination or setup that opens with a strike that fits the gap, or a single strike
+ * (mostly one that lands, now and then a step in behind a longer one).
+ */
+function throwFromHere(fc: FighterContext, s: Situation, seed: number, u: number, agg: number, pack: Pack): RuleDecision {
+  const combo = houseCombo(fc, s, seed, agg);
+  if (combo) {
+    const setups = setupCombos(fc.design, s.me, s.opp).filter((c) => opensHere(fc, s, c.steps));
+    if (setups.length && rng(mixSeed(seed, fc.corner, s.tick, SETUP_RULE_STREAM))() < HOUSE_SETUP_RATE) {
+      const pick = setups[0];
+      const comboPlan = planOf(pick);
+      return { ...pack('combo', agg, `set him up: ${pick.why}`, comboPlan.zones[0]), combo: [...pick.steps], comboPlan };
+    }
+    const entry = opener(combo);
+    const why = entry && strikeFit(fc, s, entry) === 'step' ? 'step in behind a combination' : 'in range: combination';
+    return { ...pack('combo', agg, why, strikeTarget(combo[0], fc, s)), combo };
+  }
+  const strike = pickStrike(fc, s, u);
+  if (!strike) return pack('close_distance', agg, 'in range: step in', 'head');
+  return pack(strike, agg, strikeFit(fc, s, strike) === 'step' ? `step in behind the ${tacticWords(strike)}` : 'in range: strike');
+}
+
+type Pack = (tactic: Tactic, aggression: number, reason: string, target?: TargetZone) => RuleDecision;
+
+/**
+ * Past the clinch, for a body with skill ranges: the weapons decide, not the reach band.
+ *   something lands     throw it (a combination or setup that opens with one, or a single strike;
+ *                       now and then a step in behind a longer one); staggered: the biggest that fits
+ *   one step out        enter WITH a strike: step in behind one that lands after the step (a feint sometimes)
+ *   all too close       tie him up, or make room
+ *   nothing reaches     close the distance
+ */
+function rangedTree(fc: FighterContext, s: Situation, seed: number, u: number, agg: number, pack: Pack): RuleDecision {
+  const lands = strikesFitting(fc, s, ['lands']);
+  const step = strikesFitting(fc, s, ['step']);
+  if (s.oppPhase === 'staggered' && (lands.length || step.length)) return pack(finisher(fc, s), Math.max(agg, 0.85), 'opponent staggered: big shot');
+  if (lands.length) return throwFromHere(fc, s, seed, u, agg, pack);
+  if (step.length) {
+    if (u < EDGE_FEINT) return pack('feint', agg * 0.8, 'at the edge: feint to draw him', 'torso');
+    return throwFromHere(fc, s, seed, (u - EDGE_FEINT) / (1 - EDGE_FEINT), Math.max(agg, EDGE_ENTRY_AGGRESSION), pack);
+  }
+  if (s.range?.mine.length && s.range.mine.every((w) => w.fit === 'close')) {
+    return has(fc, 'clinch') ? pack('clinch', agg, 'too close for my weapons: clinch', 'torso') : pack('hold_range', agg * 0.7, 'too close for my weapons: make room', 'torso');
   }
   return pack('close_distance', agg, 'out of range: close in', 'head');
 }

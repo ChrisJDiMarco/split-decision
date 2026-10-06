@@ -5,6 +5,7 @@ import type { PartDef, RobotDesign } from '../core/types';
 import { hpWords } from './bands';
 import { NONE, NOTHING, riskBand, type MenuItem, type OpeningMenu } from './gambles';
 import type { JevQuestion } from './jev-client';
+import { fitNote, weaponFit, type RangeRead } from './ranges';
 import type { SetupCombo } from './setups';
 import type { FighterContext } from './situation';
 import { COMBO_MAX, comboId, styleOf } from './style';
@@ -50,7 +51,11 @@ export interface ExtraQuestions {
   setups?: SetupCombo[] | null; // setup → payoff combinations, offered in the combo question
   kipRisk?: number | null; // ask getup_style (only when down)
   reflex?: MenuItem[] | null; // ask on_opening (the pre-armed reflex) when non-empty
+  range?: RangeRead | null; // annotate each strike option with how it fits the gap (Situation.range)
 }
+
+/** Most words a tactic option may carry, description plus its range note (Jev: irrelevant words distract). */
+export const TACTIC_OPTION_MAX_WORDS = 20;
 
 /** Which target zone a part belongs to, from its tags. */
 export function partZone(part: Pick<PartDef, 'tags'>): TargetZone | null {
@@ -99,6 +104,22 @@ export function counterOptions(design: RobotDesign): Tactic[] {
 
 function describe(tactics: readonly Tactic[]): Record<string, string> {
   return Object.fromEntries(tactics.map((t) => [t, TACTIC_INFO[t].description]));
+}
+
+/**
+ * A strike option's range note from this gap ('lands from here', 'needs a step in', 'too close for it',
+ * 'too far from here'), 'out of action' when damage took the weapon away, null for everything else.
+ */
+export function rangeNote(fc: FighterContext, range: RangeRead | null | undefined, t: Tactic): string | null {
+  return fitNote(weaponFit(fc.design, range, t));
+}
+
+/** Tactic options, each strike annotated by range (footwork and defence stay as they are). */
+export function tacticCriteria(fc: FighterContext, tactics: readonly Tactic[], range?: RangeRead | null): Record<string, string> {
+  return Object.fromEntries(tactics.map((t) => {
+    const note = rangeNote(fc, range, t);
+    return [t, note ? `${TACTIC_INFO[t].description}; ${note}` : TACTIC_INFO[t].description];
+  }));
 }
 
 export function comboWords(c: readonly Tactic[]): string {
@@ -183,7 +204,7 @@ export function buildQuestions(fc: FighterContext, opp: RobotTelemetry, extras: 
     reflex,
     questions: {
       ...extra,
-      tactic: { type: 'choice', instructions: 'Which tactic should `you` run for the next second, following `plan` and `personality`?', criteria: describe(tactics) },
+      tactic: { type: 'choice', instructions: 'Which tactic should `you` run for the next second, following `plan` and `personality`?', criteria: tacticCriteria(fc, tactics, extras.range) },
       target: { type: 'choice', instructions: 'Where on the `opponent` should `you` aim right now?', criteria: Object.fromEntries(zones) },
       opp_commit: { type: 'noul', instructions: 'Will the `opponent` commit to a strike or lunge within the next half second?' },
       counter_if_lunge: { type: 'choice', instructions: 'If the `opponent` lunges at `you` right now, what should `you` do?', criteria: describe(counters) },

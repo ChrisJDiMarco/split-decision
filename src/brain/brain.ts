@@ -366,7 +366,7 @@ export class Brain {
       ? openingMenu(this.fc.design, s.me, openings, (t) => TACTIC_INFO[t].description, creative, combos.length > 0)
       : null;
     const reflex = REFLEX_BANDS.has(s.band) && !s.me.down && s.oppPhase !== 'down' ? reflexMenu(this.fc.design, s.me) : null;
-    return { menu, combos, setups, reflex };
+    return { menu, combos, setups, reflex, range: s.range };
   }
 
   private query(s: Situation, trigger: string) {

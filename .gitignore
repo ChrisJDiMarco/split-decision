@@ -7,3 +7,5 @@ dist/
 # Raw mocap source (CMU, ~87 MB); only retargeted clips are committed
 assets-src/mocap/cmu/*.bvh
 assets-src/audio/*.zip
+
+tests/brain/.out/

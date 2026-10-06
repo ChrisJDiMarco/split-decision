@@ -7,10 +7,11 @@ import * as B from './bands';
 import { designFlashy, openingsWords, riskBand } from './gambles';
 import type { RecentAction } from './observer';
 import { freshRead, habitsWords, readWords, weakSpotsWords } from './scouting';
+import { fromHereWords, hisWeaponsWords, meetWords, reachEdgeWords } from './ranges';
 import type { FighterContext, Situation } from './situation';
 import { styleOf } from './style';
 import { abilityTactics, tacticWords } from './tactics';
-import type { MatchClock } from './types';
+import type { DistanceBand, MatchClock } from './types';
 
 export const PLAN_MAX_WORDS = 150;
 const MY_DAMAGE_ITEMS = 5;
@@ -135,6 +136,39 @@ export function flashyRiskWords(design: RobotDesign, tel: RobotTelemetry): strin
   return items.length ? items.join('; ') : null;
 }
 
+/**
+ * Range in words, from the body's own skill ranges: which of my weapons land from here, whether his
+ * reach me, the reach edge. Bodies without skill ranges keep the coarse inside/outside-his-reach line.
+ */
+function rangeGeometry(s: Situation): Array<[string, string | null]> {
+  const r = s.range;
+  if (!r) return [['reach', s.insideOppReach ? 'you are inside his reach' : 'you are outside his reach']];
+  return [
+    ['from_here', fromHereWords(r.mine)],
+    ['his_weapons', hisWeaponsWords(r.his)],
+    ['reach', reachEdgeWords(r.myLongest, r.hisLongest)],
+  ];
+}
+
+/**
+ * The distance band as Jev reads it. With skill ranges it follows the weapons (striking range = one of
+ * mine lands, just outside = one step in), so it never contradicts `from_here`; the brain's own rules keep
+ * s.band (reach-based) for cadence and menus.
+ */
+export function distanceWords(s: Situation): DistanceBand {
+  const r = s.range;
+  if (!r || !r.mine.length || s.band === 'clinch' || s.band === 'far') return s.band;
+  if (r.mine.some((w) => w.fit === 'lands') || r.mine.every((w) => w.fit === 'close')) return 'striking range';
+  if (r.mine.some((w) => w.fit === 'step')) return 'just outside reach';
+  return 'mid range';
+}
+
+function closingWords(s: Situation): string {
+  const band = B.closingBand(s.geometry.closingSpeed);
+  const meet = meetWords(s.range?.meetS ?? null);
+  return meet ? `${band}, ${meet}` : band;
+}
+
 function lastReadWords(me: RobotTelemetry, now: number): string | null {
   const r = freshRead(me, now);
   return r ? readWords(r) : null;
@@ -184,9 +218,9 @@ export function serializeState(
       ]),
     },
     geometry: {
-      distance: s.band,
-      reach: s.insideOppReach ? 'you are inside his reach' : 'you are outside his reach',
-      closing: B.closingBand(geometry.closingSpeed),
+      distance: distanceWords(s),
+      ...optional(rangeGeometry(s)),
+      closing: closingWords(s),
       bearing: `opponent at your ${B.clockWords(geometry.bearingRad)}`,
       cage: B.cageWords(geometry.cageGap, geometry.cageBearingRad),
       opponent_cage: B.opponentCageWords(geometry.oppCageGap),

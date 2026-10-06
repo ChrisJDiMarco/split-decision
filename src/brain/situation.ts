@@ -6,6 +6,7 @@ import { motor } from '../robots/catalog';
 import { balanceClass, distanceBand } from './bands';
 import { computeGeometry, designReach, type Geometry } from './geometry';
 import { WINDUP_ALERT } from './observer';
+import { readRange, type RangeRead } from './ranges';
 import { isStrike, skillAction } from './tactics';
 import type { BrainFrame, DistanceBand, OpponentPhaseClass } from './types';
 
@@ -50,6 +51,8 @@ export interface Situation {
   geometry: Geometry;
   band: DistanceBand;
   insideOppReach: boolean;
+  /** Which weapons land from this gap, both ways, from the body's own skill ranges (null: a body without them). */
+  range: RangeRead | null;
   oppPhase: OpponentPhaseClass;
   oppAction: Tactic | null;
   myBalance: 'down' | 'unsteady' | 'steady';
@@ -74,6 +77,7 @@ export function readSituation(fc: FighterContext, frame: BrainFrame): Situation 
     me, opp, geometry,
     band: distanceBand(geometry.distance, fc.reach),
     insideOppReach: geometry.distance < fc.oppReach + 0.15,
+    range: readRange(fc.design, me, fc.oppDesign, opp, geometry.distance, geometry.closingSpeed),
     oppPhase: opponentPhase(opp),
     oppAction: skillAction(opp.skill),
     myBalance: balanceClass(me.down, me.upright, me.balance),
