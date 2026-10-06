@@ -102,6 +102,12 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - 2026-10-06: the spend limit (reset Oct 5 10pm) had cut off the balance fix and everything after it, plus the range-awareness mind build. Retried: balance wt48stc28 (resume wf_38bd1af8-d17; p1:build and p1:verify replayed from cache, p1:fix running, told to review the partial feedforward.ts edit) and range-awareness-mind w2dko0n8h (run wf_4aba2ef3-4c1, told to review and finish its partial brain edits: src/brain/ranges.ts and others). Overnight polish and the NEXT GEN Phase 0 test still wait for Chris's "going to bed".
 
+- Ring IQ, mind side: DONE (c4675b7; details in docs/design/ring-iq.md). FOR THE BALANCE BUILD'S PACE / P3 AGENTS:
+  - (a) From the edge, Jev now mostly picks close_distance. The body should turn close_distance at the edge into a step-in strike, not a walk.
+  - (b) head_kick's minimum range (0.47-0.51 m on SAVATE/PYLON) sits inside the clinch band. Tighten it in the skill.
+  - (c) Every measured whiff started in range, so hit rate and aim are the body's job.
+  - (d) If mocap kicks turn on with clip-based ranges, keep src/brain/ranges.ts (reads def.range) in sync.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
