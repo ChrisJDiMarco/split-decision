@@ -7,7 +7,11 @@ import { randomInCone, range, type Rng } from './coords';
 import { boltShape, nutShape, plateShape, shardShape, type DebrisShape } from './debris-geometry';
 import { makeBody, stepBody, wake, type RigidBody, type RigidEnv } from './rigid';
 
-export type DebrisKind = 'bolt' | 'nut' | 'shard' | 'plate' | 'chip';
+/**
+ * chip: bright metal flakes; fibre: dark carbon slivers off a cracked panel; shaving: off-white UHMW
+ * curls off a gouge; flake: pale polycarbonate chips off a whitened crack.
+ */
+export type DebrisKind = 'bolt' | 'nut' | 'shard' | 'plate' | 'chip' | 'fibre' | 'shaving' | 'flake';
 
 interface Species {
   kind: DebrisKind;
@@ -23,8 +27,8 @@ interface Piece {
   slot: number;
 }
 
-const CAPACITY: Record<DebrisKind, number> = { bolt: 90, nut: 60, shard: 80, plate: 24, chip: 220 };
-const VARIANTS: Record<DebrisKind, number> = { bolt: 2, nut: 1, shard: 4, plate: 2, chip: 3 };
+const CAPACITY: Record<DebrisKind, number> = { bolt: 90, nut: 60, shard: 80, plate: 24, chip: 220, fibre: 60, shaving: 60, flake: 60 };
+const VARIANTS: Record<DebrisKind, number> = { bolt: 2, nut: 1, shard: 4, plate: 2, chip: 3, fibre: 2, shaving: 2, flake: 2 };
 const FENCE_MARGIN_M = 0.05;
 
 export class DebrisSystem {
@@ -67,6 +71,13 @@ export class DebrisSystem {
     make('shard', () => shardShape(this.rng, new THREE.Vector3(range(this.rng, 0.04, 0.1), range(this.rng, 0.012, 0.02), range(this.rng, 0.03, 0.08))), armor);
     make('plate', () => plateShape(this.rng, range(this.rng, 0.12, 0.2), range(this.rng, 0.08, 0.14), 0.008), armor);
     make('chip', () => shardShape(this.rng, new THREE.Vector3(range(this.rng, 0.008, 0.016), 0.003, range(this.rng, 0.006, 0.012))), bright);
+    // Shell flecks by material (docs/design/strike-power.md §4.7).
+    const carbon = new THREE.MeshStandardNodeMaterial({ color: 0x17181a, metalness: 0.15, roughness: 0.55, flatShading: true });
+    const uhmw = new THREE.MeshStandardNodeMaterial({ color: 0xe9e5d8, metalness: 0, roughness: 0.85, flatShading: true });
+    const polycarb = new THREE.MeshStandardNodeMaterial({ color: 0xdfe5ea, metalness: 0, roughness: 0.4, flatShading: true });
+    make('fibre', () => shardShape(this.rng, new THREE.Vector3(range(this.rng, 0.025, 0.05), 0.0018, range(this.rng, 0.003, 0.006))), carbon);
+    make('shaving', () => shardShape(this.rng, new THREE.Vector3(range(this.rng, 0.012, 0.024), 0.0015, range(this.rng, 0.008, 0.014))), uhmw);
+    make('flake', () => shardShape(this.rng, new THREE.Vector3(range(this.rng, 0.01, 0.022), 0.002, range(this.rng, 0.008, 0.016))), polycarb);
   }
 
   /** Pieces on screen, moving or at rest. The oldest piece of a kind is recycled when its pool is full. */
@@ -157,6 +168,10 @@ function restitutionFor(kind: DebrisKind): { restitution: number; friction: numb
       return { restitution: 0.35, friction: 0.45 };
     case 'chip':
       return { restitution: 0.2, friction: 0.7 };
+    case 'fibre':
+    case 'shaving':
+    case 'flake':
+      return { restitution: 0.12, friction: 0.8 };
     default:
       return { restitution: 0.18, friction: 0.6 };
   }

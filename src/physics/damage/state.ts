@@ -1,20 +1,33 @@
-// Damage-model state: per-geom lookup tables, per-part and per-joint wear, contact episodes.
+// Damage-model state: per-geom lookup tables, per-part and per-joint wear, contact episodes and
+// strike groups, physical dents, and the ledger the tools read.
 // Built once per SimContext (a reset builds a new context, so state never leaks across fights).
 import { ARENA } from '../../core/arena-spec';
-import type { Corner, GeomDef, GeomRole, HydraulicCircuit, PartDef, PartTag } from '../../core/types';
+import type { DentMode, JointCause, JointFailure, JointRole } from '../../core/protocol';
+import type { Corner, GeomDef, GeomRole, HydraulicCircuit, PartDef, PartTag, Vec3 } from '../../core/types';
 import { MATERIALS } from '../../robots/catalog';
 import type { PartRuntime, RobotRuntime, SimContext } from '../sim-context';
-import { CUSHION_MATERIALS, JOINT_HP_BASE, JOINT_HP_PER_NM, WORLD_SURFACES } from './constants';
+import { CUSHION_MATERIALS, DAMAGE_TUNING, WORLD_SURFACES } from './constants';
+import { driveRatings, durabilityProfile, type DriveRatings, type DurabilityProfile, type ZoneId } from './durability';
+import { worldSurface, type Surface as ShellSurface } from './shell';
 
 export const GEOM_KIND = { NONE: 0, ROBOT: 1, DEBRIS: 2, CANVAS: 3, FENCE: 4, POST: 5, PROP: 6 } as const;
 export type GeomKind = (typeof GEOM_KIND)[keyof typeof GEOM_KIND];
 
+/** Hardness and sparks of a surface (presentation: the impact event's `metal` flag). */
 export interface Surface {
   brinell: number;
   yieldMPa: number;
   sparks: boolean;
-  /** An elastomer pad (a rubber sole): it soaks up the blow instead of yielding like a metal. */
+  /** An elastomer pad (a rubber sole) or a glove: it soaks up the blow instead of yielding like a metal. */
   cushion?: boolean;
+}
+
+/** Who loaded a part's joints in the current arm window, for the joint events' cause. */
+export interface ArmContext {
+  role: JointRole;
+  byCorner: Corner | null; // the robot whose strike it was (null: a prop)
+  byPart: string | null; // its striking part
+  skill: string | null; // what that robot's body was doing (r.skill), e.g. 'hook'
 }
 
 export interface PartInfo {
@@ -23,9 +36,8 @@ export interface PartInfo {
   def: PartDef;
   /** Indices into robot.joints of the joints that live in this part (between it and its parent). */
   jointIdx: number[];
-  /** Where impact damage to the joints goes: this part's joints, or the parent's if it has none. */
-  woundJointIdx: number[];
-  woundShare: number;
+  /** Joints of the parts hanging off this one: their drives sit at this part's far end (housing hits). */
+  childJointIdx: number[];
   /** Parts that leave with this one when it detaches (its rigid descendants). */
   carried: PartInfo[];
   circuits: HydraulicCircuit[];
@@ -33,8 +45,11 @@ export interface PartInfo {
   punctured: boolean;
   /** This part and its ancestors up to the root: the joints an impact on this part loads. */
   loadPath: PartInfo[];
-  /** Overload tracking is armed for this part's joints until this tick (set by impacts). */
+  /** Joint-load channels are armed for this part's joints until this tick (set by strikes). */
   armedUntil: number;
+  arm: ArmContext | null;
+  /** Cracks per zone: a cracked panel keeps DAMAGE_TUNING.crackWeakening of its strength per crack. */
+  weakening: Partial<Record<ZoneId, number>>;
 }
 
 export interface GeomInfo {
@@ -44,12 +59,49 @@ export interface GeomInfo {
   part: PartInfo | null; // robot or debris geom: the part it belongs to
   surface: Surface;
   role: GeomRole | null;
+  /** The geom's definition (robot and debris geoms), for its zone and material. */
+  def: GeomDef | null;
+  /** World surfaces and props: their fixed shell mechanics. Robot geoms resolve theirs per contact. */
+  mech: ShellSurface | null;
 }
 
-export interface JointWear {
-  hp: number; // damage points to destroy it
-  overloadPeakNm: number; // peak back-driving torque in the current overload episode
-  inOverload: boolean;
+/** Mechanical state of one joint's drive: load episode peaks and the damage it carries. */
+export interface JointMech {
+  drive: DriveRatings;
+  mjJoint: number;
+  bodyId: number;
+  /** Bodies with one hinge can show a permanent bend (body_quat); multi-axis bodies only bind. */
+  singleHinge: boolean;
+  /**
+   * A strike landing this close to the joint's anchor hits the drive housing: the module's radius plus
+   * the limb's (the module sits across the limb at the joint, the contact lands on the limb's surface).
+   */
+  housingReachM: number;
+  /**
+   * Permissible side moment of this joint: the module's output bearing, or what the subtree it
+   * carries demands (DAMAGE_TUNING.structuralG), whichever is larger.
+   */
+  bearingMomentNm: number;
+  // ---- the current load episode (armed ticks)
+  inEpisode: boolean;
+  role: JointRole;
+  arm: ArmContext | null;
+  ring: Float64Array; // FILTER_TAPS samples × 3 channels (gear, stop, bearing ratios)
+  ringN: number;
+  peak: [number, number, number]; // filtered peaks: gear, stop, bearing (× rating)
+  stopSide: number; // +1 upper limit, −1 lower, at the stop peak
+  bendAxisW: Vec3 | null; // world direction of the off-axis moment at the bearing peak
+  // ---- damage carried
+  slipCapNm: number | null; // a QDD that shed a tooth slips above this torque
+  teeth: number; // teeth shed
+  faultUntil: number; // tick: the drive is faulted (no torque) until then
+  faults: number;
+  encoderSlop: number; // extra backlash wander from housing hits, rad
+  bendRad: number; // permanent bend target
+  bendApplied: number; // what body_quat shows now (ramps toward bendRad)
+  bendAxisP: Vec3 | null; // bend axis in the parent body frame
+  baseQuat: [number, number, number, number]; // the body's design quaternion
+  hyperRad: number; // how far its stop gave way
 }
 
 export interface Limb {
@@ -57,29 +109,141 @@ export interface Limb {
   jointIdx: number[];
 }
 
-export interface RobotDamage {
-  robot: RobotRuntime;
-  parts: Map<string, PartInfo>;
-  wear: JointWear[];
-  limbs: Limb[];
-  downS: number;
+/** One permanent mark on a shell, published in telemetry so the renderer dents at the contact point. */
+export interface DentRecord {
+  seq: number;
+  part: string;
+  pos: Vec3; // part frame
+  normal: Vec3; // part frame, pointing out of the shell
+  depthM: number;
+  radiusM: number;
+  mode: DentMode;
+  cracked: boolean;
+  whiten: number;
+  time: number;
 }
 
+/** Joint health lost, by channel (cause) and by the robot's role in the hit. */
+export type LossByRole = Record<JointRole, number>;
+
+/** What the damage model did to one robot this fight (tools/fight-metrics.ts, tools/strike-bench.ts). */
+/** One joint injury, as booked (the most recent LEDGER_LOG of them). */
+export interface InjuryRecord {
+  t: number;
+  joint: string;
+  cause: JointCause;
+  failure: JointFailure;
+  severity: number;
+  role: JointRole;
+  loss: number;
+  by: string | null; // the striking part and what that body was doing, e.g. 'fist_r (hook)'
+}
+
+/** Injury records kept per robot. */
+export const LEDGER_LOG = 64;
+
+export interface DamageLedger {
+  jointLoss: Record<JointCause, LossByRole>;
+  failures: Record<JointFailure, number>;
+  /** The most recent injuries (wear included), oldest first. */
+  log: InjuryRecord[];
+  /** Joints that became degraded or worse (each joint counts once). */
+  injured: string[];
+  /** Ticks of the load episodes per channel that passed their onset / break (calibration). */
+  overloads: Record<'gear' | 'stop' | 'bearing', { onset: number; broke: number; peak: number }>;
+  dents: { count: number; cracks: number; byZone: Partial<Record<ZoneId, number>>; maxDepthM: number; plasticJ: number };
+  partPoints: number;
+}
+
+export interface RobotDamage {
+  robot: RobotRuntime;
+  profile: DurabilityProfile;
+  parts: Map<string, PartInfo>;
+  mech: JointMech[];
+  limbs: Limb[];
+  downS: number;
+  dents: DentRecord[]; // the most recent, for telemetry
+  dentSeq: number;
+  ledger: DamageLedger;
+}
+
+/**
+ * One contact pair (two geoms) from first touch to separation. Robot-robot pairs belong to a strike
+ * or push group; the rest are their own group.
+ */
 export interface Episode {
   a: number; // geom ids, a < b
   b: number;
   startTick: number;
   lastTick: number;
   active: boolean; // false = resting or already measured: ignore until separation
+  group: HitGroup | null;
   impulse: number; // ∫ normal force dt, N·s
   jx: number; // impulse vector acting on geom b, N·s (negate for geom a)
   jy: number;
   jz: number;
+  work: number; // ∫ F·v_closing dt: the work the contact absorbed, J
+  /** This tick's Σ F and Σ F·v over the pair's contacts, and the last settled tick's (trapezoid rule). */
+  tickF: number;
+  tickFV: number;
+  prevF: number;
+  prevV: number;
   peakForce: number;
   pos: [number, number, number];
   speed: number; // closing speed at first touch
-  massEff: number; // reduced mass of the two bodies
+  massEff: number; // reduced mass of the two bodies (presentation energy)
   striker: 'a' | 'b'; // the side that was moving into the other
+  /** Share of the absorbed work that goes into geom a's surface (the rest into b's). */
+  shareA: number;
+  tallyA: Tally | null;
+  tallyB: Tally | null;
+}
+
+/** What one part took in a group: impulse, work into its surface, peak local force and where. */
+export interface Tally {
+  info: PartInfo;
+  geom: GeomInfo;
+  other: GeomInfo; // the surface that hit it (at its peak)
+  zone: ZoneId;
+  surface: ShellSurface;
+  impulse: number;
+  jx: number; // impulse on this part, world
+  jy: number;
+  jz: number;
+  work: number; // its share of the absorbed work
+  peakForce: number; // the largest single-contact force, as the solver gave it
+  /** Largest single-contact force this step, and the last few steps of it (DAMAGE_TUNING.forceFilterSteps). */
+  tickForce: number;
+  forceRing: number[];
+  /** Peak of the filtered force: what the shell's yield and a drive housing feel. */
+  filtPeak: number;
+  pos: Vec3; // world, at peak force
+  normal: Vec3; // world, pushing into this part
+  localPos: Vec3; // the same point in the part's body frame, taken at the peak (where the dent goes)
+  localNormal: Vec3; // out of the shell, part frame
+  striking: boolean; // it is on the striking side of its pair
+  /** Fastest first-touch closing speed among the pairs that landed on this part (clean-hit test). */
+  speed: number;
+}
+
+/**
+ * A group of contact pairs measured as one: a strike (robot on robot, the first strikeWindowS from
+ * first touch), a push (contact soon after a strike), or a single pair (canvas, cage, debris, props).
+ */
+export interface HitGroup {
+  kind: 'strike' | 'push' | 'pair';
+  striker: Corner | null;
+  victim: Corner | null;
+  startTick: number;
+  closeTick: number; // measuring ends after this tick
+  first: Episode;
+  pairs: Episode[];
+  tallies: Tally[];
+  impulse: number;
+  work: number;
+  peakForce: number;
+  speed: number;
+  done: boolean;
 }
 
 export interface DamageState {
@@ -87,6 +251,14 @@ export interface DamageState {
   geoms: Array<GeomInfo | null>;
   robots: [RobotDamage, RobotDamage];
   episodes: Map<number, Episode>;
+  /** Open strike / push group per striking corner. */
+  strikes: [HitGroup | null, HitGroup | null];
+  pushes: [HitGroup | null, HitGroup | null];
+  /** Tick the last strike group of each striking corner closed (push tail). */
+  strikeEnd: [number, number];
+  pairGroups: Set<HitGroup>;
+  /** model joint id → [corner, joint index] (robot joints only). */
+  jointOf: Map<number, [Corner, number]>;
   /** Reusable out-parameter for mj_objectVelocity. Re-read GetView() after every call: heap growth detaches old views. */
   velBuf: VelBuf;
 }
@@ -108,6 +280,9 @@ function velBufFor(mj: SimContext['mj']): VelBuf {
 const ARM_TAGS: PartTag[] = ['upperarm', 'forearm', 'fist', 'shield', 'hammer'];
 const LEG_TAGS: PartTag[] = ['thigh', 'shin', 'foot', 'leg', 'wheel'];
 const SIDE_TAGS: PartTag[] = ['left', 'right', 'front', 'rear'];
+
+/** Samples in the load filter (DAMAGE_TUNING.loadFilterS at a 1 ms step). */
+export const FILTER_TAPS = 3;
 
 function surfaceOf(g: GeomDef): Surface {
   const m = MATERIALS[g.material];
@@ -146,7 +321,86 @@ function handOwner(info: PartInfo, parts: Map<string, PartInfo>): PartInfo {
   return p ?? info;
 }
 
-function buildRobotDamage(robot: RobotRuntime, geoms: Array<GeomInfo | null>): RobotDamage {
+const lossByRole = (): LossByRole => ({ victim: 0, striker: 0, none: 0 });
+
+export function emptyLedger(): DamageLedger {
+  return {
+    jointLoss: { gear: lossByRole(), bearing: lossByRole(), hyperextension: lossByRole(), housing: lossByRole(), thermal: lossByRole(), detach: lossByRole() },
+    failures: { wear: 0, seize: 0, strip: 0, slip: 0, bend: 0, hyperextension: 0, fault: 0, seal: 0, detach: 0 },
+    log: [],
+    injured: [],
+    overloads: { gear: { onset: 0, broke: 0, peak: 0 }, stop: { onset: 0, broke: 0, peak: 0 }, bearing: { onset: 0, broke: 0, peak: 0 } },
+    dents: { count: 0, cracks: 0, byZone: {}, maxDepthM: 0, plasticJ: 0 },
+    partPoints: 0,
+  };
+}
+
+function profileFor(ctx: SimContext, robot: RobotRuntime): DurabilityProfile {
+  const model = ctx.model;
+  const massKg = model.body_subtreemass[robot.rootBody] as number;
+  const head = robot.parts.get('head');
+  const headKg = head ? (model.body_mass[head.body] as number) : 0;
+  return durabilityProfile(robot.design, { massKg, headKg, comHeightM: robot.design.rootHeight });
+}
+
+/**
+ * Radius of a limb: its largest capsule or cylinder. A drive in a limb sits across the limb, so a hit
+ * on the limb's surface at the joint is a hit on its housing. Box parts (torso, pelvis, head, feet)
+ * enclose their drives: 0, so only a hit right at the joint reaches the housing.
+ */
+function limbRadius(def: PartDef | undefined): number {
+  let r = 0;
+  for (const g of def?.geoms ?? []) {
+    const s = g.shape;
+    if (s.type === 'capsule' || s.type === 'cylinder' || s.type === 'sphere') r = Math.max(r, s.radius);
+  }
+  return r;
+}
+
+function jointMech(ctx: SimContext, robot: RobotRuntime, i: number): JointMech {
+  const { model } = ctx;
+  const j = robot.joints[i];
+  const mjJoint = model.dof_jntid[j.dadr] as number;
+  const bodyId = model.jnt_bodyid[mjJoint] as number;
+  const bq = model.body_quat as Float64Array;
+  const drive = driveRatings(j.motor);
+  const part = robot.design.parts.find((p) => p.id === j.part);
+  const parent = robot.design.parts.find((p) => p.id === part?.parent);
+  // Structural floor: the subtree this joint carries, at its centre of mass (stance pose at build).
+  const subMass = model.body_subtreemass[bodyId] as number;
+  const sc = ctx.data.subtree_com as Float64Array;
+  const xa = ctx.data.xanchor as Float64Array;
+  const lever = Math.hypot(sc[bodyId * 3] - xa[mjJoint * 3], sc[bodyId * 3 + 1] - xa[mjJoint * 3 + 1], sc[bodyId * 3 + 2] - xa[mjJoint * 3 + 2]);
+  const structural = DAMAGE_TUNING.structuralG * subMass * 9.81 * lever;
+  return {
+    drive,
+    mjJoint,
+    bodyId,
+    singleHinge: (model.body_jntnum[bodyId] as number) === 1,
+    housingReachM: drive.housingRadiusM + Math.max(limbRadius(part), limbRadius(parent)) + DAMAGE_TUNING.housingMarginM,
+    bearingMomentNm: Math.max(drive.bearingMomentNm, structural),
+    inEpisode: false,
+    role: 'none',
+    arm: null,
+    ring: new Float64Array(FILTER_TAPS * 3),
+    ringN: 0,
+    peak: [0, 0, 0],
+    stopSide: 0,
+    bendAxisW: null,
+    slipCapNm: null,
+    teeth: 0,
+    faultUntil: -1,
+    faults: 0,
+    encoderSlop: 0,
+    bendRad: 0,
+    bendApplied: 0,
+    bendAxisP: null,
+    baseQuat: [bq[bodyId * 4], bq[bodyId * 4 + 1], bq[bodyId * 4 + 2], bq[bodyId * 4 + 3]],
+    hyperRad: 0,
+  };
+}
+
+function buildRobotDamage(ctx: SimContext, robot: RobotRuntime, geoms: Array<GeomInfo | null>): RobotDamage {
   const { design } = robot;
   const defs = new Map(design.parts.map((p) => [p.id, p]));
   const children = childrenMap(design.parts);
@@ -157,21 +411,18 @@ function buildRobotDamage(robot: RobotRuntime, geoms: Array<GeomInfo | null>): R
     const jointIdx = robot.joints.flatMap((j, i) => (j.part === def.id ? [i] : []));
     parts.set(def.id, {
       robot, part, def, jointIdx,
-      woundJointIdx: jointIdx,
-      woundShare: 1,
+      childJointIdx: [],
       carried: [],
       circuits: (design.hydraulics ?? []).filter((h) => h.parts.includes(def.id)),
       punctured: false,
       loadPath: [],
       armedUntil: -1,
+      arm: null,
+      weakening: {},
     });
   }
   for (const info of parts.values()) {
-    // Joint-less parts (fists, pelvis) pass half their joint damage up to the parent's joints.
-    if (!info.jointIdx.length && info.def.parent) {
-      info.woundJointIdx = parts.get(info.def.parent)?.jointIdx ?? [];
-      info.woundShare = 0.5;
-    }
+    for (const c of children.get(info.def.id) ?? []) info.childJointIdx.push(...(parts.get(c.id)?.jointIdx ?? []));
     for (let p: PartInfo | undefined = info; p; p = p.def.parent ? parts.get(p.def.parent) : undefined) info.loadPath.push(p);
     if (info.def.detachable) {
       const stack = [...(children.get(info.def.id) ?? [])];
@@ -187,13 +438,13 @@ function buildRobotDamage(robot: RobotRuntime, geoms: Array<GeomInfo | null>): R
     const owner = handOwner(info, parts);
     info.part.geoms.forEach((gid, i) => {
       const g = def.geoms[i];
-      geoms[gid] = { kind: GEOM_KIND.ROBOT, body: info.part.body, corner: robot.corner, part: owner, surface: surfaceOf(g), role: g.role };
+      geoms[gid] = { kind: GEOM_KIND.ROBOT, body: info.part.body, corner: robot.corner, part: owner, surface: surfaceOf(g), role: g.role, def: g, mech: null };
     });
     if (info.part.debrisBody !== null) {
       const merged = mergedGeoms(def, children);
       info.part.debrisGeoms.forEach((gid, i) => {
         const g = merged[i] ?? def.geoms[0];
-        geoms[gid] = { kind: GEOM_KIND.DEBRIS, body: info.part.debrisBody!, corner: robot.corner, part: info, surface: surfaceOf(g), role: g.role };
+        geoms[gid] = { kind: GEOM_KIND.DEBRIS, body: info.part.debrisBody!, corner: robot.corner, part: info, surface: surfaceOf(g), role: g.role, def: g, mech: null };
       });
     }
   }
@@ -208,10 +459,14 @@ function buildRobotDamage(robot: RobotRuntime, geoms: Array<GeomInfo | null>): R
   }
   return {
     robot,
+    profile: profileFor(ctx, robot),
     parts,
-    wear: robot.joints.map((j) => ({ hp: JOINT_HP_BASE + JOINT_HP_PER_NM * j.motor.stallTorqueNm, overloadPeakNm: 0, inOverload: false })),
+    mech: robot.joints.map((_, i) => jointMech(ctx, robot, i)),
     limbs: [...limbMap.values()],
     downS: 0,
+    dents: [],
+    dentSeq: 0,
+    ledger: emptyLedger(),
   };
 }
 
@@ -224,13 +479,13 @@ function worldGeom(ctx: SimContext, name: string): number {
 }
 
 function classifyWorld(ctx: SimContext, geoms: Array<GeomInfo | null>): void {
-  const mark = (id: number, kind: GeomKind, surface: Surface) => {
-    if (id >= 0) geoms[id] = { kind, body: 0, corner: null, part: null, surface, role: null };
+  const mark = (id: number, kind: GeomKind, surface: Surface, mech: ShellSurface) => {
+    if (id >= 0) geoms[id] = { kind, body: 0, corner: null, part: null, surface, role: null, def: null, mech };
   };
-  mark(worldGeom(ctx, 'canvas'), GEOM_KIND.CANVAS, WORLD_SURFACES.canvas);
+  mark(worldGeom(ctx, 'canvas'), GEOM_KIND.CANVAS, WORLD_SURFACES.canvas, worldSurface('canvas'));
   for (let i = 0; i < ARENA.SIDES; i++) {
-    mark(worldGeom(ctx, `fence_${i}`), GEOM_KIND.FENCE, WORLD_SURFACES.fence);
-    mark(worldGeom(ctx, `post_${i}`), GEOM_KIND.POST, WORLD_SURFACES.post);
+    mark(worldGeom(ctx, `fence_${i}`), GEOM_KIND.FENCE, WORLD_SURFACES.fence, worldSurface('fence'));
+    mark(worldGeom(ctx, `post_${i}`), GEOM_KIND.POST, WORLD_SURFACES.post, worldSurface('post'));
   }
   // Anything else that can collide is a loose prop (steel) or unnamed world geometry (treated as canvas).
   const { model } = ctx;
@@ -242,8 +497,11 @@ function classifyWorld(ctx: SimContext, geoms: Array<GeomInfo | null>): void {
     if (geoms[g] || (contype[g] === 0 && conaff[g] === 0)) continue;
     const body = bodyOf[g];
     geoms[g] = body === 0
-      ? { kind: GEOM_KIND.CANVAS, body: 0, corner: null, part: null, surface: WORLD_SURFACES.canvas, role: null }
-      : { kind: GEOM_KIND.PROP, body, corner: null, part: null, surface: { brinell: steel.brinell, yieldMPa: steel.yieldMPa, sparks: true }, role: null };
+      ? { kind: GEOM_KIND.CANVAS, body: 0, corner: null, part: null, surface: WORLD_SURFACES.canvas, role: null, def: null, mech: worldSurface('canvas') }
+      : {
+        kind: GEOM_KIND.PROP, body, corner: null, part: null, surface: { brinell: steel.brinell, yieldMPa: steel.yieldMPa, sparks: true }, role: null, def: null,
+        mech: { material: 'steel', mode: 'dent', thicknessM: 0, radiusM: 0, stiffness: 2e8, collapseN: Infinity, elasticJ: Infinity, sparks: true },
+      };
   }
 }
 
@@ -251,9 +509,20 @@ export function buildDamageState(ctx: SimContext): DamageState {
   const ngeom = ctx.model.ngeom as number;
   const geoms: Array<GeomInfo | null> = new Array(ngeom).fill(null);
   const robots: [RobotDamage, RobotDamage] = [
-    buildRobotDamage(ctx.robots[0], geoms),
-    buildRobotDamage(ctx.robots[1], geoms),
+    buildRobotDamage(ctx, ctx.robots[0], geoms),
+    buildRobotDamage(ctx, ctx.robots[1], geoms),
   ];
   classifyWorld(ctx, geoms);
-  return { ngeom, geoms, robots, episodes: new Map(), velBuf: velBufFor(ctx.mj) };
+  const jointOf = new Map<number, [Corner, number]>();
+  for (const rd of robots) rd.mech.forEach((m, i) => jointOf.set(m.mjJoint, [rd.robot.corner, i]));
+  return {
+    ngeom, geoms, robots,
+    episodes: new Map(),
+    strikes: [null, null],
+    pushes: [null, null],
+    strikeEnd: [-1e9, -1e9],
+    pairGroups: new Set(),
+    jointOf,
+    velBuf: velBufFor(ctx.mj),
+  };
 }

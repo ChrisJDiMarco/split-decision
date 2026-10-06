@@ -173,9 +173,17 @@ export class BroadcastAudio {
         f.ko(s.massKg[ev.corner], this.placeCorner(s, ev.corner, rate));
         this.crowd?.swell(1);
         return;
-      case 'joint':
-        if (ev.state !== 'ok') f.joint(ev.state === 'seized', ev.state === 'degraded' ? 0.5 : 0.9, this.placeCorner(s, ev.corner, rate));
+      case 'joint': {
+        // At the joint when the physics says where; voiced by what failed (thermal limp and lost parts
+        // keep the old grind: their own sounds are the motor and the tear).
+        const where = ev.pos ? this.place(s, ev.pos, rate) : this.placeCorner(s, ev.corner, rate);
+        if (ev.failure && ev.cause && ev.cause !== 'thermal' && ev.cause !== 'detach' && (ev.failure !== 'wear' || ev.state !== 'ok')) {
+          f.jointFailure(ev.failure, ev.severity ?? 1, s.massKg[ev.corner], where);
+          return;
+        }
+        if (ev.state !== 'ok') f.joint(ev.state === 'seized', ev.state === 'degraded' ? 0.5 : 0.9, where);
         return;
+      }
     }
   }
 
@@ -186,6 +194,7 @@ export class BroadcastAudio {
       const kind = classifyStrike({ metal: ev.metal, part: ev.part, victimMaterial: material, strikerGloved: this.gloved(s, ev.striker) });
       const massKg = Math.sqrt(s.massKg[ev.striker] * s.massKg[ev.victim]);
       f.hit({ ...where, kind, energyJ: ev.energyJ, part: ev.part, material, massKg });
+      if (ev.dent && (ev.dent.mode === 'crack' || ev.dent.cracked)) f.shellCrack(Math.min(1, 0.4 + ev.dent.radiusM * 5), where);
       if (ev.energyJ > SWELL_HIT_J) this.crowd?.swell(0.08 + ev.energyJ / 1500);
       return;
     }

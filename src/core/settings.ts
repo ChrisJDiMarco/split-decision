@@ -1,6 +1,6 @@
 // Player settings, persisted per browser. Physics never reads these. Most only switch presentation
-// (effects and sounds); MINDS picks which mind decides for every non-player corner, and FAIR MODE
-// gives a human player Jev's reaction delay.
+// (effects, sounds, how deep dents are drawn); MINDS picks which mind decides for every non-player
+// corner, and FAIR MODE gives a human player Jev's reaction delay.
 
 export interface Settings {
   /** Hydraulic oil spray, puddles and the leak hiss. Leaks still cost pressure either way. */
@@ -15,13 +15,19 @@ export interface Settings {
   minds: GlobalMinds;
   /** A human player feels Jev's reaction delay (MatchSetup.reactionDelayS) instead of the snappy player delay. */
   fairMode: boolean;
+  /**
+   * PRESENTATION ONLY: draw physical dents about 2× deeper so they read on screen
+   * (src/render/robot-kit/damage DENT_VISUAL_BOOST). The physics, and every number it reports, is
+   * unchanged either way. On by default (Chris, decision D6).
+   */
+  dentBoost: boolean;
 }
 
 export type GlobalMinds = 'corner' | 'jev' | 'local' | 'house';
 export const GLOBAL_MINDS: readonly GlobalMinds[] = ['corner', 'jev', 'local', 'house'];
 
 const STORAGE_KEY = 'split-decision.settings.v1';
-const DEFAULTS: Settings = { oilEffects: false, soundOn: false, minds: 'corner', fairMode: false };
+const DEFAULTS: Settings = { oilEffects: false, soundOn: false, minds: 'corner', fairMode: false, dentBoost: true };
 
 type Listener = (s: Readonly<Settings>) => void;
 const listeners = new Set<Listener>();
@@ -45,6 +51,7 @@ function pick(p: Partial<Settings>): Partial<Settings> {
   if (typeof p.soundOn === 'boolean') out.soundOn = p.soundOn;
   if (typeof p.minds === 'string' && (GLOBAL_MINDS as readonly string[]).includes(p.minds)) out.minds = p.minds;
   if (typeof p.fairMode === 'boolean') out.fairMode = p.fairMode;
+  if (typeof p.dentBoost === 'boolean') out.dentBoost = p.dentBoost;
   return out;
 }
 

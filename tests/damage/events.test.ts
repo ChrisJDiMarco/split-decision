@@ -42,8 +42,14 @@ describe('impact events', () => {
     const hits = ofKind(drain(ctx), 'impact').filter((e) => e.victim !== null && e.striker !== null);
     console.info(`[robot hits] ${hits.map((e) => `${e.striker}→${e.victim}:${e.part} ${e.impulseNs.toFixed(0)} N·s ${e.speed.toFixed(1)} m/s ${e.energyJ.toFixed(0)} J${e.metal ? ' sparks' : ''}`).join(' | ')}`);
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0]).toMatchObject({ striker: 1, victim: 0 });
+    expect(hits[0]).toMatchObject({ striker: 1, victim: 0, push: false });
     expect(hits.some((e) => e.metal)).toBe(true);
-    expect(ctx.robots[0].parts.get(hits[0].part!)!.damage).toBeGreaterThan(0);
+    // The measured contact: absorbed work, peak force and the striking part ride on the event.
+    expect(hits[0].workJ).toBeGreaterThan(0);
+    expect(hits[0].peakForceN).toBeGreaterThan(0);
+    expect(hits[0].strikerPart).toBeTruthy();
+    // A slow body check into the Bruiser's 4 mm AR500 stays elastic: hardened shells shrug it off.
+    expect(ctx.robots[0].parts.get(hits[0].part!)!.damage).toBe(0);
+    expect(hits[0].dent).toBeUndefined();
   });
 });

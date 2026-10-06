@@ -59,10 +59,11 @@ export function makeRig(opts: RigOptions = {}): SimContext {
   return ctx;
 }
 
-/** One physics step, same order as the worker: pre systems, mj_step, damage. */
+/** One physics step, same order as the worker: pre systems (damage's drive state after the motors), mj_step, damage. */
 export function step(ctx: SimContext, n = 1, onStep?: () => void): void {
   for (let k = 0; k < n; k++) {
     for (const s of PRE) s.pre?.(ctx);
+    damageSystem.pre!(ctx);
     ctx.mj.mj_step(ctx.model, ctx.data);
     ctx.tick++;
     ctx.time += ctx.dt;

@@ -28,11 +28,30 @@ export interface MaterialSpec {
   brinell: number; // hardness, used to scale dent depth and spark intensity
   friction: number; // sliding friction coefficient against canvas / metal
   sparks: boolean; // does a hard hit throw sparks
+  // Shell mechanics for physical dents (src/physics/damage/shell.ts). Optional so older specs stay valid.
+  youngsGPa?: number; // elastic modulus
+  poisson?: number;
+  failureMode?: FailureMode; // how a shell of it fails under a hard local hit
 }
+
+/**
+ * How a shell fails under a hard local hit: metal dents (and keeps the dent), polycarbonate dents,
+ * whitens and partly springs back, UHMW gouges and never cracks, carbon cracks and delaminates
+ * instead of denting, and a cushion (rubber, a glove) soaks the blow without a mark.
+ */
+export type FailureMode = 'dent' | 'whiten' | 'gouge' | 'crack' | 'cushion';
 
 // ---------------------------------------------------------------- actuators
 
 export type MotorKind = 'electric' | 'hydraulic' | 'pneumatic';
+
+/**
+ * Drive train between rotor and output. qdd: a single-stage reducer (6-10:1) that backdrives;
+ * planetary: a high-ratio planetary (20:1) that barely does; cycloidal: a shock-tolerant cycloid
+ * stage; hydraulic / pneumatic: a cylinder (no teeth: the relief valve and seals take overloads);
+ * direct: no reducer.
+ */
+export type GearType = 'qdd' | 'planetary' | 'cycloidal' | 'hydraulic' | 'pneumatic' | 'direct';
 
 /** A real purchasable actuator (or a close analog), expressed at the joint output. */
 export interface MotorSpec {
@@ -47,6 +66,18 @@ export interface MotorSpec {
   maxTempC: number; // derating starts ~20 C below, burnout above
   copperLossAtStallW: number; // I^2R at stall; scales with (torque/stall)^2
   source?: string; // spec sheet / product the numbers come from
+  // Drive-train ratings for the joint-load damage channels (src/physics/damage/joint-loads.ts).
+  // Optional: a motor without them gets labelled default assumptions (src/physics/damage/durability.ts).
+  gearType?: GearType;
+  gearRatio?: number; // rotor turns per output turn
+  rotorInertiaKgM2?: number; // motor-side rotor inertia as vendors publish it; reflected = × gearRatio²
+  reflectedInertiaKgM2?: number; // or the reflected (output-side) inertia when that is what is published
+  gearPeakTorqueNm?: number; // momentary (shock) torque the gear train takes at the output before teeth yield
+  bearingMomentNm?: number; // output bearing: permissible tilting moment
+  bearingRadialN?: number; // output bearing: permissible radial load
+  bearingAxialN?: number; // output bearing: permissible axial load
+  housingDiameterMm?: number; // module diameter (housing hits, bearing scale)
+  ratingsSource?: string; // where the ratings come from; "assumed" marks numbers no vendor publishes
 }
 
 // ---------------------------------------------------------------- geometry

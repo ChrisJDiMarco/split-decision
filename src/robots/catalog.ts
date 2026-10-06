@@ -2,6 +2,9 @@
 // Sources are in docs/research/02-actuators.md. Where a fighter needs more torque
 // than one module gives, the catalog entry names the stack (module + extra gearing)
 // and derives torque and speed from it, so the numbers stay traceable.
+// The damage model's extra fields (material stiffness and failure mode; gear type, ratio, rotor
+// inertia, gear and bearing ratings) are in MATERIAL_MECHANICS and DRIVE_TRAINS at the end of
+// this file, merged into the entries at load (docs/design/strike-power.md §4.1, §4.3).
 import type { MaterialId, MaterialSpec, MotorSpec } from '../core/types';
 
 export const MATERIALS: Record<MaterialId, MaterialSpec> = {
@@ -193,3 +196,141 @@ export function motor(id: string): MotorSpec {
   if (!spec) throw new Error(`Unknown motor '${id}'`);
   return spec;
 }
+
+// ---------------------------------------------------------------- damage-model fields (additive)
+//
+// Shell mechanics per material: Young's modulus and Poisson's ratio are typical handbook values
+// (MatWeb / ASM data sheets for the alloys, polycarbonate and UHMW-PE); the carbon entry is a
+// quasi-isotropic woven CFRP laminate (assumed ~50 GPa); rubber and glove foam are assumed. They set
+// how stiff a shell panel is, so how much of a hit's work it takes and when it yields
+// (src/physics/damage/shell.ts).
+const MATERIAL_MECHANICS: Record<MaterialId, Pick<MaterialSpec, 'youngsGPa' | 'poisson' | 'failureMode'>> = {
+  ar500: { youngsGPa: 200, poisson: 0.29, failureMode: 'dent' },
+  steel: { youngsGPa: 200, poisson: 0.29, failureMode: 'dent' },
+  al6061: { youngsGPa: 68.9, poisson: 0.33, failureMode: 'dent' },
+  al7075: { youngsGPa: 71.7, poisson: 0.33, failureMode: 'dent' },
+  ti6al4v: { youngsGPa: 113.8, poisson: 0.34, failureMode: 'dent' },
+  uhmw: { youngsGPa: 0.8, poisson: 0.46, failureMode: 'gouge' },
+  polycarb: { youngsGPa: 2.4, poisson: 0.37, failureMode: 'whiten' },
+  carbon: { youngsGPa: 50, poisson: 0.3, failureMode: 'crack' }, // assumed laminate
+  rubber: { youngsGPa: 0.005, poisson: 0.49, failureMode: 'cushion' }, // assumed
+  glove: { youngsGPa: 0.0005, poisson: 0.3, failureMode: 'cushion' }, // assumed
+};
+for (const [id, m] of Object.entries(MATERIAL_MECHANICS)) Object.assign(MATERIALS[id as MaterialId], m);
+
+/**
+ * Drive-train ratings per actuator. Published numbers are cited; the rest are labelled
+ * assumptions (decision D7), built from three rules:
+ *  · gear shock rating = 1.9 × vendor peak torque: the momentary / repeated-peak torque ratio of
+ *    Harmonic Drive's CSF-2UH units (35/18 … 382/216 N·m, i.e. 1.8-2.1; harmonicdrive.net CSF-2UH
+ *    table). No module vendor here publishes a gear momentary or ratchet torque.
+ *  · output bearing: permissible radial load 40 N per mm of housing diameter and axial 36 N/mm,
+ *    scaled from MyActuator's published crossed-roller ratings (X12: 5 kN / 4.5 kN; X15: 6 kN /
+ *    5.4 kN); permissible tilting moment = radial × dp/2 with pitch diameter dp = 0.7 × housing
+ *    (a crossed-roller ring sees a moment as an extra radial load 2M/dp: THK's equivalent-load
+ *    rule P0 = Fr + 2M/dp).
+ *  · reflected inertia = rotor inertia × ratio²; rotor inertias the vendor does not publish are taken
+ *    from the CubeMars module of the same torque class.
+ * Parallel stacks (one module each side of the joint) carry a moment as a couple across ~0.12 m.
+ */
+const GEAR_SHOCK = 1.9;
+const RADIAL_N_PER_MM = 40;
+const AXIAL_N_PER_MM = 36;
+const STACK_SPAN_M = 0.12;
+function bearing(odMm: number, radialN = RADIAL_N_PER_MM * odMm, axialN = AXIAL_N_PER_MM * odMm): Pick<MotorSpec, 'bearingRadialN' | 'bearingAxialN' | 'bearingMomentNm' | 'housingDiameterMm'> {
+  return { housingDiameterMm: odMm, bearingRadialN: radialN, bearingAxialN: axialN, bearingMomentNm: (radialN * 0.7 * odMm) / 2000 };
+}
+function stack(n: number, odMm: number): Pick<MotorSpec, 'bearingRadialN' | 'bearingAxialN' | 'bearingMomentNm' | 'housingDiameterMm'> {
+  const one = bearing(odMm);
+  return {
+    housingDiameterMm: odMm,
+    bearingRadialN: n * one.bearingRadialN!,
+    bearingAxialN: n * one.bearingAxialN!,
+    bearingMomentNm: n * one.bearingMomentNm! + one.bearingRadialN! * STACK_SPAN_M,
+  };
+}
+const shock = (id: string) => GEAR_SHOCK * MOTORS[id].stallTorqueNm;
+
+const DRIVE_TRAINS: Record<string, Partial<MotorSpec>> = {
+  'qdd.rs04': {
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: shock('qdd.rs04'), ...bearing(110),
+    ratingsSource: 'ratio 9:1 and the 120×120 mm housing published (openelab.io RobStride04); rotor inertia assumed (CubeMars AKE90-8 class, 3.4e-4 kg·m²); gear and bearing ratings assumed',
+  },
+  'qdd.rs04x3': {
+    gearType: 'cycloidal', gearRatio: 27, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: shock('qdd.rs04x3'), ...bearing(130),
+    ratingsSource: 'RobStride 04 (9:1) into a 3:1 cycloidal stage; rotor inertia, housing and ratings assumed',
+  },
+  'qdd.t800': {
+    gearType: 'planetary', gearRatio: 16, reflectedInertiaKgM2: 0.2427, gearPeakTorqueNm: shock('qdd.t800'), ...bearing(140),
+    ratingsSource: 'reflected armature 0.2427 kg·m² of EngineAI\'s Q300HL class (engineai_rl_lab t800.py / SDK MJCF; docs/research/10); ratio, housing and ratings assumed',
+  },
+  'qdd.ak80': {
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 1.118e-4, gearPeakTorqueNm: shock('qdd.ak80'), ...bearing(98),
+    ratingsSource: 'cubemars.com AK80-9 V3: 9:1, rotor inertia 1118 g·cm²; housing and ratings assumed',
+  },
+  'qdd.ak10': {
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 1.002e-4, gearPeakTorqueNm: shock('qdd.ak10'), ...bearing(98),
+    ratingsSource: 'cubemars.com AK10-9 V3 KV60: 9:1, rotor inertia 1002 g·cm², Ø98 mm; gear and bearing ratings assumed',
+  },
+  'qdd.rs00': {
+    gearType: 'qdd', gearRatio: 10, rotorInertiaKgM2: 1.5e-5, gearPeakTorqueNm: shock('qdd.rs00'), ...bearing(63),
+    ratingsSource: 'ratio 10:1 published (github.com/RobStride/Product_Information); rotor inertia, housing and ratings assumed',
+  },
+  'qdd.rs02': {
+    gearType: 'qdd', gearRatio: 7.75, rotorInertiaKgM2: 3.5e-5, gearPeakTorqueNm: shock('qdd.rs02'), ...bearing(76),
+    ratingsSource: 'ratio 7.75:1 published (github.com/RobStride/Product_Information); rotor inertia, housing and ratings assumed',
+  },
+  'qdd.rs03': {
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 1.0e-4, gearPeakTorqueNm: shock('qdd.rs03'), ...bearing(106),
+    ratingsSource: 'ratio 9:1 published (github.com/RobStride/Product_Information); rotor inertia assumed (CubeMars AK10-9 class); housing and ratings assumed',
+  },
+  'qdd.rs06': {
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 6.0e-5, gearPeakTorqueNm: shock('qdd.rs06'), ...bearing(86),
+    ratingsSource: 'ratio 9:1 published (robstride.com RobStride06); rotor inertia, housing and ratings assumed',
+  },
+  'plan.x12': {
+    gearType: 'planetary', gearRatio: 20, rotorInertiaKgM2: 1.29e-3, gearPeakTorqueNm: shock('plan.x12'), ...bearing(125, 5000, 4500),
+    ratingsSource: 'openelab.io RMD-X12-P20: 20:1 planetary, moment of inertia 12.9 kg·cm² (read as rotor-side), crossed-roller bearing 5 kN radial / 4.5 kN axial; housing Ø125 mm, tilting moment and gear shock rating assumed',
+  },
+  'plan.x15': {
+    gearType: 'planetary', gearRatio: 20.25, rotorInertiaKgM2: 3.16e-3, gearPeakTorqueNm: shock('plan.x15'), ...bearing(150, 6000, 5400),
+    ratingsSource: 'openelab.io RMD-X15-P20: 20.25:1 planetary, moment of inertia 31.6 kg·cm² (read as rotor-side), crossed-roller bearing 6 kN radial / 5.4 kN axial; housing Ø150 mm, tilting moment and gear shock rating assumed',
+  },
+  'qdd.ake90': {
+    gearType: 'qdd', gearRatio: 8, rotorInertiaKgM2: 3.377e-4, gearPeakTorqueNm: shock('qdd.ake90'), ...bearing(107.5),
+    ratingsSource: 'cubemars.com AKE90-8 KV35: 8:1, rotor inertia 3377 g·cm², Ø107.5 mm; gear and bearing ratings assumed',
+  },
+  'qdd.ake90x2': {
+    gearType: 'qdd', gearRatio: 8, rotorInertiaKgM2: 2 * 3.377e-4, gearPeakTorqueNm: shock('qdd.ake90x2'), ...stack(2, 107.5),
+    ratingsSource: 'two AKE90-8 rotors (3377 g·cm² each, cubemars.com) on one output; ratings assumed (modules either side of the joint)',
+  },
+  'qdd.ake90x3': {
+    gearType: 'qdd', gearRatio: 8, rotorInertiaKgM2: 3 * 3.377e-4, gearPeakTorqueNm: shock('qdd.ake90x3'), ...stack(3, 107.5),
+    ratingsSource: 'three AKE90-8 rotors (3377 g·cm² each, cubemars.com) on one output; ratings assumed (modules either side of the joint)',
+  },
+  'hyd.cyl50': {
+    gearType: 'hydraulic', gearRatio: 1, gearPeakTorqueNm: 1.5 * MOTORS['hyd.cyl50'].stallTorqueNm, bearingMomentNm: 3000, bearingRadialN: 60000, bearingAxialN: 40000, housingDiameterMm: 140,
+    ratingsSource: 'seal / tube rating 1.5 × working torque, after the 1.5× proof pressure of ISO 10100 cylinder tests (assumed); clevis pin ratings assumed',
+  },
+  'hyd.cyl32': {
+    gearType: 'hydraulic', gearRatio: 1, gearPeakTorqueNm: 1.5 * MOTORS['hyd.cyl32'].stallTorqueNm, bearingMomentNm: 1500, bearingRadialN: 30000, bearingAxialN: 20000, housingDiameterMm: 110,
+    ratingsSource: 'seal / tube rating 1.5 × working torque, after the 1.5× proof pressure of ISO 10100 cylinder tests (assumed); clevis pin ratings assumed',
+  },
+  'pneu.ram': {
+    gearType: 'pneumatic', gearRatio: 1, gearPeakTorqueNm: 1.5 * MOTORS['pneu.ram'].stallTorqueNm, bearingMomentNm: 2000, bearingRadialN: 30000, bearingAxialN: 20000, housingDiameterMm: 120,
+    ratingsSource: 'vessel and seal rating 1.5 × working (assumed; SPARC v1.5 asks 1.2× for pressure vessels); clevis ratings assumed',
+  },
+  'servo.neck': {
+    gearType: 'qdd', gearRatio: 7.75, rotorInertiaKgM2: 3.5e-5, gearPeakTorqueNm: shock('servo.neck'), ...bearing(76),
+    ratingsSource: 'RobStride 02: ratio 7.75:1 published; rotor inertia, housing and ratings assumed',
+  },
+  'grip.ak60': {
+    gearType: 'qdd', gearRatio: 6, rotorInertiaKgM2: 2.0e-5, gearPeakTorqueNm: shock('grip.ak60'), ...bearing(80),
+    ratingsSource: 'cubemars.com AK60-6 V1.1: 6:1 published; rotor inertia, housing and ratings assumed',
+  },
+  'drive.wheel': {
+    gearType: 'direct', gearRatio: 1, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: 2 * MOTORS['drive.wheel'].stallTorqueNm, ...bearing(110),
+    ratingsSource: 'direct-drive hub: no gear teeth; ratings assumed',
+  },
+};
+for (const [id, d] of Object.entries(DRIVE_TRAINS)) if (MOTORS[id]) Object.assign(MOTORS[id], d);

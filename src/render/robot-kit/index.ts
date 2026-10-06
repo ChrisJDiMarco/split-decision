@@ -2,7 +2,8 @@
 //
 //   const { views, bodyGroups } = buildRobotKitViews(meta, stage.physicsRoot, [skin0, skin1]);
 //   each frame:  applyPoses(poses, bodyGroups); updateRobotKit(views, telemetry, dt);
-//   on impact:   applyImpact(views[victim], part, worldPos, normal, energyJ);
+//   on impact:   applyImpact(views[victim], part, worldPos, normal, energyJ);  (scuff + eyes; physical
+//                dents arrive in telemetry and updateRobotKit draws them: syncDents)
 //   on detach:   setPartState(views[corner], part, { attached: false })  (or let telemetry do it)
 //   on reset:    for (const v of views) v.dispose();
 //
@@ -18,7 +19,7 @@ export { buildRobotKitView, buildRobotKitViews, type PartMeta } from './build';
 export { updateRobotKit } from './animate';
 export { noteHit, telemetryGaze } from './eyes';
 export { HAND_POSES, derivedHands, handPoseAngles, telemetryHands } from './hands';
-export { anchorPointsWorld, applyImpact, partPointWorld, setPartState, sparkPoints, type KitAnchor } from './damage';
+export { DENT_VISUAL_BOOST, anchorPointsWorld, applyDent, applyImpact, partPointWorld, setPartState, sparkPoints, syncDents, type KitAnchor } from './damage';
 export { forwardKinematics, applyBodyPoses, type BodyPose } from './fk';
 export { SKIN_IDS, SKINS, skinParams } from './materials';
 export { registerKitRecipe, registeredRecipes, hasKitRecipe } from './recipes/registry';

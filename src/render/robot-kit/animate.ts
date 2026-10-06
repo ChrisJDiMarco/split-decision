@@ -5,7 +5,7 @@
 import * as THREE from 'three/webgpu';
 import type { RobotTelemetry } from '../../core/protocol';
 import { motor } from '../../robots/catalog';
-import { setPartState } from './damage';
+import { setPartState, syncDents } from './damage';
 import { updateEyes } from './eyes';
 import { updateHands } from './hands';
 import { jointAngles, poseFrames } from './rig/joints';
@@ -75,6 +75,7 @@ function flick(t: number, rate: number, seed: number): number {
 }
 
 function syncTelemetry(view: RobotKitView, tel: RobotTelemetry, dt: number): void {
+  syncDents(view, tel.dents); // physical dents, each seq once
   for (const p of tel.parts) {
     const kit = view.parts.get(p.id);
     if (!kit) continue;

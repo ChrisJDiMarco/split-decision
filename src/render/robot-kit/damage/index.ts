@@ -1,8 +1,18 @@
-// Damage visuals. applyImpact dents the part's meshes around the contact (vertex displacement
-// with analytically tilted normals, so shading reads the dent) and writes scratch / scorch into
-// aDamage for the shader. setPartState drives heat glow and wear, and swaps a detached part
-// for its debris twin while a torn socket appears on the parent.
+// Damage visuals.
+//   physical dents  the physics publishes each permanent dent, crack or gouge in the struck part's
+//                   own frame (RobotTelemetry.dents, src/physics/damage/shell.ts). syncDents (called
+//                   from updateRobotKit) applies each one once: vertex displacement with analytically
+//                   tilted normals so shading reads it, a cumulative depth cap per vertex, and the
+//                   material's look in aDamage (scratch, scorch, crack chips, stress whitening).
+//                   DENT_VISUAL_BOOST (~2×, settings.dentBoost) is PRESENTATION ONLY.
+//   applyImpact     every landed impact: the eyes flinch and the paint scuffs. Harnesses without
+//                   physics telemetry (the showroom puppet, unit tests) still get the old energy dent
+//                   from it; a view that has seen physics dents does not (they would count twice).
+// setPartState drives heat glow and wear, and swaps a detached part for its debris twin while a torn
+// socket appears on the parent.
 import * as THREE from 'three/webgpu';
+import type { DentTelemetry } from '../../../core/protocol';
+import { settings } from '../../../core/settings';
 import type { Vec3 } from '../../../core/types';
 import { MATERIALS } from '../../../robots/catalog';
 import type { KitPart, PartVisualState, RobotKitView } from '../types';
@@ -19,6 +29,19 @@ const MAX_RADIUS_M = 0.11;
 const SCRATCH_REACH = 1.7; // scratches extend past the dent
 const SCORCH_J = 450; // energy for full scorch at the centre
 const REF_BRINELL = 180;
+const SCUFF_RADIUS_M = 0.035; // a hit that does not dent still scuffs the paint this far out
+
+/**
+ * PRESENTATION ONLY (decision D6): physical dents are drawn this many times deeper (and a little
+ * wider) while settings().dentBoost is on, so a 4 mm dent reads on a broadcast shot. The physics never
+ * sees it: every number in telemetry and events stays the physical one.
+ */
+export const DENT_VISUAL_BOOST = 2;
+const DENT_RADIUS_BOOST_MAX = 1.4;
+/** Total inward displacement any one vertex can take (render): repeat hits on one spot don't punch through. */
+export const MAX_CUMULATIVE_DEPTH_M = 0.04;
+/** Crack line half-width at the centre (render). */
+const CRACK_HALF_WIDTH_M = 0.004;
 
 const tmpP = new THREE.Vector3();
 const tmpN = new THREE.Vector3();
@@ -47,17 +70,38 @@ interface Dent {
   depth: number;
   radius: number;
   scorch: number;
+  /** 0..1 stress whitening / fibre fuzz (aDamage.w): crazed polycarbonate, gouged UHMW, cracked carbon. */
+  whiten?: number;
+  /** A crack: a chipped line through the dent instead of (much) displacement. */
+  crack?: boolean;
+  /** Paint scuff only: no displacement. */
+  scuffOnly?: boolean;
 }
 
-/** Displace one mesh's vertices around the dent and record scratch / scorch / dent memory. */
+/** Inward displacement already taken per vertex, for the cumulative cap. */
+const taken = new WeakMap<THREE.BufferGeometry, Float32Array>();
+
+function takenOf(geo: THREE.BufferGeometry, count: number): Float32Array {
+  let t = taken.get(geo);
+  if (!t || t.length !== count) {
+    t = new Float32Array(count);
+    taken.set(geo, t);
+  }
+  return t;
+}
+
+/** Displace one mesh's vertices around the dent and record scratch / scorch / dent / whitening. */
 function dentMesh(mesh: THREE.Mesh, d: Dent): void {
   const geo = mesh.geometry;
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const nor = geo.getAttribute('normal') as THREE.BufferAttribute;
   const dmg = geo.getAttribute('aDamage') as THREE.BufferAttribute | undefined;
+  const cum = takenOf(geo, pos.count);
   const reach = d.radius * SCRATCH_REACH;
   const R2 = d.radius * d.radius;
   const radial = new THREE.Vector3();
+  // A crack runs along one deterministic direction across the dent (in the surface plane).
+  const along = d.crack ? crackDirection(d) : null;
   for (let i = 0; i < pos.count; i++) {
     tmpP.fromBufferAttribute(pos, i);
     const dist = tmpP.distanceTo(d.center);
@@ -65,25 +109,40 @@ function dentMesh(mesh: THREE.Mesh, d: Dent): void {
     if (dmg) {
       const s = 1 - dist / reach;
       const scorch = d.scorch * Math.max(0, 1 - dist / (d.radius * 0.9));
-      dmg.setX(i, Math.min(1, dmg.getX(i) + s * 0.9));
+      dmg.setX(i, Math.min(1, dmg.getX(i) + s * (d.scuffOnly ? 0.5 : 0.9)));
       dmg.setY(i, Math.min(1, dmg.getY(i) + scorch));
+      if (d.whiten) dmg.setW(i, Math.min(1, dmg.getW(i) + d.whiten * Math.max(0, 1 - dist / d.radius)));
+      if (along && dist < d.radius) {
+        // Distance from the crack line through the centre: a thin chipped band, narrowing to its ends.
+        radial.subVectors(tmpP, d.center);
+        const off = radial.addScaledVector(along, -radial.dot(along)).addScaledVector(d.dir, -radial.dot(d.dir)).length();
+        const width = CRACK_HALF_WIDTH_M * (1 - dist / d.radius) + 0.0015;
+        if (off < width) {
+          dmg.setX(i, 1);
+          dmg.setZ(i, 1);
+        }
+      }
     }
-    if (dist * dist >= R2) continue;
+    if (d.scuffOnly || dist * dist >= R2) continue;
     const x = dist / d.radius;
     const f = (1 - x * x) * (1 - x * x);
     const crumple = 0.7 + 0.6 * hash3(tmpP.x * 91, tmpP.y * 91, tmpP.z * 91);
-    const disp = d.depth * f * crumple;
-    pos.setXYZ(i, tmpP.x - d.dir.x * disp, tmpP.y - d.dir.y * disp, tmpP.z - d.dir.z * disp);
-    // Tilt the normal toward the dent centre by the slope of the dent profile.
-    tmpN.fromBufferAttribute(nor, i);
-    radial.subVectors(tmpP, d.center).addScaledVector(tmpN, -radial.dot(tmpN));
-    const rl = radial.length();
-    if (rl > 1e-6) {
-      // Front faces see a crater (tilt inward); faces looking away see a bulge (tilt outward).
-      const facing = tmpN.dot(d.dir) >= 0 ? 1 : -1;
-      const slope = (4 * d.depth * x * (1 - x * x)) / d.radius;
-      tmpN.addScaledVector(radial.divideScalar(rl), -slope * crumple * facing).normalize();
-      nor.setXYZ(i, tmpN.x, tmpN.y, tmpN.z);
+    const want = d.depth * f * crumple;
+    const disp = Math.max(0, Math.min(want, MAX_CUMULATIVE_DEPTH_M - cum[i]));
+    if (disp > 0) {
+      cum[i] += disp;
+      pos.setXYZ(i, tmpP.x - d.dir.x * disp, tmpP.y - d.dir.y * disp, tmpP.z - d.dir.z * disp);
+      // Tilt the normal toward the dent centre by the slope of the dent profile.
+      tmpN.fromBufferAttribute(nor, i);
+      radial.subVectors(tmpP, d.center).addScaledVector(tmpN, -radial.dot(tmpN));
+      const rl = radial.length();
+      if (rl > 1e-6) {
+        // Front faces see a crater (tilt inward); faces looking away see a bulge (tilt outward).
+        const facing = tmpN.dot(d.dir) >= 0 ? 1 : -1;
+        const slope = (4 * (disp / Math.max(1e-6, f * crumple)) * x * (1 - x * x)) / d.radius;
+        tmpN.addScaledVector(radial.divideScalar(rl), -slope * crumple * facing).normalize();
+        nor.setXYZ(i, tmpN.x, tmpN.y, tmpN.z);
+      }
     }
     if (dmg) dmg.setZ(i, Math.min(1, Math.max(dmg.getZ(i), f * (d.depth / 0.012))));
   }
@@ -92,12 +151,23 @@ function dentMesh(mesh: THREE.Mesh, d: Dent): void {
   if (dmg) dmg.needsUpdate = true;
 }
 
+/** A unit direction in the surface plane, fixed by where the crack is (deterministic). */
+function crackDirection(d: Dent): THREE.Vector3 {
+  const a = hash3(d.center.x * 53, d.center.y * 53, d.center.z * 53) * Math.PI * 2;
+  const t1 = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(d.dir.y) > 0.9) t1.set(1, 0, 0);
+  t1.cross(d.dir).normalize();
+  const t2 = new THREE.Vector3().crossVectors(d.dir, t1);
+  return t1.multiplyScalar(Math.cos(a)).addScaledVector(t2, Math.sin(a)).normalize();
+}
+
 const instM = new THREE.Matrix4();
 const instP = new THREE.Vector3();
 const instQ = new THREE.Quaternion();
 const instS = new THREE.Vector3();
 
 function dentBolts(inst: THREE.InstancedMesh, d: Dent): void {
+  if (d.scuffOnly) return;
   let moved = false;
   for (let i = 0; i < inst.count; i++) {
     inst.getMatrixAt(i, instM);
@@ -105,7 +175,7 @@ function dentBolts(inst: THREE.InstancedMesh, d: Dent): void {
     const dist = instP.distanceTo(d.center);
     if (dist >= d.radius) continue;
     const x = dist / d.radius;
-    instP.addScaledVector(d.dir, -d.depth * (1 - x * x) * (1 - x * x));
+    instP.addScaledVector(d.dir, -Math.min(d.depth, MAX_CUMULATIVE_DEPTH_M) * (1 - x * x) * (1 - x * x));
     inst.setMatrixAt(i, instM.compose(instP, instQ, instS));
     moved = true;
   }
@@ -130,20 +200,40 @@ function partMeshes(kit: KitPart): THREE.Object3D[] {
   return out;
 }
 
+/** Applies one dent (scene-space point and outward normal) to every dentable mesh of the part. */
+function markPart(kit: KitPart, wp: THREE.Vector3, wn: THREE.Vector3, spec: Omit<Dent, 'center' | 'dir'>): void {
+  for (const o of partMeshes(kit)) {
+    o.updateWorldMatrix(true, false);
+    inv.copy(o.matrixWorld).invert();
+    const center = wp.clone().applyMatrix4(inv);
+    nrmMat.getNormalMatrix(inv);
+    const dir = wn.clone().applyMatrix3(nrmMat).normalize();
+    const d: Dent = { center, dir, ...spec };
+    const inst = o as THREE.InstancedMesh;
+    if (inst.isInstancedMesh) dentBolts(inst, d);
+    else dentMesh(o as THREE.Mesh, d);
+  }
+}
+
+/** Views that receive physics dents in telemetry, and the last dent seq each has drawn. */
+const physical = new WeakMap<RobotKitView, number>();
+
 /**
- * Dent and mark a part. `worldPoint` and `normal` are in scene space (the three.js world, not
- * the physics frame); energy in joules. The normal may point either way; it is flipped to
- * face out of the part.
+ * Mark a part for an impact. `worldPoint` and `normal` are in scene space (the three.js world, not
+ * the physics frame); energy in joules. The normal may point either way; it is flipped to face out
+ * of the part. With physics dents streaming (syncDents) this only scuffs and flinches the eyes;
+ * otherwise (harnesses, the showroom puppet) it also dents by energy, as the kit always did.
  */
 export function applyImpact(view: RobotKitView, partId: string, worldPoint: Vec3 | THREE.Vector3, normal: Vec3 | THREE.Vector3, energyJ: number): void {
   const kit = view.parts.get(partId);
   if (!kit || !(energyJ >= MIN_VISIBLE_J)) return;
   noteHit(view, partId, energyJ);
+  const scuffOnly = physical.has(view);
   const soft = softness(kit);
   const e10 = energyJ / 10;
-  const depth = energyJ < MIN_DENT_J ? 0 : Math.min(MAX_DEPTH_M, DEPTH_K * Math.sqrt(e10) * soft);
-  const radius = THREE.MathUtils.clamp(RADIUS_K * Math.cbrt(e10), MIN_RADIUS_M, MAX_RADIUS_M);
-  const scorch = Math.min(1, energyJ / SCORCH_J);
+  const depth = scuffOnly || energyJ < MIN_DENT_J ? 0 : Math.min(MAX_DEPTH_M, DEPTH_K * Math.sqrt(e10) * soft);
+  const radius = scuffOnly ? SCUFF_RADIUS_M : THREE.MathUtils.clamp(RADIUS_K * Math.cbrt(e10), MIN_RADIUS_M, MAX_RADIUS_M);
+  const scorch = scuffOnly ? 0 : Math.min(1, energyJ / SCORCH_J);
   const wp = toV(worldPoint);
   const wn = toV(normal).normalize();
   const host = kit.state.attached ? kit.attached : kit.debris;
@@ -151,19 +241,48 @@ export function applyImpact(view: RobotKitView, partId: string, worldPoint: Vec3
   host.updateWorldMatrix(true, true);
   const centreW = new THREE.Box3().setFromObject(kit.state.attached ? kit.content : (kit.debrisContent ?? kit.content)).getCenter(new THREE.Vector3());
   if (wn.dot(wp.clone().sub(centreW)) < 0) wn.negate();
-  for (const o of partMeshes(kit)) {
-    o.updateWorldMatrix(true, false);
-    inv.copy(o.matrixWorld).invert();
-    const center = wp.clone().applyMatrix4(inv);
-    nrmMat.getNormalMatrix(inv);
-    const dir = wn.clone().applyMatrix3(nrmMat).normalize();
-    const d: Dent = { center, dir, depth, radius, scorch };
-    const inst = o as THREE.InstancedMesh;
-    if (inst.isInstancedMesh) dentBolts(inst, d);
-    else dentMesh(o as THREE.Mesh, d);
-  }
-  kit.obj.wear = Math.min(1, kit.obj.wear + energyJ / 4000);
+  markPart(kit, wp, wn, { depth, radius, scorch, scuffOnly });
+  kit.obj.wear = Math.min(1, kit.obj.wear + energyJ / (scuffOnly ? 12000 : 4000));
   if (kit.debrisObj) kit.debrisObj.wear = kit.obj.wear;
+}
+
+/**
+ * One physical dent (src/physics/damage) on the view. `boost` is the presentation multiplier
+ * (DENT_VISUAL_BOOST while settings().dentBoost, else 1). Metal dents get a touch of scorch at the
+ * centre; polycarbonate whitens; UHMW gouges pale; carbon cracks along a chipped line.
+ */
+export function applyDent(view: RobotKitView, dent: DentTelemetry, boost = 1): void {
+  const kit = view.parts.get(dent.part);
+  if (!kit) return;
+  const host = kit.state.attached ? kit.attached : kit.debris;
+  if (!host) return;
+  host.updateWorldMatrix(true, true);
+  const wp = new THREE.Vector3(dent.pos[0], dent.pos[1], dent.pos[2]).applyMatrix4(host.matrixWorld);
+  const wn = new THREE.Vector3(dent.normal[0], dent.normal[1], dent.normal[2]).transformDirection(host.matrixWorld);
+  const crack = dent.mode === 'crack' || dent.cracked;
+  const depth = dent.depthM * boost;
+  const radius = dent.radiusM * Math.min(DENT_RADIUS_BOOST_MAX, Math.sqrt(boost));
+  const scorch = dent.mode === 'dent' ? Math.min(0.35, dent.depthM * 25) : 0;
+  markPart(kit, wp, wn, { depth, radius, scorch, whiten: dent.whiten, crack });
+  kit.obj.wear = Math.min(1, kit.obj.wear + dent.depthM * 6 + (crack ? 0.08 : 0));
+  if (kit.debrisObj) kit.debrisObj.wear = kit.obj.wear;
+}
+
+/**
+ * Applies the physics dents in a telemetry frame that this view has not drawn yet (each seq once:
+ * replays and repeated frames draw nothing new). Marks the view as physics-driven, so applyImpact
+ * stops denting by energy.
+ */
+export function syncDents(view: RobotKitView, dents: readonly DentTelemetry[] | undefined): void {
+  if (!dents) return;
+  let last = physical.get(view) ?? 0;
+  const boost = settings().dentBoost ? DENT_VISUAL_BOOST : 1;
+  for (const d of dents) {
+    if (d.seq <= last) continue;
+    applyDent(view, d, boost);
+    last = d.seq;
+  }
+  physical.set(view, last);
 }
 
 // ---------------------------------------------------------------- state and detach

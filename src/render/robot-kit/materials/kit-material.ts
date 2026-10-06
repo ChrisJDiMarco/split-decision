@@ -183,6 +183,11 @@ export function createKitMaterial({ skin, flavor, atlas, gloveColor }: KitMateri
   const scratch = lines.mul(smoothstep(0.62, 0.95, density.add(U.scratches.mul(0.3)).add(oWear.mul(0.35)).add(dmg.x.mul(1.3))));
   col = mix(col, U.bare, scratch.mul(0.7));
 
+  // Stress whitening from physical dents (aDamage.w): crazed polycarbonate, gouged UHMW and the fibre
+  // fuzz along a carbon crack go pale and matte.
+  const craze = clamp(dmg.w.mul(float(0.75).add(chipN.mul(0.5))), 0.0, 1.0);
+  col = mix(col, vec3(0.84, 0.85, 0.86), craze.mul(0.6));
+
   // Grime in cavities, vertical streaks and battle wear.
   const gN = fbm01(ps.mul(4.5), 3);
   const drip = smoothstep(0.55, 0.95, mx_noise_float(vec3(ps.x.mul(20), ps.y.mul(20), ps.z.mul(1.4))).mul(0.5).add(0.5));
@@ -214,6 +219,8 @@ export function createKitMaterial({ skin, flavor, atlas, gloveColor }: KitMateri
   metal = mix(metal, float(0.15), clamp(dust, 0.0, 0.8));
   rough = mix(rough, float(0.95), scorch);
   metal = mix(metal, float(0.05), scorch);
+  rough = mix(rough, float(0.8), craze.mul(0.8));
+  metal = mix(metal, float(0.05), craze.mul(0.6));
 
   const m = new THREE.MeshPhysicalNodeMaterial();
   m.name = `kit-${flavor}-${skin.id}`;

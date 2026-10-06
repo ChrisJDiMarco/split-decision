@@ -1,24 +1,30 @@
-// Damage system (post-step). Order inside one physics step:
-//   impacts    contacts → episodes → 'impact' / 'cage' events, part damage, joint wounds, breaks
-//   overload   gear trains back-driven past 2× stall lose health, may seize
-//   every SLOW_STRIDE steps:
-//     hydraulics   punctures leak, fluid drains, pressure falls
-//     heat/smoke   part heat from its joints, smoke from heat and wounds
-//     ko           head / down / power / disabled
-// Telemetry adds vent points (world position and velocity of each smoking or leaking part's smokePoint).
+// Damage system. Order inside one physics step:
+//   pre (after the motor model)
+//     drives      faulted drives give no torque, slipping gears give at most their cap, bends ramp in
+//   post
+//     impacts     contacts → strike / push / pair groups → 'impact' / 'cage' events, shell work → dents,
+//                 cracks and part damage, punctures, housing faults, breaks; strikes arm load paths
+//     joint loads gear, end-stop and bearing loads on armed joints → wear, seizes, slips, bends, overruns
+//     every SLOW_STRIDE steps:
+//       hydraulics   punctures leak, fluid drains, pressure falls
+//       heat/smoke   part heat from its joints, smoke from heat and wounds
+//       ko           head / down / power / disabled
+// Telemetry adds vent points (world position and velocity of each smoking or leaking part's smokePoint),
+// each joint's bend, fault and remaining torque fraction, and the most recent physical dents.
+// docs/design/strike-power.md §3.2 and §4 describe the model; thresholds are PROVISIONAL (constants.ts).
 import type { PartTelemetry, RobotTelemetry } from '../../core/protocol';
 import type { Vec3 } from '../../core/types';
 import type { RobotRuntime, SimContext, SimSystem } from '../sim-context';
 import { SLOW_STRIDE } from './constants';
 import { heatSmokeStep, hydraulicsStep } from './fluids';
 import { impactStep } from './impacts';
+import { drivePre, jointLoadStep, torqueFraction } from './joint-loads';
 import { koStep } from './ko';
 import { buildDamageState, type DamageState, type PartInfo } from './state';
-import { overloadStep } from './wear';
 
 export { detachPart } from './detach';
-export { damagePoints } from './wear';
-export type { DamageState } from './state';
+export { DAMAGE_TUNING } from './constants';
+export type { DamageLedger, DamageState } from './state';
 
 /** Parts venting less than this get no vent point in telemetry. */
 const VENT_SMOKE_MIN = 0.005;
@@ -58,10 +64,13 @@ export const damageSystem: SimSystem = {
   init(ctx) {
     states.set(ctx, buildDamageState(ctx));
   },
+  pre(ctx) {
+    drivePre(ctx, damageState(ctx));
+  },
   post(ctx) {
     const st = damageState(ctx);
     impactStep(ctx, st);
-    overloadStep(ctx, st);
+    jointLoadStep(ctx, st);
     if (ctx.tick % SLOW_STRIDE === 0) {
       const dt = ctx.dt * SLOW_STRIDE;
       hydraulicsStep(st, dt);
@@ -77,5 +86,14 @@ export const damageSystem: SimSystem = {
       const info = rd.parts.get(p.id);
       if (info) vent(ctx, st, info, p);
     }
+    // out.joints is built in robot.joints order (systems/telemetry.ts).
+    out.joints.forEach((jt, i) => {
+      const m = rd.mech[i];
+      if (!m || jt.name !== robot.joints[i].name) return;
+      jt.bend = m.bendRad;
+      jt.fault = m.faultUntil >= ctx.tick;
+      jt.torqueFraction = torqueFraction(ctx, rd, i);
+    });
+    out.dents = rd.dents.map((d) => ({ seq: d.seq, part: d.part, pos: d.pos, normal: d.normal, depthM: d.depthM, radiusM: d.radiusM, mode: d.mode, cracked: d.cracked, whiten: d.whiten }));
   },
 };

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { damageState, detachPart } from '../../src/physics/damage';
 import { DESIGNS } from '../../src/robots/designs';
-import { bodyPos, drain, fireRam, geomPos, makeRig, mj, ofKind, step } from './helpers';
+import { bodyPos, drain, fireRam, fireRamAt, geomPos, makeRig, mj, ofKind, step } from './helpers';
 
 const SETTLE_STEPS = 500;
 
-/** Fires a ram at the Bruiser's (corner 0) head from behind, above the torso's top edge. */
-function hitHead(massKg: number, speed: number) {
-  const ctx = makeRig({ rams: [{ name: 'ram', massKg, halfSize: 0.12 }] });
+/** Fires a ram at corner 0's head (the Bruiser by default) from behind, above the torso's top edge. */
+function hitHead(massKg: number, speed: number, design = 'bruiser') {
+  const ctx = makeRig({ designs: [design, 'striker'], rams: [{ name: 'ram', massKg, halfSize: 0.12 }] });
   step(ctx, SETTLE_STEPS);
   drain(ctx);
   const head = damageState(ctx).robots[0].parts.get('head')!;
@@ -77,16 +77,28 @@ describe('impacts', () => {
     expect(head.part.hp).toBeGreaterThan(0.99);
   });
 
-  it('a mid hit below the break impulse damages the head and neck but leaves it on', () => {
+  it('a mid hit below the break impulse leaves an AR500 head untouched but dents a polycarbonate one', () => {
     // A p90 fight strike (~40-50 N·s, tools/fight-sim.ts) against a 75 N·s break threshold.
     const { ctx, head, events } = hitHead(12, 5);
     const hit = ofKind(events, 'impact').find((e) => e.part === 'head')!;
     const neck = ctx.robots[0].joints.find((j) => j.name === 'neck_yaw')!;
-    console.info(`[mid hit] 12 kg @ 5 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s, head hp ${head.part.hp.toFixed(3)}, neck health ${neck.health.toFixed(3)}, slop ${neck.slop.toFixed(4)} rad`);
+    console.info(`[mid hit] Bruiser, 12 kg @ 5 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s, work ${hit.workJ?.toFixed(0)} J, peak ${((hit.peakForceN ?? 0) / 1000).toFixed(1)} kN, head hp ${head.part.hp.toFixed(3)}, neck health ${neck.health.toFixed(3)}`);
     expect(ofKind(events, 'detach')).toHaveLength(0);
-    expect(head.part.hp).toBeLessThan(0.99); // a p90 strike dents the head a few percent
-    expect(neck.health).toBeLessThan(0.99);
-    expect(neck.slop).toBeGreaterThan(0);
+    // 4 mm AR500 yields at ~35 kN: a 12 kg ram at 5 m/s leaves no mark on the plate.
+    expect(head.part.hp).toBe(1);
+    expect(hit.dent).toBeUndefined();
+
+    // A blow of that class on SAVATE's 2.5 mm polycarbonate chest (yield ~0.6 kN, ~4 J elastic) dents and whitens it.
+    const pc = makeRig({ designs: ['striker', 'savate'], rams: [{ name: 'ram', massKg: 6, halfSize: 0.06 }] });
+    step(pc, SETTLE_STEPS);
+    drain(pc);
+    const torso = damageState(pc).robots[1].parts.get('torso')!;
+    expect(fireRamAt(pc, 'ram', geomPos(pc, torso.part.geoms[0]), [1, 0, 0], 6)).toBe(true); // SAVATE faces −x: its chest
+    step(pc, 200);
+    const pcHit = ofKind(drain(pc), 'impact').find((e) => e.part === 'torso');
+    console.info(`[mid hit] SAVATE chest, 6 kg @ 6 m/s: work ${pcHit?.workJ?.toFixed(0)} J, dent ${pcHit?.dent ? `${pcHit.dent.mode} ${(pcHit.dent.depthM * 1000).toFixed(1)} mm` : 'none'}, torso hp ${torso.part.hp.toFixed(3)}`);
+    expect(pcHit?.dent?.mode).toBe('whiten');
+    expect(torso.part.hp).toBeLessThan(1);
   });
 
   it('debris poses are current the moment a part detaches (a frame can go out before the next step)', () => {
@@ -154,7 +166,7 @@ describe('impacts', () => {
     expect(hitRobot).toBe(true);
     expect(struck.length).toBeGreaterThan(0);
     expect(onCanvas).toBe(true);
-    expect(p[2]).toBeGreaterThan(0);
+    expect(p[2]).toBeGreaterThan(-0.005); // resting on the canvas (the head's origin is its base)
     expect(p[2]).toBeLessThan(0.35);
     expect(speed).toBeLessThan(0.2);
     expect(ofKind(events, 'ko')).toContainEqual({ kind: 'ko', corner: 0, reason: 'head' });

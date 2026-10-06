@@ -4,6 +4,11 @@
 // throws a short bright spark spray; the heaviest hits fling armor flecks. Tiny touches produce
 // nothing. Heavy hits knock bolts loose; bodies slamming the canvas and hard foot plants raise
 // dust (and a dust ring when it's heavy); detached parts shed their fasteners in a burst.
+// Physical damage reads by material and cause (docs/design/strike-power.md §4.7): a cracked carbon
+// panel throws dark fibre, a gouged UHMW shell sheds pale shavings, a polycarbonate crack throws
+// flakes and a pale puff; at the joint itself a stripped gear sprays sparks and chips, a seize clacks
+// with a few, a bent shaft crunches out flecks and grit, a hyperextension snaps with a bright flash, a
+// struck drive housing sparks and puffs dark smoke, a blown seal mists.
 import * as THREE from 'three/webgpu';
 import type { SimEvent } from '../../core/protocol';
 import { FLOOR_Y, randomInCone, range, toWorld, type Rng } from './coords';
@@ -60,8 +65,95 @@ export function routeEvent(e: SimEvent, fx: EffectSystems, rng: Rng, tel?: reado
       fx.sparks.burst(P, energy, { countScale: CAGE_SPARK_SCALE, normal: N.set(-P.x, 0, -P.z).normalize() });
       break;
     }
+    case 'joint':
+      jointEffect(e, fx, rng);
+      break;
     default:
-      break; // joint / getup / ko have no particle effect of their own
+      break; // getup / ko have no particle effect of their own
+  }
+}
+
+/** Effect "energy" (J, the spark and flash scales) for a joint failure at severity 1. */
+export const JOINT_FX_J: Record<string, number> = { strip: 260, seize: 150, slip: 90, hyperextension: 220, fault: 110, wear: 40 };
+
+/**
+ * A joint failure at the joint (e.pos), by what failed. Thermal cooking and lost parts have their
+ * own effects (smoke from telemetry, the detach burst); events without a position (the motor model's
+ * thermal limp) have none.
+ */
+export function jointEffect(e: Extract<SimEvent, { kind: 'joint' }>, fx: EffectSystems, rng: Rng): void {
+  if (!e.pos || !e.cause || !e.failure || e.cause === 'thermal' || e.cause === 'detach') return;
+  if (e.failure === 'wear' && e.state === 'ok') return;
+  toWorld(e.pos, P);
+  const sev = Math.min(3, Math.max(1, e.severity ?? 1));
+  D.copy(UP);
+  switch (e.failure) {
+    case 'strip':
+    case 'seize':
+    case 'slip':
+    case 'wear': {
+      const energy = JOINT_FX_J[e.failure] * sev;
+      fx.sparks.burst(P, energy, { normal: randomInCone(rng, UP, 1.4, N) });
+      const chips = e.failure === 'strip' ? 6 : e.failure === 'seize' ? 3 : e.failure === 'slip' ? 2 : 0;
+      if (chips) fx.debris.throw('chip', chips, P, D, 2.2, 1.3);
+      if (e.failure !== 'wear') fx.flash.flash(P, energy * 0.35);
+      return;
+    }
+    case 'bend':
+      // A crunch: flecks and grit out of the bearing, no sparks.
+      fx.debris.throw('chip', Math.round(3 + 2 * sev), P, D, 1.6, 1.4);
+      for (let i = 0; i < 4; i++) {
+        randomInCone(rng, UP, 1.2, V).multiplyScalar(range(rng, 0.4, 1.1));
+        fx.smoke.emit(P, V, { life: range(rng, 0.5, 0.9), size: range(rng, 0.03, 0.06), growth: 0.25, opacity: 0.22, dark: 0.3, buoyancy: 0.1, drag: 5, glow: 0, tint: 0.4 }, 0.02);
+      }
+      return;
+    case 'hyperextension':
+      fx.flash.flash(P, JOINT_FX_J.hyperextension * sev);
+      fx.contact.flash(P, randomInCone(rng, UP, 1.5, N), 0.9, 0.12);
+      fx.sparks.burst(P, 60 * sev, { countScale: 0.5 });
+      fx.debris.throw('chip', 3, P, D, 2.0, 1.4);
+      return;
+    case 'fault':
+      fx.sparks.burst(P, JOINT_FX_J.fault * sev, { countScale: 0.7, normal: randomInCone(rng, UP, 1.3, N) });
+      fx.smoke.smokePuff(P, ZERO, 0.3, 0.7, 0);
+      return;
+    case 'seal':
+      for (let i = 0; i < 3; i++) fx.smoke.smokePuff(P, ZERO, 0.35, 0, 0);
+      return;
+    default:
+      return;
+  }
+}
+
+/** Flecks off a shell a hit dented, cracked or gouged, by material. Metal sparks come with `metal`. */
+export function shellFlecks(e: Extract<SimEvent, { kind: 'impact' }>, fx: EffectSystems, rng: Rng): void {
+  const dent = e.dent;
+  if (!dent) return;
+  const size = Math.min(1, dent.depthM / 0.012 + dent.radiusM / 0.12);
+  // Thrown back off the struck surface, toward the striker.
+  D.copy(N).negate().addScaledVector(UP, 0.4).normalize();
+  switch (dent.mode) {
+    case 'crack':
+      fx.debris.throw('fibre', Math.round(4 + 8 * size), P, D, 1.8 + 1.5 * size, 1.2);
+      return;
+    case 'gouge':
+      fx.debris.throw('shaving', Math.round(3 + 6 * size), P, D, 1.4 + size, 1.3);
+      return;
+    case 'whiten': {
+      if (dent.cracked) fx.debris.throw('flake', Math.round(3 + 5 * size), P, D, 1.6 + size, 1.2);
+      basis(N);
+      for (let i = 0; i < 3 + Math.round(4 * size); i++) {
+        const a = rng() * Math.PI * 2;
+        const v = 0.6 + 1.2 * size;
+        V.copy(T1).multiplyScalar(Math.cos(a) * v).addScaledVector(T2, Math.sin(a) * v).addScaledVector(N, -0.3 * v);
+        fx.smoke.emit(P, V, { life: range(rng, 0.4, 0.8), size: range(rng, 0.03, 0.06), growth: 0.3, opacity: 0.25, dark: 0, buoyancy: 0.1, drag: 6, glow: 0, tint: 1 }, 0.02);
+      }
+      return;
+    }
+    case 'dent':
+      // Bare metal on metal already sparks; a dented aluminium frame sheds a couple of bright flakes.
+      if (!e.metal) fx.debris.throw('chip', Math.round(1 + 3 * size), P, D, 1.5, 1.3);
+      return;
   }
 }
 
@@ -76,6 +168,7 @@ function impact(e: Extract<SimEvent, { kind: 'impact' }>, fx: EffectSystems, rng
   const strength = strikeStrength(e, tel);
   if (floorHit) canvasDust(e, fx);
   if (strike) strikeMarks(e, strength, fx, rng);
+  if (e.dent) shellFlecks(e, fx, rng);
   // Bare metal on metal throws sparks (a landed strike only when it's more than a touch).
   if (e.metal && e.energyJ >= SPARK_MIN_ENERGY_J && (!strike || hitStrength(e.energyJ, e.impulseNs, e.speed) >= HIT.MIN)) {
     fx.sparks.burst(P, e.energyJ, { normal: N });
@@ -186,3 +279,4 @@ const T1 = new THREE.Vector3();
 const T2 = new THREE.Vector3();
 const POS = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const ZERO = new THREE.Vector3(0, 0, 0);

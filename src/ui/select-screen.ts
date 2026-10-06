@@ -79,11 +79,12 @@ export class SelectScreen {
   }
 
   /**
-   * Settings: MINDS (the global mind override), FAIR MODE, and the presentation toggles. Only MINDS
-   * and FAIR MODE change who decides or how fast; physics never reads any of them.
+   * Settings: MINDS (the global mind override), FAIR MODE, and the presentation toggles (sound, oil,
+   * the 2× dent boost). Only MINDS and FAIR MODE change who decides or how fast; physics never reads
+   * any of them.
    */
   private buildSettings(): HTMLElement {
-    const toggle = (key: 'oilEffects' | 'soundOn' | 'fairMode', label: string, title?: string) => {
+    const toggle = (key: 'oilEffects' | 'soundOn' | 'fairMode' | 'dentBoost', label: string, title?: string) => {
       const input = h('input', { type: 'checkbox', class: 'sel-toggle-input' }) as HTMLInputElement;
       input.checked = settings()[key];
       input.addEventListener('change', () => setSetting(key, input.checked));
@@ -92,18 +93,20 @@ export class SelectScreen {
     const sound = toggle('soundOn', 'SOUND');
     const oil = toggle('oilEffects', 'OIL SPILLS & HISS');
     const fair = toggle('fairMode', 'FAIR MODE', 'The human player feels Jev\'s 0.3 s reaction delay instead of 0.05 s');
+    const dents = toggle('dentBoost', 'DENTS 2× (VISUAL)', 'Presentation only: physical dents are drawn about twice as deep so they read on screen. Physics is unchanged.');
     const minds = mindSwitch(GLOBAL_MINDS, (g) => GLOBAL_LABEL[g], (g) => setSetting('minds', g), 'Global minds');
     this.syncSettings = () => {
       const s = settings();
       sound.input.checked = s.soundOn;
       oil.input.checked = s.oilEffects;
       fair.input.checked = s.fairMode;
+      dents.input.checked = s.dentBoost;
       minds.set(s.minds);
     };
     this.syncSettings();
     return h('div', 'sel-settings-block',
       h('div', 'sel-minds-global', h('span', 'sel-settings-label', 'MINDS'), minds.el),
-      h('div', 'sel-settings-row', sound.el, oil.el, fair.el),
+      h('div', 'sel-settings-row', sound.el, oil.el, fair.el, dents.el),
     );
   }
 

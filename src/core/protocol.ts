@@ -105,16 +105,43 @@ export type SimEvent =
       kind: 'impact';
       pos: Vec3;
       normal: Vec3;
+      /**
+       * One strike is one event (docs/design/strike-power.md §3.2): every contact between the two
+       * robots in the first 30 ms of a strike sums into it. Contact that keeps pushing after that window
+       * comes as its own event with push = true.
+       */
       impulseNs: number;
       speed: number; // closing speed at the contact, m/s
+      /** Presentation energy: ½·m_eff·v² of the first contact (hit feel, camera, audio scales). */
       energyJ: number;
       striker: Corner | null; // null = floor / cage
       victim: Corner | null;
       part: string | null; // victim part id
       metal: boolean; // both sides metal: sparks + clang
+      // ---- damage overhaul (optional so older recordings and fixtures stay valid)
+      workJ?: number; // measured absorbed work ∫F·v dt over the episode, J (what the damage model uses)
+      peakForceN?: number;
+      strikerPart?: string | null; // the striking part (fist_r, shin_l, ...)
+      clean?: boolean; // a striking surface landing at clean-hit speed on the other robot
+      push?: boolean; // contact after a strike's window: pushing, scored as a push
+      dent?: ImpactDent; // the permanent mark it left on the struck part, if any
     }
   | { kind: 'detach'; corner: Corner; part: string; debrisBody: number; pos: Vec3; vel: Vec3 }
-  | { kind: 'joint'; corner: Corner; joint: string; health: number; state: JointState }
+  | {
+      kind: 'joint';
+      corner: Corner;
+      joint: string;
+      health: number;
+      state: JointState;
+      // ---- damage overhaul (optional: thermal limp from the motor model carries none of them)
+      cause?: JointCause;
+      failure?: JointFailure;
+      pos?: Vec3; // the joint's anchor, world (play effects and sound here)
+      severity?: number; // load / rating at the failure (≥ 1), or how far past onset for wear
+      bendAxis?: Vec3; // world, for bends: the axis the shaft bent about
+      role?: JointRole; // was this robot hit (victim) or hurting itself (striker)?
+      by?: { corner: Corner | null; part: string | null; skill: string | null }; // whose strike it was
+    }
   | { kind: 'fall'; corner: Corner }
   | { kind: 'getup'; corner: Corner }
   | { kind: 'ko'; corner: Corner; reason: 'head' | 'down' | 'power' | 'disabled' }
@@ -140,6 +167,44 @@ export type RefereeEvent =
 export type RefereeLogEvent = RefereeEvent & { seq: number; time: number };
 
 export type JointState = 'ok' | 'degraded' | 'limp' | 'seized';
+
+/**
+ * Why a joint was hurt (docs/design/strike-power.md §4.3): its gear train overloaded, its output
+ * bearing side-loaded, its end stop overrun (hyperextension), its drive housing struck, its windings
+ * cooked, or its part lost.
+ */
+export type JointCause = 'gear' | 'bearing' | 'hyperextension' | 'housing' | 'thermal' | 'detach';
+/**
+ * What the damage did: wear (health only), or a failure by mechanism. A planetary jams (seize) or
+ * strips (limp); a QDD sheds a tooth and slips above a torque cap; a bent shaft binds; an overrun stop
+ * hyperextends; a struck housing faults the drive for a moment; a cylinder seal blows.
+ */
+export type JointFailure = 'wear' | 'seize' | 'strip' | 'slip' | 'bend' | 'hyperextension' | 'fault' | 'seal' | 'detach';
+export type JointRole = 'victim' | 'striker' | 'none';
+
+/** How a shell took a hit: metal dents, polycarbonate whitens, UHMW gouges, carbon cracks. */
+export type DentMode = 'dent' | 'whiten' | 'gouge' | 'crack';
+
+/** A permanent mark a hit left on a shell (physics: src/physics/damage/shell.ts). */
+export interface ImpactDent {
+  part: string;
+  mode: DentMode;
+  depthM: number; // physical permanent depth (springback taken out)
+  radiusM: number;
+  cracked: boolean;
+}
+
+/**
+ * A physical dent, in the struck part's own frame (the body frame the renderer's part group uses), so
+ * it lands where the hit landed however the part has moved since. Telemetry carries the most recent
+ * few with increasing seq; the renderer applies each seq once.
+ */
+export interface DentTelemetry extends ImpactDent {
+  seq: number;
+  pos: Vec3;
+  normal: Vec3; // out of the shell
+  whiten: number; // 0..1 stress whitening / fibre fuzz around it
+}
 
 /**
  * Where the head is looking (src/physics/systems/gaze.ts). track: the opponent's head; threat: an
@@ -190,6 +255,17 @@ export interface JointTelemetry {
   state: JointState;
   tempC: number;
   torqueFrac: number; // |torque| / available torque
+  // ---- damage overhaul (optional so hand-built telemetry stays valid; the physics worker fills them)
+  /** Permanent bend of the joint's shaft, rad (the limb is visibly kinked; punches land off-line). */
+  bend?: number;
+  /** The drive is faulted out right now (a housing hit): no torque until it re-enables. */
+  fault?: boolean;
+  /**
+   * Share of the motor's peak torque this joint can still give after damage (health, a slipping
+   * gear's cap, a fault), 0..1, before speed and heat. A guard sags when this drops below what holding
+   * it up needs.
+   */
+  torqueFraction?: number;
 }
 
 export interface RobotTelemetry {
@@ -225,6 +301,8 @@ export interface RobotTelemetry {
   reads?: FeintRead[]; // the last few feints this fighter threw and how he answered them (newest last)
   habits?: Habit[]; // his habits this fight, strongest first
   referee?: RefereeTelemetry; // referee break state (src/physics/systems/referee.ts)
+  /** The most recent physical dents on this robot (src/physics/damage), oldest first, by seq. */
+  dents?: DentTelemetry[];
 }
 
 // ---------------------------------------------------------------- fighter IQ (src/physics/openings)

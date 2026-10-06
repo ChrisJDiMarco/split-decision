@@ -222,6 +222,10 @@ const EVENT_CASES: Array<{ name: string; events: SimEvent[]; opts?: SceneOpts; f
   { name: 'ko', events: [{ kind: 'ko', corner: 1, reason: 'down' }] },
   { name: 'joint degraded', events: [{ kind: 'joint', corner: 0, joint: 'knee_l', health: 0.4, state: 'degraded' }] },
   { name: 'joint seized', events: [{ kind: 'joint', corner: 0, joint: 'knee_l', health: 0, state: 'seized' }] },
+  // Joint failures by cause, voiced at the joint (src/physics/damage/joint-loads.ts).
+  { name: 'gear strip at the joint', events: [{ kind: 'joint', corner: 0, joint: 'elbow_l', health: 0, state: 'limp', cause: 'gear', failure: 'strip', severity: 1.8, pos: [0.3, 0.2, 1.1], role: 'victim' }] },
+  { name: 'drive fault (housing hit)', events: [{ kind: 'joint', corner: 0, joint: 'elbow_l', health: 0.96, state: 'ok', cause: 'housing', failure: 'fault', severity: 1.3, pos: [0.3, 0.2, 1.1], role: 'victim' }] },
+  { name: 'bent shaft (bearing)', events: [{ kind: 'joint', corner: 0, joint: 'knee_l', health: 0.7, state: 'ok', cause: 'bearing', failure: 'bend', severity: 1.4, pos: [0.1, 0.1, 0.5], role: 'victim' }] },
   { name: 'footsteps (poses → footfall)', events: [], frames: true },
 ];
 

@@ -3,10 +3,11 @@
 // the ring to the struck part and covers any sample that hasn't loaded. Everything is physical:
 // bigger robots pitch down, harder hits get louder AND brighter (log curve), variants rotate with
 // small pitch/time jitter, and each hit is panned, distance-filtered and sent to the arena reverb.
+import type { JointFailure } from '../core/protocol';
 import type { MaterialId } from '../core/types';
 import type { AudioEngine } from './engine';
 import type { SampleBank, SampleGroup } from './samples';
-import { boom, cageRattle, clang, grind, powerDown, servoEffort, sizePitch, tear, thud, thump } from './sounds';
+import { boom, cageRattle, clang, grind, hissBurst, powerDown, servoEffort, sizePitch, tear, thud, thump, zap } from './sounds';
 
 // ---------------------------------------------------------------- physical mapping (pure)
 
@@ -266,6 +267,58 @@ export class Foley {
   /** Knocked out: the loser's servos spin down. */
   ko(massKg: number, where: Placement): void {
     powerDown(this.e, where.pan, massPitch(massKg), where.rate, where.at ?? this.e.now);
+  }
+
+  /**
+   * A joint failing by cause, voiced at the joint (docs/design/strike-power.md §4.7): stripped gear
+   * teeth crack and rattle, a jammed planetary clacks, a slipping tooth clunks, a bending shaft
+   * crunches, an overrun stop snaps, a struck drive zaps and its relay drops out, a seal hisses.
+   */
+  jointFailure(failure: JointFailure, severity: number, massKg: number, where: Placement): void {
+    const at = where.at ?? this.e.now;
+    const level = Math.max(0.35, Math.min(1, 0.5 + 0.2 * (severity - 1)));
+    const pitch = massPitch(massKg);
+    const bus = this.bus(where, 0.25);
+    const gain = hitGain(level) * MASTER_HIT;
+    const layers = (l: Layer[]) => this.layers(bus, l, { at, rate: where.rate, pitch, gain, lowpass: 14000 });
+    switch (failure) {
+      case 'strip':
+        grind(this.e, level, where.pan, at);
+        if (!layers([{ group: 'crack', gain: 0.8, pitch: 1.2 }, { group: 'metalMedium', gain: 0.6, pitch: 1.25 }, { group: 'tin', gain: 0.35, pitch: 1.4, delay: 0.08 }, { group: 'tin', gain: 0.22, pitch: 1.5, delay: 0.16 }])) {
+          clang(this.e, { material: 'steel', part: 'fist', level, pan: where.pan, rate: where.rate, at, out: bus });
+        }
+        return;
+      case 'seize':
+        grind(this.e, level, where.pan, at);
+        layers([{ group: 'metalLight', gain: 0.6, pitch: 1.3 }]);
+        return;
+      case 'slip':
+        thump(this.e, bus, level * 0.7, 140 * pitch * where.rate, 0.06 / where.rate, at);
+        layers([{ group: 'metalLight', gain: 0.45, pitch: 0.9 }]);
+        return;
+      case 'bend':
+        grind(this.e, level * 0.8, where.pan, at);
+        if (!layers([{ group: 'softMedium', gain: 0.6, lowpass: 2500 }, { group: 'plateLight', gain: 0.4, pitch: 0.8, lowpass: 3000 }])) thud(this.e, level * 0.6, where.pan, false, at, pitch);
+        return;
+      case 'hyperextension':
+        if (!layers([{ group: 'crack', gain: 1, pitch: 1.1 }, { group: 'metalMedium', gain: 0.5, pitch: 1.1 }])) clang(this.e, { material: 'steel', part: 'forearm', level, pan: where.pan, rate: where.rate, at, out: bus });
+        return;
+      case 'fault':
+        zap(this.e, level, where.pan, where.rate, at);
+        return;
+      case 'seal':
+        hissBurst(this.e, level, where.pan, where.rate, at);
+        return;
+      default:
+        grind(this.e, level * 0.6, where.pan, at);
+    }
+  }
+
+  /** A shell cracking under a hit (carbon delaminating, polycarbonate splitting): a dry snap on top of the hit. */
+  shellCrack(level: number, where: Placement): void {
+    const at = where.at ?? this.e.now;
+    const bus = this.bus(where, 0.2);
+    this.layers(bus, [{ group: 'crack', gain: 0.7, pitch: 1.35, lowpass: 9000 }], { at, rate: where.rate, pitch: 1, gain: hitGain(level) * MASTER_HIT, lowpass: 12000 });
   }
 
   /** A joint failing: grinding gears, and a hard clack when it seizes solid. */

@@ -1,23 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { MATERIALS } from '../../src/robots/catalog';
 import { damageState } from '../../src/physics/damage';
-import { damagePoints } from '../../src/physics/damage/wear';
-import type { Surface } from '../../src/physics/damage/state';
+import { shellResponse } from '../../src/physics/damage/dent';
+import { shellSurface, solidSurface, workShare } from '../../src/physics/damage/shell';
 import { drain, fireRamAt, geomPos, makeRig, ofKind, step } from './helpers';
 
-const surface = (id: keyof typeof MATERIALS, cushion = false): Surface => {
-  const m = MATERIALS[id];
-  return { brinell: m.brinell, yieldMPa: m.yieldMPa, sparks: m.sparks, cushion };
-};
-
 describe('rubber-soled feet', () => {
-  it('a kick into AR500 plate costs the rubber-soled foot about what it costs the plate', () => {
-    // Striker front kick into the Bruiser's chest: ~53 N·s, ~160 J (effective masses from the designs).
-    const foot = surface('rubber', true);
-    const plate = surface('ar500');
-    const onFoot = damagePoints(53, 160, plate, foot);
-    const onPlate = damagePoints(53, 160, foot, plate);
-    expect(onFoot).toBeLessThanOrEqual(1.5 * onPlate);
+  it('a kick into AR500 plate: the rubber sole soaks most of the work and the plate stays elastic', () => {
+    // Striker front kick into the Bruiser's chest: ~160 J, peak ~20 kN (the audit's heaviest kicks).
+    const sole = solidSurface('rubber');
+    const plate = shellSurface('ar500', 4);
+    const intoSole = workShare(sole, plate);
+    expect(intoSole).toBeGreaterThan(0.9); // the pad is the soft side of the pair
+    expect(shellResponse(plate, 160 * (1 - intoSole), 20e3)).toBeNull(); // 4 mm AR500: ~35 kN, ~38 J before it yields
+    expect(shellResponse(sole, 160 * intoSole, 20e3)).toBeNull(); // a cushion never dents
   });
 
   it('five hard hits on the foot leave the ankles working', () => {

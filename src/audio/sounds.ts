@@ -299,3 +299,57 @@ export function servoEffort(e: AudioEngine, pan: number, pitch = 1, rate = 1, at
   osc.start(t);
   osc.stop(t + dur * 1.4);
 }
+
+/** A drive faulting out: a short electrical buzz with a crackle, then the relay dropping out. */
+export function zap(e: AudioEngine, level: number, pan: number, rate = 1, at = e.now): void {
+  const dur = 0.18 / rate;
+  if (!e.claimVoice(dur + 0.15, false, at)) return;
+  const t = at;
+  const out = e.output(pan, 0.15);
+  const osc = e.ctx.createOscillator();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(118 * rate, t);
+  osc.frequency.linearRampToValueAtTime(96 * rate, t + dur);
+  const bp = e.ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1800 * rate;
+  bp.Q.value = 1.2;
+  const g = e.ctx.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(level * 0.22, t + 0.004);
+  g.gain.setTargetAtTime(0, t + dur * 0.6, dur / 5);
+  osc.connect(bp).connect(g).connect(out);
+  osc.start(t);
+  osc.stop(t + dur * 1.5);
+  const src = e.noiseSource(false, Math.random() * 2, t);
+  const hp = e.ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 3500 * rate;
+  const ng = e.ctx.createGain();
+  ng.gain.value = 0;
+  for (let i = 0; i < 6; i++) {
+    const ti = t + Math.random() * dur;
+    ng.gain.setValueAtTime(level * 0.5, ti);
+    ng.gain.setTargetAtTime(0, ti + 0.002, 0.004);
+  }
+  src.connect(hp).connect(ng).connect(out);
+  src.stop(t + dur * 1.5);
+  transient(e, out, level * 0.4, rate, t + dur); // the relay
+}
+
+/** A blown seal: a short hard hiss that tails off. */
+export function hissBurst(e: AudioEngine, level: number, pan: number, rate = 1, at = e.now): void {
+  const dur = 0.45 / rate;
+  if (!e.claimVoice(dur + 0.1, false, at)) return;
+  const t = at;
+  const out = e.output(pan, 0.3);
+  const src = e.noiseSource(false, Math.random() * 2, t);
+  const hp = e.ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 2400 * rate;
+  const g = e.ctx.createGain();
+  g.gain.setValueAtTime(level * 0.55, t);
+  g.gain.setTargetAtTime(0, t + dur * 0.3, dur / 3);
+  src.connect(hp).connect(g).connect(out);
+  src.stop(t + dur * 1.4);
+}

@@ -1,7 +1,7 @@
 // Standard vertex attributes for every kit geometry, so any two kit geometries can merge.
 //   aSurf   = (edge wear weight, cavity/grime, accent plate flag, per-plate variant)
 //   aDecal  = (u, v, decal kind, mask)            planar decal / accent-pattern coordinates
-//   aDamage = (scratch, scorch, dent depth 0..1, heat-tint memory)   written by applyImpact
+//   aDamage = (scratch, scorch, dent depth 0..1, stress whitening)   written by applyImpact / applyDent
 //   color   = vertex tint (cables, hoses, wires); white elsewhere
 import * as THREE from 'three/webgpu';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';

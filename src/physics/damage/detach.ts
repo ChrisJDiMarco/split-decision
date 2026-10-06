@@ -104,7 +104,7 @@ export function detachPart(ctx: SimContext, st: DamageState, info: PartInfo, imp
   const rd = st.robots[robot.corner];
   for (const p of going) {
     p.part.attached = false;
-    for (const i of p.jointIdx) makeLimp(ctx, rd.robot, i);
+    for (const i of p.jointIdx) makeLimp(ctx, rd.robot, i, st, { cause: 'detach', failure: 'detach', severity: 1, role: 'victim' });
   }
   const xpos = ctx.data.xpos as Float64Array;
   ctx.events.push({
