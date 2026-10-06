@@ -98,6 +98,8 @@ export interface PlanInput {
   lastSide: Side | null;
   /** The body's DCM now (a walk under way cannot stop short of it). */
   xi: P2;
+  /** Ring IQ: a walk toward the opponent ends at least this far from him (m; FOOTWORK_TUNING.walkEndM otherwise). */
+  walkEnd?: number;
 }
 
 /** What the swing leg's drive can do (from the motor model and the leg's mass). */
@@ -260,7 +262,7 @@ export class FootstepPlanner {
     const o = pin.opp;
     if (!o) return goal;
     const gap = Math.hypot(goal.x - o[0], goal.y - o[1]);
-    const back = FOOTWORK_TUNING.walkEndM - gap;
+    const back = Math.max(FOOTWORK_TUNING.walkEndM, pin.walkEnd ?? 0) - gap;
     const dx = goal.x - cur.x, dy = goal.y - cur.y;
     const d = Math.hypot(dx, dy);
     if (back <= 0 || d < 1e-6) return goal;
@@ -528,7 +530,99 @@ export class FootstepPlanner {
 
   private push(): Footstep {
     if (this.count >= this.steps.length) this.steps.push(newStep());
-    return this.steps[this.count++];
+    const s = this.steps[this.count++];
+    s.clipIdx = undefined;
+    return s;
+  }
+
+  /** The walk's arrival latch, for a caller that tries plans it may throw away (mocap picks). */
+  saveArrival(): StanceFrame | null {
+    return this.arrival;
+  }
+
+  restoreArrival(a: StanceFrame | null): void {
+    this.arrival = a;
+  }
+
+  /**
+   * Like plan(), with the footsteps `clip[from..to)` of a mocap pick (already placed and timed,
+   * balance/mocap-steps.ts) taken first, after any swing in the air; the plan then carries on from
+   * where they leave the feet toward the goal with the gait plan() chose (walk or step-drag), so
+   * the DCM reference runs to the goal and never brakes at the end of a clip.
+   */
+  planClip(pin: PlanInput, dcm: DcmPlan, clip: readonly Footstep[], from: number, to: number): void {
+    const T = FOOTWORK_TUNING;
+    const w = pin.omega;
+    const sw = pin.swing;
+    const stanceSide: Side | null = sw ? other(sw.side) : null;
+    const place: Record<Side, FootPlace> = {
+      l: sw?.side === 'l' ? sw.target : this.feet.feet.l.place,
+      r: sw?.side === 'r' ? sw.target : this.feet.feet.r.place,
+    };
+    const cur = frameOf(this.feet, place);
+    const goal = pin.goal ?? { x: cur.x, y: cur.y, heading: pin.bearing };
+    this.planned.x = goal.x;
+    this.planned.y = goal.y;
+    this.planned.heading = goal.heading;
+    const gait: GaitKind = this.gait === 'hold' ? 'drag' : this.gait;
+    this.count = 0;
+    this.next = 0;
+    dcm.clear();
+    dcm.add(pin.time, pin.cmpNow[0], pin.cmpNow[1]);
+    if (sw && stanceSide) {
+      const st = this.feet.feet[stanceSide].place;
+      const [cx, cy] = soleCmp(this.geo, stanceSide, st, 0.1);
+      dcm.add(Math.max(pin.time + 0.02, sw.land), cx, cy);
+    }
+    let lastSide: Side | null = sw ? sw.side : pin.lastSide;
+    let tEnd = sw ? sw.land : pin.time;
+    for (let i = from; i < to; i++) {
+      const c = clip[i];
+      const s = this.push();
+      s.side = c.side;
+      s.place = c.place;
+      s.lift = c.lift;
+      s.land = c.land;
+      s.cmp[0][0] = c.cmp[0][0];
+      s.cmp[0][1] = c.cmp[0][1];
+      s.cmp[1][0] = c.cmp[1][0];
+      s.cmp[1][1] = c.cmp[1][1];
+      s.clearance = c.clearance;
+      s.source = 'clip';
+      s.clipIdx = i;
+      place[c.side] = c.place;
+      lastSide = c.side;
+      tEnd = c.land;
+    }
+    // Carry on toward the goal from where the clip leaves the feet.
+    const end = frameOf(this.feet, place);
+    const pin2: PlanInput = { ...pin, time: tEnd, swing: null, fromRest: false, lastSide, doubleS: 0 };
+    const firstLift = tEnd + (gait === 'walk' ? T.walkDs / w : this.dragDs(pin) / w);
+    const dPos = Math.hypot(goal.x - end.x, goal.y - end.y), dYaw = Math.abs(wrapAngle(goal.heading - end.heading));
+    if (dPos > T.moveTol.pos || dYaw > T.moveTol.yaw) {
+      let ok = false;
+      if (gait === 'walk') ok = this.planWalk(pin2, place, null, firstLift, this.walkTarget(pin2, end, goal));
+      if (!ok) this.planDrag(pin2, place, null, firstLift, end, goal);
+    }
+    let lastPlace: Record<Side, FootPlace> = { l: sw?.side === 'l' ? sw.target : this.feet.feet.l.place, r: sw?.side === 'r' ? sw.target : this.feet.feet.r.place };
+    for (let i = 0; i < this.count; i++) {
+      const s = this.steps[i];
+      dcm.add(s.lift, s.cmp[0][0], s.cmp[0][1]);
+      dcm.add(s.land, s.cmp[1][0], s.cmp[1][1]);
+      lastPlace = { ...lastPlace, [s.side]: s.place };
+    }
+    this.endFrame = frameOf(this.feet, lastPlace);
+    const lp = lastPlace.l, rp = lastPlace.r;
+    this.final[0] = (lp.x + rp.x) / 2 + pin.shift[0];
+    this.final[1] = (lp.y + rp.y) / 2 + pin.shift[1];
+    const endT = this.count ? this.steps[this.count - 1].land : sw ? sw.land : pin.time;
+    this.finalTime = endT + T.finalDs / w;
+    dcm.add(this.finalTime, this.final[0], this.final[1]);
+    dcm.solve(w);
+    if (this.gait === 'hold' && this.count) {
+      this.gait = 'drag';
+      this.gaitSince = pin.time;
+    }
   }
 }
 

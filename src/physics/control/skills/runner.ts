@@ -83,6 +83,19 @@ export class SkillRunner {
     return true;
   }
 
+  /**
+   * End a blow in its recovery now: a combination starts its next step from here (the arms decay
+   * from where they are through the controller's inertializer). False outside a recovery.
+   */
+  handOff(env: SkillEnv): boolean {
+    const r = this.run;
+    if (!r || r.phase !== 'recover') return false;
+    this.lastEnd = 'chained';
+    r.def.end?.(env, r);
+    this.run = null;
+    return true;
+  }
+
   /** Keep a guard or clinch in its hold phase for another moment. */
   sustain(): void {
     const r = this.run;

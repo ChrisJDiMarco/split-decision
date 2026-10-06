@@ -86,6 +86,13 @@ export interface BalanceMetrics {
   gyroSatPeak: number;
   reserveAtTouchdown: number; // mean free momentum at touchdown (1 = empty rotor)
   reserveAtTouchdownMin: number;
+  // Mocap footwork (Phase 5).
+  clipLiftShare: number; // swings that were clip steps
+  clipMoveShare: number; // of the time with footsteps planned or a foot up, the share a clip drove
+  followLiftShare: number; // swings that were the planner's own, with the clip's clock following them
+  styleShare: number; // of the time on the feet, the share with the clip style on (incl. the guard idle)
+  picks: number;
+  fallbacks: number;
 }
 
 const legJoint = /^(hip|knee|ankle)_/;
@@ -123,6 +130,8 @@ export class BalanceRecorder {
   private reserves: number[] = [];
   private lastTouch = -1;
   private touch0 = -1;
+  private probe0: { lifts: number; clipLifts: number; followLifts: number; clipTime: number; moveTime: number; styleTime: number; picks: number; fallbacks: number } | null = null;
+  private upSeconds = 0;
   private closeM = 0;
   private closeS = 0;
   private timeTo13 = Infinity;
@@ -215,6 +224,9 @@ export class BalanceRecorder {
     }
     this.satPeak = Math.max(this.satPeak, c.gyro?.saturation ?? 0);
     if (this.touch0 < 0) this.touch0 = p.touchdowns;
+    // (?? 0: an engine from before Phase 5 has no mocap counters.)
+    if (!this.probe0) this.probe0 = { lifts: p.lifts, clipLifts: p.clipLifts ?? 0, followLifts: p.followLifts ?? 0, clipTime: p.clipTime ?? 0, moveTime: p.moveTime ?? 0, styleTime: p.styleTime ?? 0, picks: p.picks ?? 0, fallbacks: p.fallbacks ?? 0 };
+    this.upSeconds += ctx.dt * 2;
     if (this.lastTouch < 0) this.lastTouch = p.touchdowns;
     else if (p.touchdowns !== this.lastTouch) {
       this.reserves.push(p.reserveAtTouchdown);
@@ -281,6 +293,21 @@ export class BalanceRecorder {
       gyroSatPeak: this.satPeak,
       reserveAtTouchdown: rates.length ? rates.reduce((s, x) => s + x, 0) / rates.length : 1,
       reserveAtTouchdownMin: rates.length ? Math.min(...rates) : 1,
+      ...this.mocapShares(),
+    };
+  }
+
+  private mocapShares(): Pick<BalanceMetrics, 'clipLiftShare' | 'clipMoveShare' | 'followLiftShare' | 'styleShare' | 'picks' | 'fallbacks'> {
+    const p = this.c.probe, z = this.probe0;
+    if (!z) return { clipLiftShare: 0, clipMoveShare: 0, followLiftShare: 0, styleShare: 0, picks: 0, fallbacks: 0 };
+    const lifts = p.lifts - z.lifts, move = (p.moveTime ?? 0) - z.moveTime;
+    return {
+      clipLiftShare: lifts > 0 ? ((p.clipLifts ?? 0) - z.clipLifts) / lifts : 0,
+      clipMoveShare: move > 0 ? Math.min(1, ((p.clipTime ?? 0) - z.clipTime) / move) : 0,
+      followLiftShare: lifts > 0 ? ((p.followLifts ?? 0) - z.followLifts) / lifts : 0,
+      styleShare: this.upSeconds > 0 ? Math.min(1, ((p.styleTime ?? 0) - z.styleTime) / this.upSeconds) : 0,
+      picks: (p.picks ?? 0) - z.picks,
+      fallbacks: (p.fallbacks ?? 0) - z.fallbacks,
     };
   }
 }

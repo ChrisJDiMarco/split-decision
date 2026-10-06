@@ -19,6 +19,8 @@ export interface Footstep {
   cmp: [P2, P2];
   clearance: number;
   source: StepSource;
+  /** A clip footstep: its index in the mocap pick (balance/mocap-steps.ts). */
+  clipIdx?: number;
 }
 
 export type BalanceStateMode = 'steady' | 'absorb' | 'recover' | 'brace' | 'down' | 'rise';
@@ -34,8 +36,21 @@ export interface BalanceState {
   mode: BalanceStateMode;
   clipRate: number;
   clipSync: { hold: boolean; jumpTo?: number };
+  /**
+   * Steady on both feet: planted, slow (Euphoria's 0.3 m/s and 0.3 rad/s), the DCM on its plan inside
+   * the soles and the gyro in hand. What a kick waits for, and the referee's test for FIGHT.
+   */
+  steady: boolean;
+  /**
+   * An arm strike may start now, from the footing the body has (the pace stage): steady; or on two
+   * feet still moving with the DCM settled inside the soles; or from a planned step whose landing
+   * catches the DCM, the touchdown close (the blow lands with the foot). Never during a capture step.
+   */
   canStrike: boolean;
+  /** A leg may be lent to a kick now (steady, both soles flat, the gyro's reserve for the kick). */
   canKick: boolean;
+  /** Where the DCM will be at the touchdown of the swing in the air (single support); else the DCM. */
+  xiTouch: P2;
 }
 
 /** What the tools read every control tick (both modes fill it). */
@@ -51,8 +66,23 @@ export interface BalanceProbe {
   gait: string;
   /** Gyro momentum free at the last touchdown (1 = empty rotor). */
   reserveAtTouchdown: number;
+  /** Mocap footwork (Phase 5): swings that were clip steps, time with a clip driving the feet, time
+   *  with the clip style on, picks made and picks that fell back to the procedural steps. */
+  clipLifts: number;
+  clipTime: number;
+  /** Swings and time with the clip's clock following the planner's own steps (style only). */
+  followLifts: number;
+  followTime: number;
+  /** Time with footsteps planned or a foot in the air (the denominator of clipTime). */
+  moveTime: number;
+  styleTime: number;
+  picks: number;
+  fallbacks: number;
 }
 
 export function newProbe(): BalanceProbe {
-  return { cop: [0, 0], cmp: [0, 0], xi: [0, 0], xiRef: [0, 0], touchdowns: 0, lifts: 0, gait: 'legacy', reserveAtTouchdown: 1 };
+  return {
+    cop: [0, 0], cmp: [0, 0], xi: [0, 0], xiRef: [0, 0], touchdowns: 0, lifts: 0, gait: 'legacy', reserveAtTouchdown: 1,
+    clipLifts: 0, clipTime: 0, followLifts: 0, followTime: 0, moveTime: 0, styleTime: 0, picks: 0, fallbacks: 0,
+  };
 }

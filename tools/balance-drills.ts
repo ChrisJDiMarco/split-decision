@@ -16,6 +16,8 @@
 //                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance]
 //   npx tsx tools/balance-drills.ts --job '<json>'        one drill in this process, JSON on stdout
 //   --tune BALANCE_TUNING.stanceAnkleKp=1,FOOTWORK_TUNING.walkGapM=0.03   A/B a tuning table value
+//   --mocap steps|1|0|style   mocap footwork (SD_MOCAP_FOOTWORK): clip steps (the default), steps and style, neither, style only
+//   --ring 1|0                ring IQ's footwork rules (SD_RING_IQ)
 //   (the drill children set it before they run; the tables are the engine's exported tunables)
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -30,6 +32,8 @@ import { FOOTWORK_TUNING } from '../src/physics/control/balance/footsteps';
 import { GYRO_POLICY } from '../src/physics/control/balance/gyro-policy';
 import { BALANCE_TUNING } from '../src/physics/control/balance/index';
 import { INERTIA } from '../src/physics/control/balance/inertialize';
+import { MOCAP_STEPS } from '../src/physics/control/balance/mocap-steps';
+import { MOCAP_STYLE } from '../src/physics/control/balance/mocap-style';
 import { STEP_ADJUST } from '../src/physics/control/balance/step-adjust';
 import { COUNTER_YAW, YAW_TUNING } from '../src/physics/control/controller';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
@@ -251,7 +255,7 @@ async function shuffle(job: Extract<Job, { kind: 'shuffle' }>): Promise<ShuffleO
   return out;
 }
 
-const TABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING };
+const TABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE };
 
 /** SD_TUNE='TABLE.key=value,...': set numeric tunables before a drill (A/B runs). */
 function applyTune(spec: string | undefined): void {
@@ -287,7 +291,7 @@ function runChild(job: Job, balance: string): Promise<DrillOut> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...process.execArgv, script, '--job', JSON.stringify(job)], {
       stdio: ['ignore', 'pipe', 'inherit'],
-      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', '') },
+      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
     });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -350,6 +354,7 @@ export function summarizeApproach(outs: ApproachOut[], design: string): string[]
     `    gyro saturation in footwork    ${f2(sat)} (peak ${f2(maxOf(rs.map(({ m }) => m.gyroSatPeak)))})   target <= 0.10   ${ok(sat <= 0.1)}`,
     `    reserve at touchdown           mean ${f2(res)}, min ${f2(Math.min(...rs.map(({ m }) => m.reserveAtTouchdownMin)))}   target >= 0.6   ${ok(res >= 0.6)}`,
     `    control cost                   ${f1(us)} µs per robot per step   target < 40   ${ok(us < 40)}`,
+    `    mocap footwork                 clip steps ${pct(mean(rs.map(({ m }) => m.clipLiftShare ?? 0)))} of swings (+${pct(mean(rs.map(({ m }) => m.followLiftShare ?? 0)))} followed), ${pct(mean(rs.map(({ m }) => m.clipMoveShare ?? 0)))} of moving time; style on ${pct(mean(rs.map(({ m }) => m.styleShare ?? 0)))}; picks ${rs.reduce((a, { m }) => a + (m.picks ?? 0), 0)}, fallbacks ${rs.reduce((a, { m }) => a + (m.fallbacks ?? 0), 0)}`,
   ];
 }
 
@@ -379,6 +384,7 @@ export function summarizeShuffle(outs: ShuffleOut[], design: string): string[] {
   return [
     `  shuffle: falls ${m.falls.length}${m.falls.length ? ` (${m.falls.map((x) => `${f1(x.t)}s ${x.activity}`).join(', ')})` : ''}, legs ${o.legs.map((l) => `${l.leg} ${Number.isFinite(l.arrived) ? f1(l.arrived) + 's' : l.leg.startsWith('circle') ? '' : 'never'}/${l.steps}st`).join(', ')}`,
     `    single support ${pct(m.singleInside2)}, torso rate ${f2(m.torsoRateLow)}/${f2(m.torsoRateHigh)}, tilt ${f1(m.tiltPeakDeg)}°, COP jump ${f1(m.copJumpCm)} cm, DCM err ${f1(m.dcmErrCm)} cm, servo at limit ${pct(m.servoLimitShare)}, gyro ${f2(m.gyroSatFootwork)}, control ${f1(o.controlUs)} µs${o.blowup ? ', BLOW-UP' : ''}`,
+    `    mocap footwork: clip steps ${pct(m.clipLiftShare ?? 0)} of swings (+${pct(m.followLiftShare ?? 0)} followed), ${pct(m.clipMoveShare ?? 0)} of moving time, style on ${pct(m.styleShare ?? 0)}`,
   ];
 }
 
@@ -429,7 +435,9 @@ async function main(): Promise<void> {
   }
   await pool(tasks, jobs);
   const tune = arg('tune', '');
-  const lines: string[] = [`balance drills (${balance}, ${label}${tune ? `, tune ${tune}` : ''}), wall ${((performance.now() - t0) / 1000).toFixed(0)} s`];
+  const mocap = arg('mocap', process.env.SD_MOCAP_FOOTWORK ?? 'steps');
+  const ring = arg('ring', process.env.SD_RING_IQ ?? '1');
+  const lines: string[] = [`balance drills (${balance}, mocap footwork ${mocap}, ring IQ ${ring}, ${label}${tune ? `, tune ${tune}` : ''}), wall ${((performance.now() - t0) / 1000).toFixed(0)} s`];
   for (const design of designs) {
     lines.push(`${design}:`);
     lines.push(...summarizeApproach(results.filter((o): o is ApproachOut => o.kind === 'approach'), design));

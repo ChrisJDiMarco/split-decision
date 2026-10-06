@@ -24,17 +24,23 @@ import type { JointMap, LegCommand } from '../posture';
 import type { Sense } from '../sense';
 import type { StanceParams } from '../stance';
 import { skillCaptureStep } from '../stepping';
-import { clampToPolygon, footCorners, polygonDistance, type FootPlace, type P2 } from '../support';
+import { clampToPolygon, convexHull, footCorners, polygonDistance, type FootPlace, type P2 } from '../support';
+import type { MocapSet } from '../mocap/library';
 import { ComReference } from './com-ref';
 import { DcmPlan, newDcmSample } from './dcm';
-import { FOOTWORK_TUNING, FootstepPlanner, soleCmp, type GaitKind } from './footsteps';
+import { FOOTWORK_TUNING, FootstepPlanner, soleCmp, type GaitKind, type PlanInput } from './footsteps';
 import { GYRO_POLICY, gyroPolicy, newGyroCommand } from './gyro-policy';
+import { FUTURE_S, MOCAP_STEPS, MocapSteps, type ClipFootstep } from './mocap-steps';
+import { MOCAP_STYLE } from './mocap-style';
+import { newRolloutResult, rollout } from './rollout';
+import { newTakeoffState, planTakeoff, TAKEOFF, type TakeoffRequest } from './takeoff';
 import { adjustSwing, captureStep, followCapture } from './step-adjust';
 import { Swing } from './swing';
 import type { BalanceProbe, BalanceState } from './types';
 
 export { CONTROL } from './config';
 export type { BalanceProbe, BalanceState, Footstep } from './types';
+export type { TakeoffRequest, TakeoffState } from './takeoff';
 
 /** Engine tuning (exported so tools can sweep it; the worker never changes it). */
 export const BALANCE_TUNING = {
@@ -72,9 +78,23 @@ export const BALANCE_TUNING = {
   trimSpeed: 0.1, // ...and this COM speed (m/s)
   stableSpeed: 0.3, // m/s and rad/s: stable (Euphoria's thresholds)
   stableErrM: 0.05, // DCM error under this counts as stable
-  strikeReserve: 0.6, // gyro momentum free to start a strike...
-  kickReserve: 0.6, // ...or a kick
+  steadyReserve: 0.6, // gyro momentum free to count as steady (§5.2: ready to throw from a set stance)...
+  kickReserve: 0.6, // ...or to start a kick (a kicking leg's momentum is 40-60% of the rotor's)
+  // Strikes from the current footing (the pace stage): an arm strike may also start on two feet with
+  // the body still moving, once its DCM sits strikeInsideM inside the soles, the torso turns slower
+  // than strikeRate and the DCM is within strikeErrM of its plan; or from a planned step (never a
+  // capture step) whose touchdown is at most stepStrikeS away, when the DCM predicted at the
+  // touchdown lies stepStrikeInsideM inside the support the landing makes (the blow lands with the foot).
+  // A punch's pitch momentum is about 10 N·m·s (an arm of 4-10 kg at 2-5 m/s, 0.4 m above the COM),
+  // 15-20% of the rotor's: strikeReserve leaves the rest of the rotor for a fall.
+  strikeReserve: 0.4,
+  strikeInsideM: 0.02,
+  strikeRate: 0.5,
+  strikeErrM: 0.12,
+  stepStrikeS: 0.25,
+  stepStrikeInsideM: 0.02,
   copSlewM: 0.018, // the planned COP (and the ground force's CMP) moves at most this far per control tick
+  noPickS: 0.6, // a clip step that waited out liftWaitS blocks mocap picks this long
 };
 
 export interface EngineInput {
@@ -83,6 +103,8 @@ export interface EngineInput {
   oppDist: number;
   aggression: number;
   speed: number | null;
+  /** Ring IQ: a walk toward the opponent ends this far from him (m, COM to COM; 0: at the goal). */
+  walkEnd?: number;
   /** No new footsteps (a skill holds the feet, the get-up rise): the in-progress swing lands. */
   holdFeet: boolean;
   /** World COM offset a strike wants (weight transfer). */
@@ -104,7 +126,7 @@ export class BalanceEngine {
   readonly ref = newDcmSample();
   readonly state: BalanceState = {
     xi: [0, 0], xiRef: [0, 0], margin: 1, gyroReserve: 1, mode: 'steady', clipRate: 1, clipSync: { hold: false },
-    canStrike: false, canKick: false,
+    steady: false, canStrike: false, canKick: false, xiTouch: [0, 0],
   };
   readonly gyro = newGyroCommand();
   /** The COM the posture tracks (an inverted pendulum under the CMP the soles can make). */
@@ -153,6 +175,20 @@ export class BalanceEngine {
   private readonly vCtl: P2 = [0, 0];
   private readonly scratch = newDcmSample();
   private readonly tmpPlace: FootPlace = { x: 0, y: 0, yaw: 0 };
+  /** Mocap footwork (Phase 5): motion-matched clip steps on the plan, and the style layer. */
+  mocap: MocapSteps | null = null;
+  private readonly dcmTry = new DcmPlan();
+  private readonly pickSample = newDcmSample();
+  private readonly future = new Float32Array(6);
+  private readonly facing = new Float32Array(3);
+  /** No mocap pick before this time (a clip step's lift that never came). */
+  private noPickUntil = -Infinity;
+  private readonly rollProc = newRolloutResult();
+  private readonly rollClip = newRolloutResult();
+  /** A flashy move's take-off being prepared (takeoff.ts), and its readiness. */
+  private takeoff: TakeoffRequest | null = null;
+  private takeoffFresh = false;
+  readonly takeoffState = newTakeoffState();
 
   constructor(
     readonly geo: HumanoidGeometry,
@@ -163,6 +199,77 @@ export class BalanceEngine {
     readonly probe: BalanceProbe,
   ) {
     this.planner = new FootstepPlanner(geo, stance, gait);
+  }
+
+  /** The design's motion library has loaded: footwork from its clips from now on. */
+  attachMocap(set: MocapSet): void {
+    // Off (SD_MOCAP_FOOTWORK=0): nothing of it runs, the engine is exactly the Phase 1 one.
+    if (!MOCAP_STEPS.enabled && !MOCAP_STYLE.enabled) return;
+    const m = new MocapSteps(set, this.geo, this.stance);
+    this.mocap = m.db ? m : null;
+  }
+
+  /**
+   * Flashy stage hook (§5.3): prepare a take-off from `req.support` at `req.at` with the COM moving at
+   * `req.comVel`. The feet hold (no new steps); the plan shifts the weight onto the support sole and
+   * ends with the DCM where that velocity puts it. False when the body is not on that foot (or both).
+   */
+  requestTakeoff(req: TakeoffRequest, now: number): boolean {
+    const g = this.gait;
+    if (!g.planted(req.support) || (g.phase !== 'double' && g.stanceSide() !== req.support)) return false;
+    this.takeoff = { ...req, at: Math.max(req.at, now + TAKEOFF.minLeadS), comVel: [req.comVel[0], req.comVel[1]], lean: req.lean ? [req.lean[0], req.lean[1]] : undefined };
+    this.takeoffFresh = true;
+    this.mocap?.cancel();
+    return true;
+  }
+
+  /** The flashy stage dropped the take-off (not ready in time, or changed its mind). */
+  cancelTakeoff(): void {
+    if (!this.takeoff) return;
+    this.takeoff = null;
+    this.takeoffState.active = this.takeoffState.ready = false;
+    this.planned = false;
+  }
+
+  /** The flight is over: plan from the body as it lands (the step adjuster and capture steps take over). */
+  landed(s: Sense): void {
+    this.takeoff = null;
+    this.takeoffState.active = this.takeoffState.ready = false;
+    this.reset(s);
+  }
+
+  /** The take-off plan, every tick while one is prepared: no steps, the reference fixed. */
+  private planTakeoffTick(s: Sense): void {
+    const tk = this.takeoff!;
+    const t = s.time;
+    const st = this.takeoffState;
+    if (this.takeoffFresh) {
+      this.takeoffFresh = false;
+      const cmpNow: P2 = [this.xiM[0], this.xiM[1]];
+      const oldXi: P2 = [this.xiM[0], this.xiM[1]];
+      if (this.planned) {
+        this.dcm.cmpAt(this.planClock(t), cmpNow);
+        this.currentXiRef(t, oldXi);
+      }
+      const p = this.gait.feet[tk.support].place;
+      const sole: P2 = [p.x + (tk.lean?.[0] ?? 0), p.y + (tk.lean?.[1] ?? 0)];
+      planTakeoff(this.dcm, t, cmpNow, sole, tk.at, tk.comVel, s.omega0);
+      this.dcm.sample(t, this.scratch);
+      this.blend[0] = oldXi[0] - this.scratch.xi[0];
+      this.blend[1] = oldXi[1] - this.scratch.xi[1];
+      this.blendT = t;
+      this.planner.count = this.planner.next = 0;
+      this.planned = true;
+      this.holdPlan = true;
+      this.lastPlanT = t;
+    }
+    st.active = true;
+    st.eta = tk.at - t;
+    st.xiErr = Math.hypot(this.xiM[0] - this.state.xiRef[0], this.xiM[1] - this.state.xiRef[1]);
+    const flat = this.gait.planted(tk.support) && s.feet[tk.support].flat > TAKEOFF.flat;
+    st.ready = flat && Math.abs(st.eta) <= 0.05 && st.xiErr <= TAKEOFF.readyM && this.state.gyroReserve >= TAKEOFF.reserve;
+    // Not launched well after its time: the move is off, back to the plan.
+    if (st.eta < -0.3) this.cancelTakeoff();
   }
 
   /** The swing leg's drive for the planner: hip pitch motor, leg mass from the compiled model. */
@@ -189,6 +296,9 @@ export class BalanceEngine {
   /** Start over from the body as it is (after a get-up, on the gantry, after a fall). */
   reset(s: Sense | null): void {
     this.r.mem[GAZE_STABILIZE_KEY] = false;
+    this.mocap?.cancel();
+    this.takeoff = null;
+    this.takeoffState.active = this.takeoffState.ready = false;
     this.swing.stop();
     this.swingSide = null;
     this.planned = false;
@@ -223,6 +333,13 @@ export class BalanceEngine {
     if (!this.driveSet) this.setDrive(s);
     g.maintain(s);
     this.senseXi(s);
+    if (this.mocap) {
+      const up = this.planner.upcoming();
+      this.mocap.tick(s.time, dt, up ? up.lift : NaN);
+      if (this.mocap.active) this.probe.clipTime += dt;
+      if (this.mocap.following) this.probe.followTime += dt;
+    }
+    if (this.swing.active || this.planner.count > this.planner.next) this.probe.moveTime += dt;
     if (g.phase === 'double' && !g.bothPlanted()) {
       // Feet in the air (dropped off the gantry, not landed yet): hold on, wait for the canvas.
       this.idle(s, inp);
@@ -240,7 +357,8 @@ export class BalanceEngine {
     // Plan: kicks and held feet stand on what they have; otherwise at every footstep event and
     // whenever the goal moves; a held stance refreshes its weight shift every tick.
     const kicking = g.phase === 'shift' || g.phase === 'skill';
-    if (kicking) {
+    if (this.takeoff && !kicking) this.planTakeoffTick(s);
+    else if (kicking) {
       this.kick(s);
       this.planHold(s, inp, true);
     } else if (inp.holdFeet) {
@@ -249,7 +367,7 @@ export class BalanceEngine {
     } else if (touched || this.needsPlan(s, inp)) this.replan(s, inp);
     else if (this.holdPlan && g.phase === 'double') this.planHold(s, inp, false);
     // Lift-off when the plan says, if the body is ready.
-    if (!kicking && !inp.holdFeet && g.phase === 'double' && g.bothPlanted()) this.maybeLift(s, inp);
+    if (!kicking && !this.takeoff && !inp.holdFeet && g.phase === 'double' && g.bothPlanted()) this.maybeLift(s, inp);
     // The reference (its clock stops while a swing is late or a lift waits), feedback, allocation.
     this.dcm.sample(this.planClock(t), this.ref);
     const kb = Math.exp(-(t - this.blendT) / T.blendS);
@@ -455,11 +573,27 @@ export class BalanceEngine {
     // From rest (a held stance, or a lift that waited for a weight shift that never came): the
     // plan launches from the body's own DCM, with a full weight shift before the first lift.
     const fromRest = (this.wasHolding || this.waitSince >= 0) && !sw;
-    this.planner.plan({
+    // A clip step whose lift never came (the body never got ready for it): the planner's own steps
+    // for a while, not the same pick again.
+    if (this.waitSince >= 0 && this.mocap?.active) this.noPickUntil = t + BALANCE_TUNING.noPickS;
+    const pin: PlanInput = {
       time: t, omega: s.omega0, goal: inp.goal, bearing: inp.bearing, oppDist: inp.oppDist, aggression: inp.aggression,
       speed: inp.speed, cmpNow, shift: inp.shift, swing: sw, doubleS: this.doubleSince, fromRest, lastSide: this.lastLanded, xi: this.xiM,
+      walkEnd: inp.walkEnd ?? 0,
       opp: Number.isFinite(inp.oppDist) ? [s.com[0] + inp.oppDist * Math.cos(inp.bearing), s.com[1] + inp.oppDist * Math.sin(inp.bearing)] : null,
-    }, this.dcm);
+    };
+    const m = this.mocap;
+    if (sw && m && m.active && m.inAir >= 0) {
+      // A clip step in the air: the clip's steps still to come keep their rhythm from the real lift-off.
+      m.retime(sw.land);
+      this.planner.planClip(pin, this.dcm, m.steps, m.next, m.count);
+    } else {
+      this.planner.plan(pin, this.dcm);
+      if (m) {
+        if (!sw && this.planner.gait !== 'hold' && this.planner.count > 0 && g.bothPlanted() && !this.capturing) this.pickClip(s, inp, pin, t < this.noPickUntil);
+        else if (!sw || !m.following) m.cancel();
+      }
+    }
     this.planned = true;
     this.holdPlan = this.planner.count === 0 && !sw;
     this.lastPlanT = t;
@@ -478,6 +612,99 @@ export class BalanceEngine {
     this.blend[0] = oldXi[0] - this.scratch.xi[0];
     this.blend[1] = oldXi[1] - this.scratch.xi[1];
     this.blendT = t;
+  }
+
+  /**
+   * Mocap footwork: the motion-matching pick at a footstep event on two feet. The query's future is
+   * the procedural plan's (the COM following its ξ_ref FUTURE_S / rate ahead, and its turn); a pick
+   * is kept only if the plan with its steps starts where the body can follow (clipFits). Without
+   * one the procedural plan stands.
+   */
+  private pickClip(s: Sense, inp: EngineInput, pin: PlanInput, blocked = false): void {
+    const m = this.mocap!;
+    const M = MOCAP_STEPS;
+    const w = s.omega0;
+    const rate = M.rateLo + (M.rateHi - M.rateLo) * clamp(inp.aggression, 0, 1);
+    // The COM under the procedural plan: ċ = ω(ξ_ref − c), from the body now.
+    const horizon = FUTURE_S[2] / rate;
+    const n = 24, h = horizon / n;
+    let cx = s.com[0], cy = s.com[1];
+    let k = 0;
+    for (let i = 1; i <= n && k < 3; i++) {
+      this.dcm.sample(s.time + i * h, this.pickSample);
+      cx += w * (this.pickSample.xi[0] - cx) * h;
+      cy += w * (this.pickSample.xi[1] - cy) * h;
+      while (k < 3 && i * h >= FUTURE_S[k] / rate - 1e-9) {
+        this.future[2 * k] = cx - s.com[0];
+        this.future[2 * k + 1] = cy - s.com[1];
+        k++;
+      }
+    }
+    const cur = this.gait.currentFrame();
+    const turn = inp.goal ? angleDiff(inp.goal.heading, cur.heading) : 0;
+    const span = Math.max(0.3, this.planner.finalTime - s.time);
+    for (let i = 0; i < 3; i++) this.facing[i] = turn * clamp(FUTURE_S[i] / rate / span, 0, 1);
+    // How well the body follows the procedural plan from here (the bar a clip plan must meet).
+    this.rollPlan(s, this.dcm, this.rollProc);
+    const saved = this.planner.saveArrival();
+    let tried = false;
+    const query = {
+      s, time: s.time, omega: w, bearing: inp.bearing, aggression: inp.aggression, gait: this.gait, goal: inp.goal, opp: pin.opp,
+      future: this.future, facing: this.facing, drive: this.planner.drive, fromRest: pin.fromRest, doubleS: this.doubleSince,
+      allowPass: this.planner.gait === 'walk', lastLanded: this.lastLanded,
+      accept: (steps: readonly ClipFootstep[], count: number) => {
+        tried = true;
+        this.planner.restoreArrival(saved);
+        this.planner.planClip(pin, this.dcmTry, steps, 0, count);
+        return this.clipFits(s, pin);
+      },
+    };
+    // Walking stays on the procedural steps (MOCAP_STEPS.walkClips); the clip's clock follows them.
+    const ok = !blocked && (this.planner.gait !== 'walk' || M.walkClips > 0) && m.pick(query);
+    this.planner.restoreArrival(saved);
+    if (ok) {
+      this.planner.planClip(pin, this.dcm, m.steps, 0, m.count);
+      this.probe.picks++;
+    } else {
+      // (A fallback: candidates were tried and none fit; the procedural plan is planned again.)
+      if (tried) {
+        this.probe.fallbacks++;
+        this.planner.plan(pin, this.dcm);
+      }
+      m.follow(query);
+    }
+  }
+
+  /**
+   * Can the body follow the clip plan in dcmTry now? A rollout of the pendulum under the feedback
+   * law with the CMP clipped into the soles (rollout.ts): its DCM error must stay within
+   * MOCAP_STEPS.maxMismatchM, or no more than a centimetre above the procedural plan's.
+   */
+  private clipFits(s: Sense, pin: PlanInput): boolean {
+    const M = MOCAP_STEPS;
+    if (pin.fromRest && this.gait.bothPlanted()) {
+      // From rest the plan starts at the body's own DCM (its first CMP knot, inside the soles).
+      const poly = shrink(this.gait.supportPolygon(), BALANCE_TUNING.copShrinkM);
+      this.dcmTry.connect(this.xiM, (p) => (poly.length >= 3 ? clampPoint(poly, p) : p));
+    }
+    const r = this.rollPlan(s, this.dcmTry, this.rollClip);
+    const p = this.rollProc;
+    const ok = r.maxErr <= Math.max(M.maxMismatchM, p.maxErr + 0.01) && r.saturated <= p.saturated + 0.05;
+    this.mocap?.trace?.push(`${pin.time.toFixed(2)}   fits? clip err ${(r.maxErr * 100).toFixed(1)} cm sat ${r.saturated.toFixed(2)} s, procedural ${(p.maxErr * 100).toFixed(1)} cm sat ${p.saturated.toFixed(2)} s, v ${Math.hypot(s.comVel[0], s.comVel[1]).toFixed(2)}${ok ? '' : ' NO'}`);
+    return ok;
+  }
+
+  /** The rollout of `plan` (the planner's current footsteps) from the body now (rollout.ts). */
+  private rollPlan(s: Sense, plan: DcmPlan, out: ReturnType<typeof newRolloutResult>): ReturnType<typeof newRolloutResult> {
+    const pl = this.planner;
+    const g = this.gait;
+    let end = s.time + 0.6;
+    for (let i = 0; i < Math.min(pl.count, 2); i++) end = Math.max(end, pl.steps[i].land + 0.25);
+    const horizon = Math.min(1.6, end - s.time);
+    return rollout(this.geo, plan, pl.steps, pl.count, { l: g.feet.l.place, r: g.feet.r.place }, null,
+      s.com, this.vCtl, s.omega0, 1 + BALANCE_TUNING.kp, s.time, horizon, 0.01, BALANCE_TUNING.copShrinkM,
+      MOCAP_STEPS.dsReachHL * this.geo.legs.l.footHalfLength, this.doubleSince < MOCAP_STEPS.settleS ? this.lastLanded : null,
+      MOCAP_STEPS.settleS - this.doubleSince, out);
   }
 
   /**
@@ -514,6 +741,7 @@ export class BalanceEngine {
     this.dcm.add(t + tau, tx, ty);
     this.dcm.solve(w);
     if (fresh) {
+      this.mocap?.cancel();
       // Coming out of a moving plan: blend its DCM in, and forget its footsteps.
       this.dcm.sample(t, this.scratch);
       this.blend[0] = oldXi[0] - this.scratch.xi[0];
@@ -564,6 +792,13 @@ export class BalanceEngine {
       this.landNom = { ...step.place };
       this.planner.next++;
       this.probe.lifts++;
+      if (step.source === 'clip' && step.clipIdx !== undefined && this.mocap) {
+        this.mocap.onLift(step.clipIdx);
+        this.probe.clipLifts++;
+      } else if (this.mocap?.following) {
+        this.mocap.followLift(step.side, s.time + (step.land - step.lift));
+        this.probe.followLifts++;
+      } else this.mocap?.cancel();
       this.waitSince = -1;
       // Re-time the plan from the real lift-off.
       this.replan(s, inp);
@@ -591,6 +826,7 @@ export class BalanceEngine {
     this.landNom = { ...f.target };
     this.planned = false;
     this.capturing = false;
+    this.mocap?.cancel();
   }
 
   private touchdown(s: Sense, side: Side): boolean {
@@ -605,6 +841,7 @@ export class BalanceEngine {
     if ((u > early && touching && f.lifted) || (u >= 1 && touching) || s.time > sw.t0 + sw.T + BALANCE_TUNING.lateTouchS) {
       g.engineTouchdown(side, s);
       sw.stop();
+      this.mocap?.onTouchdown();
       this.swingSide = null;
       this.lastLanded = side;
       this.capturing = false;
@@ -673,6 +910,8 @@ export class BalanceEngine {
     const inner = footCorners(this.geo, other(plan.side), g.feet[other(plan.side)].place, BALANCE_TUNING.copShrinkM);
     if (polygonDistance(inner, this.cop).d > BALANCE_TUNING.captureCopM && s.time - this.captureSince < BALANCE_TUNING.captureUnloadS) return;
     this.captureSide = null;
+    this.mocap?.cancel();
+    this.cancelTakeoff();
     const lift = FOOTWORK_TUNING.walkLift * this.geo.legLength;
     g.engineStep(plan.side, plan.place, plan.swing, lift);
     this.swing.start(s.time, g.feet[plan.side].place, 0, plan.place, plan.swing, lift, BALANCE_TUNING.swingLeadS);
@@ -819,6 +1058,17 @@ export class BalanceEngine {
     kv?.fill(1);
   }
 
+  /** The DCM predicted at the touchdown lies inside the support the landing makes (stance sole + landing sole, shrunk). */
+  private landingCatches(): boolean {
+    const g = this.gait;
+    const side = g.swingSide;
+    if (!side) return false;
+    const m = BALANCE_TUNING.stepStrikeInsideM;
+    const stance = other(side);
+    const hull = convexHull([...footCorners(this.geo, stance, g.feet[stance].place, m), ...footCorners(this.geo, side, this.swing.target, m)]);
+    return hull.length >= 3 && polygonDistance(hull, this.state.xiTouch).d <= 0;
+  }
+
   private report(s: Sense, inp: EngineInput, inside: number, ex: number, ey: number): void {
     const st = this.state;
     const g = this.gait;
@@ -829,12 +1079,29 @@ export class BalanceEngine {
     const cp = clamp(0.5 + inside / 0.2, 0, 1);
     st.margin = clamp(cp - 0.4 * inp.gyroSaturation, 0, 1);
     st.mode = this.probe.gait === 'capture' ? 'recover' : 'steady';
+    const T = BALANCE_TUNING;
     const speed = Math.hypot(s.comVel[0], s.comVel[1]);
     const rate = Math.hypot(s.torsoOmega[0], s.torsoOmega[1]);
-    const stable = speed < BALANCE_TUNING.stableSpeed && rate < BALANCE_TUNING.stableSpeed && inside > 0 && Math.hypot(ex, ey) < BALANCE_TUNING.stableErrM;
+    const err = Math.hypot(ex, ey);
+    const stable = speed < T.stableSpeed && rate < T.stableSpeed && inside > 0 && err < T.stableErrM;
     const planted = g.phase === 'double' && g.bothPlanted();
-    st.canStrike = planted && stable && (inp.gyroHealth <= 0 || st.gyroReserve >= BALANCE_TUNING.strikeReserve);
-    st.canKick = st.canStrike && (inp.gyroHealth <= 0 || st.gyroReserve >= BALANCE_TUNING.kickReserve) && s.feet.l.flat > 0.97 && s.feet.r.flat > 0.97;
+    const noGyro = inp.gyroHealth <= 0;
+    st.steady = planted && stable && (noGyro || st.gyroReserve >= T.steadyReserve);
+    const reserve = noGyro || st.gyroReserve >= T.strikeReserve;
+    // Where the DCM is heading: the swing's touchdown, with the CMP held where the stance sole has it.
+    const tRem = g.phase === 'single' && g.swingSide && this.swing.active ? Math.max(0, this.swing.t0 + this.swing.T - s.time) : -1;
+    if (tRem >= 0) {
+      const k = Math.exp(s.omega0 * tRem);
+      st.xiTouch[0] = this.cmpSoles[0] + (this.xiM[0] - this.cmpSoles[0]) * k;
+      st.xiTouch[1] = this.cmpSoles[1] + (this.xiM[1] - this.cmpSoles[1]) * k;
+    } else {
+      st.xiTouch[0] = this.xiM[0];
+      st.xiTouch[1] = this.xiM[1];
+    }
+    const capturing = this.capturing || this.probe.gait === 'capture';
+    const settled = planted && !capturing && inside >= T.strikeInsideM && rate < T.strikeRate && err < T.strikeErrM;
+    st.canStrike = st.steady || (reserve && rate < T.strikeRate && (settled || (tRem >= 0 && tRem <= T.stepStrikeS && !capturing && this.landingCatches())));
+    st.canKick = st.steady && (inp.gyroHealth <= 0 || st.gyroReserve >= T.kickReserve) && s.feet.l.flat > 0.97 && s.feet.r.flat > 0.97;
     const p = this.probe;
     p.cop[0] = this.cop[0];
     p.cop[1] = this.cop[1];

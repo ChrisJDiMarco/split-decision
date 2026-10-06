@@ -1,12 +1,14 @@
 // Per-robot humanoid controller, every control tick:
 //   sense → skill (arms, torso, borrowed leg) → steps → gait (legs, COM plan) → balance
 //   (pelvis target, gyro) → IK → velocity + gravity feed-forward → servo targets
-import type { TargetZone } from '../../core/protocol';
+import type { FeintRead, TargetZone } from '../../core/protocol';
 import type { Vec3 } from '../../core/types';
+import { latestRead } from '../openings';
 import type { RobotRuntime, SimContext } from '../sim-context';
 import { Balance } from './balance';
 import { BalanceEngine, CONTROL } from './balance/index';
 import { Inertializer } from './balance/inertialize';
+import { MOCAP_STYLE, MocapStyle } from './balance/mocap-style';
 import { newProbe, type BalanceProbe } from './balance/types';
 import { applyGravityFeedforward, jointInfo, VelocityFeedforward, type JointInfo } from './feedforward';
 import { Gait, type StanceFrame, type StepTiming } from './gait';
@@ -134,6 +136,13 @@ export class HumanoidController {
   readonly inertia: Inertializer;
   /** Requested ground speed from Intent.move (m/s), or null (the gait's own pace). */
   moveSpeed: number | null = null;
+  /** Ring IQ: a walk toward the opponent ends this far from him (COM to COM, m; 0: at the goal). */
+  walkEnd = 0;
+  /**
+   * A strike is due but the body is not ready for it yet (mid-step, still settling): no new step
+   * lifts while this is set, so the step in the air is the last one before the blow (tactics.ts).
+   */
+  strikePending = false;
   private lastRun: unknown = null;
   private lastRising = false;
   private lastCelebrating = false;
@@ -164,6 +173,13 @@ export class HumanoidController {
   private readonly upperBody = new UpperBodyStrategy();
   /** Upper-body share of the mass × its height above the pelvis: how far a bend moves the COM. */
   private readonly upperLever: number;
+  /** Arms and waist (the joints a skill or the mocap style layer owns). */
+  private readonly upperJoints: number[];
+  /** Arm segment masses (upper arm; forearm with the fist and hand) and the whole robot's, kg. */
+  private readonly armMass: Record<Side, { upper: number; lower: number }>;
+  private readonly fullMass: number;
+  /** Mocap footwork's style layer (on the dcm path, once the motion library has loaded). */
+  private mocapStyle: MocapStyle | null = null;
 
   constructor(ctx: SimContext, readonly r: RobotRuntime) {
     this.geo = humanoidGeometry(r.design);
@@ -188,10 +204,16 @@ export class HumanoidController {
     this.pose = neutralPose(this.stance);
     const subtree = ctx.model.body_subtreemass;
     this.upperLever = (subtree[this.ids.torso] / subtree[r.rootBody]) * (this.geo.pelvisToTorso[2] + this.geo.torsoCenter[2]);
+    const bm = ctx.model.body_mass;
+    const part = (id: string) => r.parts.get(id)?.body ?? -1;
+    const armOf = (side: Side) => ({ upper: part(`upperarm_${side}`) >= 0 ? bm[part(`upperarm_${side}`)] : 0, lower: subtree[this.ids.forearm[side]] });
+    this.armMass = { l: armOf('l'), r: armOf('r') };
+    this.fullMass = subtree[r.rootBody];
     this.mass = robotMass(views(ctx), this.ids);
     this.rng = ctx.rng;
     this.engine = dcm ? new BalanceEngine(this.geo, this.stance, this.gait, this.jm, r, this.probe) : null;
     const upper = r.joints.flatMap((j, i) => (/^(waist_|shoulder_|elbow_)/.test(j.name) ? [i] : []));
+    this.upperJoints = upper;
     this.inertia = new Inertializer(r.joints.length, r.joints.map((j) => j.motor.noLoadSpeedRadS), [this.jm.neckYaw], upper);
     this.inertia.enabled = CONTROL.inertialize;
     // The guard's reach from the stance geometry (the torso turned by the blade and the waist), less
@@ -233,6 +255,11 @@ export class HumanoidController {
     return mocapSkill(this.mocap, id) ?? SKILLS[id];
   }
 
+  /** The newest read of this fighter's feints (the openings system's): a combination's payoff answers it. */
+  feintRead(ctx: SimContext): FeintRead | null {
+    return latestRead(ctx, this.r.corner);
+  }
+
   /** Start a skill now (returns false if another is running or it cannot be used). */
   startSkill(def: SkillDef, zone: TargetZone = def.defaultZone, aggression = 0.6): boolean {
     return this.skills.start(def, zone, aggression);
@@ -271,6 +298,12 @@ export class HumanoidController {
   private markSwitches(): void {
     const run = this.skills.run;
     if (run !== this.lastRun || this.rise.active !== this.lastRising || this.celebrating !== this.lastCelebrating) this.inertia.mark();
+    // The mocap style layer changed clip (or jumped its clock to a real contact): its arms and waist decay over.
+    const m = this.engine?.mocap;
+    if (m?.switched) {
+      this.inertia.mark(this.upperJoints);
+      m.switched = false;
+    }
     this.lastRun = run;
     this.lastRising = this.rise.active;
     this.lastCelebrating = this.celebrating;
@@ -287,6 +320,7 @@ export class HumanoidController {
     this.rise.active = false;
     this.upperBody.reset();
     this.skills.cancel(this.skillEnv(s), true);
+    this.tactics.onFall();
     this.walker.cancel();
     this.footwork?.cancel(this.gait, 'fell');
     this.victory?.reset();
@@ -389,6 +423,12 @@ export class HumanoidController {
     this.footwork = new ClipFootwork(this.mocap, this.r.joints.length, this.geo, this.jm, this.stance);
     this.victory = new Victory(this.mocap, this.strikePlayer);
     registerMocapRanges(this.geo, this.mocap);
+    this.engine?.attachMocap(this.mocap);
+    const db = this.engine?.mocap?.db;
+    if (db && MOCAP_STYLE.enabled) {
+      const masses = { total: this.fullMass, upperLever: this.upperLever, arm: this.armMass };
+      this.mocapStyle = new MocapStyle(this.mocap, this.geo, this.stance, this.jm, this.r.joints.length, db.idles[0] ?? null, masses);
+    }
   }
 
   private refreshMass(ctx: SimContext, dt: number): void {
@@ -509,14 +549,31 @@ export class HumanoidController {
     const [wf, wl] = this.pose.weightShift;
     const shift = rot2(wf, wl, this.heading);
     const spec = this.gyro?.spec;
-    e.update(s, dt, {
+    // comComp: the engine balances the body without the style layer's own COM shift.
+    const sty = this.mocapStyle;
+    const styled = !!sty && sty.w > 0 && MOCAP_STYLE.comComp > 0;
+    const sb: Sense = styled ? this.styleFree(s, sty!.comShift, sty!.comShiftVel) : s;
+    e.update(sb, dt, {
       goal: this.goal, bearing, oppDist: Math.hypot(opp.com[0] - s.com[0], opp.com[1] - s.com[1]),
-      aggression: this.r.intent?.aggression ?? 0.5, speed: this.moveSpeed,
-      holdFeet: this.skills.active() || this.pose.holdFeet || this.celebrating, shift, allowCapture: this.rise.stepsAllowed(),
+      aggression: this.r.intent?.aggression ?? 0.5, speed: this.moveSpeed, walkEnd: this.walkEnd,
+      holdFeet: this.skills.active() || this.pose.holdFeet || this.celebrating || this.strikePending, shift, allowCapture: this.rise.stepsAllowed(),
       gyroHealth: this.gyroHealth(), gyroSaturation: this.gyro?.saturation ?? 0,
       gyroTorqueNm: spec?.maxTorqueNm ?? 0, gyroMomentumNms: spec?.momentumNms ?? 1, legs: this.cmd.legs,
     });
     if (e.captured) this.skills.cancel(env, true);
+    // Mocap style (arms, waist, pelvis bob, tilt and sway from the clip the feet are taking, or the
+    // guard idle), only while nothing else owns the body.
+    if (styled) {
+      // The tools measure the real DCM (the style's shift included).
+      this.probe.xi[0] += sty!.comShift[0] + sty!.comShiftVel[0] / s.omega0;
+      this.probe.xi[1] += sty!.comShift[1] + sty!.comShiftVel[1] / s.omega0;
+    }
+    if (sty) {
+      const m = e.mocap;
+      const on = !this.skills.active() && !this.pose.holdFeet && !this.celebrating;
+      sty.apply(this.pose, this.cmd, dt, on, m?.clip ?? null, m?.tau ?? 0, this.r.intent?.aggression ?? 0.5, s.torsoRot, s.heading);
+      if (sty.w > 0) this.probe.styleTime += dt;
+    }
     // Walking squares the hips to the travel; over the last two steps they turn back to the blade.
     const want = e.walking() ? e.planner.travel : bearing + st.pelvisYaw + this.pose.pelvisYaw;
     const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, want), true);
@@ -537,6 +594,13 @@ export class HumanoidController {
     this.comRef = [e.state.xiRef[0], e.state.xiRef[1]];
     this.probe.cop[0] = this.plannedCop[0];
     this.probe.cop[1] = this.plannedCop[1];
+  }
+
+  /** The sense with the COM (and its velocity and capture point) moved back by the style's shift. */
+  private styleFree(s: Sense, shift: P2, vel: P2): Sense {
+    const com: Vec3 = [s.com[0] - shift[0], s.com[1] - shift[1], s.com[2]];
+    const comVel: Vec3 = [s.comVel[0] - vel[0], s.comVel[1] - vel[1], s.comVel[2]];
+    return { ...s, com, comVel, capture: [com[0] + comVel[0] / s.omega0, com[1] + comVel[1] / s.omega0, 0] };
   }
 
   /** The waist's counter-rotation this tick (COUNTER_YAW), rad. */
@@ -677,14 +741,27 @@ export class HumanoidController {
   }
 
   /**
-   * Balanced enough to start a strike: torso upright, capture point inside the feet and the gyro
-   * with momentum in hand. A fighter off balance recovers before it throws.
+   * Steady enough to throw from a set stance: torso upright, capture point inside the feet and the
+   * gyro with momentum in hand (on the balance engine: its `steady`). A fighter off balance recovers
+   * before it throws. The referee's FIGHT test reads this too.
    */
   readyToStrike(): boolean {
     const s = this.lastSense;
     if (!s || this.rise.active) return false;
-    if (this.engine) return s.upright > STRIKE_UPRIGHT && this.engine.state.canStrike;
+    if (this.engine) return s.upright > STRIKE_UPRIGHT && this.engine.state.steady;
     return s.upright > STRIKE_UPRIGHT && this.balanceMargin() > STRIKE_MARGIN && (this.gyro?.saturation ?? 0) < STRIKE_MAX_SAT;
+  }
+
+  /**
+   * An arm strike may start now from the footing the body has (the balance engine's canStrike: also
+   * still moving with the DCM settled inside the soles, or from a step whose landing catches it).
+   * The legacy path throws only from a set stance (readyToStrike, both feet planted).
+   */
+  canStrikeNow(): boolean {
+    const s = this.lastSense;
+    if (!s || this.rise.active) return false;
+    if (this.engine) return s.upright > STRIKE_UPRIGHT && this.engine.state.canStrike;
+    return this.gait.phase === 'double' && this.gait.bothPlanted() && this.readyToStrike();
   }
 
   /** Balanced enough to lend a leg to a kick (the balance engine's canKick; else as a strike). */

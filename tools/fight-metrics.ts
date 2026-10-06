@@ -44,12 +44,19 @@
 //   and --mocap steps|1|0|style (mocap footwork on the dcm path: clip steps (the default), with the
 //   style layer, neither, style only)
 //   SD_TUNE='MOCAP_STYLE.arms=0,BALANCE_TUNING.kp=1.8' sets tuning-table values in every fight
+//   --mind sparring|house   who decides: the sparring stand-in (default; an intent every 0.5 s) or
+//                           the real Brain with the House Mind (src/brain, no network: combos, setups,
+//                           feints, reflexes), fed 60 Hz telemetry with the game's 0.3 s reaction delay
+//   pace (tests/balance/pace-recorder.ts): idle-in-range share and why, the first two-way exchange,
+//   committed strikes per minute, combo completion, feint reads and bites against a no-feint baseline
 import loadMujoco from '@mujoco/mujoco';
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { SimEvent, TargetZone } from '../src/core/protocol';
-import type { MatchSetup } from '../src/core/types';
+import { Brain } from '../src/brain/brain';
+import { JevLink } from '../src/brain/link';
+import type { RobotTelemetry, SimEvent, TargetZone, WorldMeta } from '../src/core/protocol';
+import type { Corner, MatchSetup } from '../src/core/types';
 import { controllerOf, controlSystem, sparringIntent } from '../src/physics/control';
 import { COM_REF } from '../src/physics/control/balance/com-ref';
 import { FOOTWORK_TUNING } from '../src/physics/control/balance/footsteps';
@@ -62,7 +69,9 @@ import type { SkillRun } from '../src/physics/control/skills/types';
 import { buildContext } from '../src/physics/runtime';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
+import { buildTelemetry } from '../src/physics/systems/telemetry';
 import { compileWorld } from '../src/physics/world';
+import { exchanges, PaceRecorder, type PaceReport } from '../tests/balance/pace-recorder';
 import { activityOf, BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
 import { DamageRecorder, damageSummary, type FighterDamage } from './damage-metrics';
 
@@ -79,6 +88,8 @@ const BLOWUP_QVEL = 400;
 const IMPACT_TAIL_S = 0.1; // an impact event this soon after a strike ends still belongs to it
 const MIN_LANDED_IMPULSE_NS = 4; // the damage model's own event floor
 const ENTRY_STRIKE_S = 0.3; // a strike starting this soon after a pocket entry counts as entering with it
+const FRAME_S = 1 / 60; // House Mind runs: telemetry frames to the brains at this rate
+const HOUSE_TEMPERAMENT = 1.2; // the game's corners default to 1.1 and 1.3
 
 interface ImpactRec {
   t: number;
@@ -113,6 +124,8 @@ interface StrikeRec {
   maxImpulse: number;
   headImpulse: number;
   landed: boolean;
+  /** The footing it started from: 'step' (a foot in the air), 'moving' (two feet, COM over 0.3 m/s), 'set'. */
+  footing?: 'step' | 'moving' | 'set';
 }
 
 interface RingReport {
@@ -132,7 +145,7 @@ interface FighterReport {
   design: string;
   ring: RingReport;
   falls: FallRec[];
-  strikes: { thrown: number; committed: number; landed: number; headTargeted: number; headLanded: number; byId: Record<string, { thrown: number; landed: number; falls: number }> };
+  strikes: { thrown: number; committed: number; landed: number; headTargeted: number; headLanded: number; byId: Record<string, { thrown: number; landed: number; falls: number }>; byFooting?: Record<string, { committed: number; landed: number }> };
   approach: { metres: number; seconds: number; speed: number };
   selfKd: { strict: number; loose: number };
   getUp: { falls: number; counted: number; up: number; solid: number; censored: number; meanS: number };
@@ -148,6 +161,10 @@ interface FighterReport {
 
 export interface FightReport {
   balancePath: string;
+  /** Who decided: 'sparring' (the stand-in) or 'house' (the Brain's House Mind). */
+  mind?: string;
+  /** Pacing (tests/balance/pace-recorder.ts). */
+  pace?: PaceReport & { firstExchange: number | null; twoWay: number; committed: [number, number] };
   red: string;
   blue: string;
   seed: number;
@@ -187,10 +204,12 @@ function applyTune(spec: string | undefined): void {
 
 export async function runFight(red: string, blue: string, seconds: number, seed: number, log = false): Promise<FightReport> {
   applyTune(process.env.SD_TUNE);
+  const mind = process.env.SD_MIND === 'house' ? 'house' : 'sparring';
+  const temperament = mind === 'house' ? HOUSE_TEMPERAMENT : 1;
   const setup: MatchSetup = {
     fighters: [
-      { design: red, skin: 'factory', plan: '', temperament: 1 },
-      { design: blue, skin: 'neon', plan: '', temperament: 1 },
+      { design: red, skin: 'factory', plan: '', temperament },
+      { design: blue, skin: 'neon', plan: '', temperament },
     ],
     seed,
     timestep: 0.001,
@@ -214,6 +233,15 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
 
   const ctl = ctx.robots.map((r) => controllerOf(r)!);
   const recorders = [new BalanceRecorder(ctx, 0, 0.3), new BalanceRecorder(ctx, 1, 0.3)];
+  const pace = new PaceRecorder(ctl);
+  // House Mind: the real Brain (src/brain), no network, fed telemetry frames; its intents land after
+  // the game's reaction delay, as in the worker.
+  const delayTicks = Math.round(setup.reactionDelayS / ctx.dt);
+  const frameEvery = Math.max(1, Math.round(FRAME_S / ctx.dt));
+  const frameEvents: SimEvent[] = [];
+  const brains = mind === 'house' ? houseBrains(ctx, setup, (c, intent, issuedAtTick) => {
+    ctx.robots[c].pendingIntents.push({ applyAtTick: Math.max(ctx.tick, issuedAtTick + delayTicks), intent });
+  }) : [];
   const damageRec = new DamageRecorder(ctx);
   // Ring IQ: each fighter's own zones (his strikes, the other's reach), body-to-body contact.
   const rings = ctl.map((c) => new RingIq(c));
@@ -309,7 +337,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   };
 
   for (let i = 0; i < steps; i++) {
-    if (i % intentEvery === 0) for (const r of ctx.robots) r.intent = sparringIntent(ctx, r);
+    if (!brains.length && i % intentEvery === 0) for (const r of ctx.robots) r.intent = sparringIntent(ctx, r);
     for (const s of systems) s.pre?.(ctx);
     mj.mj_step(ctx.model, ctx.data);
     ctx.tick++;
@@ -328,7 +356,14 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
       onEvent(e);
       damageRec.onEvent(e, ctx.time);
     }
+    if (brains.length) frameEvents.push(...ctx.events);
     ctx.events.length = 0;
+    if (brains.length && ctx.tick % frameEvery === 0) {
+      const telemetry = [buildTelemetry(ctx, ctx.robots[0], SYSTEMS), buildTelemetry(ctx, ctx.robots[1], SYSTEMS)] as [RobotTelemetry, RobotTelemetry];
+      const events = frameEvents.splice(0);
+      for (const b of brains) b.onFrame({ tick: ctx.tick, time: ctx.time, events, telemetry });
+      await Promise.resolve();
+    }
 
     // Strike runs: one record per strike skill run, closed when the runner lets go of it.
     for (const c of [0, 1]) {
@@ -341,7 +376,11 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
         const [lo, hi] = run.def.range(ctl[c].geo);
         const rr = ringRep[c];
         rr.started++;
-        if (d > hi) rr.tooFar++;
+        // A blow started from a step (the balance engine's step-in strike) is judged where the step
+        // lands: the DCM at the touchdown, to his COM.
+        const st = ctl[c].engine?.state as { xiTouch?: [number, number] } | undefined;
+        const dLand = st?.xiTouch && ctl[c].gait.phase === 'single' ? Math.hypot(sc[him.rootBody * 3] - st.xiTouch[0], sc[him.rootBody * 3 + 1] - st.xiTouch[1]) : d;
+        if (Math.min(d, dLand) > hi) rr.tooFar++;
         else if (d < lo) rr.tooClose++;
         if (pendingEntry[c] >= 0 && ctx.time - pendingEntry[c] <= ENTRY_STRIKE_S) {
           rr.entriesWithStrike++;
@@ -349,7 +388,10 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
         }
         current[c] = {
           run,
-          rec: { id: run.def.id, zone: run.zone, start: ctx.time, end: ctx.time, committed: false, runnerLanded: false, landedAt: null, maxImpulse: 0, headImpulse: 0, landed: false },
+          rec: {
+            id: run.def.id, zone: run.zone, start: ctx.time, end: ctx.time, committed: false, runnerLanded: false, landedAt: null, maxImpulse: 0, headImpulse: 0, landed: false,
+            footing: ctl[c].gait.phase === 'single' ? 'step' : Math.hypot((ctx.data.subtree_linvel as Float64Array)[me.rootBody * 3], (ctx.data.subtree_linvel as Float64Array)[me.rootBody * 3 + 1]) > 0.3 ? 'moving' : 'set',
+          },
         };
       }
       const cur = current[c];
@@ -371,6 +413,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
 
     if (ctx.tick % SAMPLE_EVERY_STEPS === 0) {
       const dt = ctx.dt * SAMPLE_EVERY_STEPS;
+      pace.sample(ctx, dt);
       const com = ctx.data.subtree_com as Float64Array;
       const vel = ctx.data.subtree_linvel as Float64Array;
       // Body to body contact with neither throwing nor asking for a clinch: walking into the guards.
@@ -465,6 +508,13 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
         headTargeted: list.filter((s) => s.landed && s.zone === 'head').length,
         headLanded: list.filter((s) => s.landed && s.zone === 'head' && s.headImpulse > 0).length,
         byId,
+        byFooting: list.filter((s) => s.committed).reduce<Record<string, { committed: number; landed: number }>>((m, s) => {
+          const k = s.footing ?? 'set';
+          const b = (m[k] ??= { committed: 0, landed: 0 });
+          b.committed++;
+          if (s.landed) b.landed++;
+          return m;
+        }, {}),
       },
       approach: { metres: approach[c].m, seconds: approach[c].s, speed: approach[c].s > 0 ? approach[c].m / approach[c].s : 0 },
       selfKd: { strict: falls[c].filter((f) => f.selfStrict).length, loose: falls[c].filter((f) => f.selfLoose).length },
@@ -486,8 +536,12 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   const firstLanded = landedAll.reduce<number | null>((m, s) => (s.landedAt !== null && (m === null || s.landedAt < m) ? s.landedAt : m), null);
   const lastFall = koCorner !== null ? falls[koCorner][falls[koCorner].length - 1] : undefined;
   blocks.sort((a, b) => a - b);
+  const starts = [0, 1].map((c) => strikes[c].filter((s) => s.committed).map((s) => s.start)) as [number[], number[]];
+  const ex = exchanges(starts);
   return {
     balancePath: `${process.env.SD_BALANCE ?? 'default'}${process.env.SD_MOCAP_FOOTWORK ? ` mocap ${process.env.SD_MOCAP_FOOTWORK}` : ''}${process.env.SD_RING_IQ ? ` ring ${process.env.SD_RING_IQ}` : ''}`,
+    mind,
+    pace: { ...pace.finish(), firstExchange: ex.first, twoWay: ex.twoWay, committed: [starts[0].length, starts[1].length] },
     red, blue, seed, seconds, length, end, koCorner,
     koAfterSelfFall: end === 'down' && !!lastFall?.selfStrict,
     firstLanded,
@@ -505,6 +559,18 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
     fighters,
     timeline,
   };
+}
+
+/** Two Brains on the House Mind (src/brain: no network), as tests/brain/measure-iq.ts runs them. */
+function houseBrains(ctx: SimContext, setup: MatchSetup, onIntent: (c: Corner, intent: NonNullable<SimContext['robots'][number]['intent']>, issuedAtTick: number) => void): Brain[] {
+  const link = new JevLink({ ask: () => Promise.reject(new Error('offline: House Mind')), retryMs: 1e9 });
+  const meta: WorldMeta = {
+    nbody: 0, timestep: ctx.dt, props: [],
+    robots: ([0, 1] as Corner[]).map((corner) => ({ corner, design: setup.fighters[corner].design, prefix: '', parts: [] })),
+  };
+  const brains = ([0, 1] as Corner[]).map((corner) => new Brain({ corner, meta, seed: setup.seed, link, source: 'house', fighter: setup.fighters[corner], onIntent }));
+  for (const b of brains) b.start();
+  return brains;
 }
 
 // ------------------------------------------------------------------ reporting
@@ -622,6 +688,7 @@ export function summarize(fights: FightReport[]): string {
     'mocap footwork (Phase 5):',
     `  clip steps ${pct(avg('clipLiftShare'))} of swings (+${pct(avg('followLiftShare'))} the planner's, clip clock following), clip-driven ${pct(avg('clipMoveShare'))} of moving time, style on ${pct(avg('styleShare'))} of the time up`,
     ...ringLines(fs.map(({ x }) => x), minutes),
+    ...paceLines(fights, minutes),
   ];
   return lines.join('\n');
 }
@@ -639,6 +706,53 @@ function ringLines(fs: FighterReport[], minutes: number): string[] {
     `  strikes started too far / too close      ${sum((r) => r.tooFar)} / ${sum((r) => r.tooClose)} of ${started}`,
     `  pocket entries with a strike             ${pct(sum((r) => r.entriesWithStrike) / Math.max(1, sum((r) => r.entries)))} (${sum((r) => r.entriesWithStrike)}/${sum((r) => r.entries)})`,
     `  strikes thrown per minute (both)         ${(started / Math.max(1e-6, minutes)).toFixed(1)}`,
+  ];
+}
+
+function footingLine(fights: FightReport[]): string {
+  const by = new Map<string, { committed: number; landed: number }>();
+  for (const f of fights) for (const x of f.fighters) for (const [k, v] of Object.entries(x.strikes.byFooting ?? {})) {
+    const b = by.get(k) ?? { committed: 0, landed: 0 };
+    b.committed += v.committed;
+    b.landed += v.landed;
+    by.set(k, b);
+  }
+  return [...by].map(([k, v]) => `${k} ${v.committed} (${pct(v.landed / Math.max(1, v.committed))})`).join(', ') || '-';
+}
+
+/** Pacing and commitment (tests/balance/pace-recorder.ts). */
+function paceLines(fights: FightReport[], minutes: number): string[] {
+  const ps = fights.filter((f) => f.pace);
+  if (!ps.length) return [];
+  const fs = ps.flatMap((f) => f.pace!.fighters);
+  const sum = (k: (x: (typeof fs)[number]) => number) => fs.reduce((a, x) => a + k(x), 0);
+  const inRange = Math.max(1e-6, sum((x) => x.inRangeS));
+  const idle = sum((x) => x.idleS);
+  const by = new Map<string, number>();
+  for (const x of fs) for (const [k, v] of Object.entries(x.idleBy)) by.set(k, (by.get(k) ?? 0) + (v ?? 0));
+  const committed = ps.reduce((a, f) => a + f.pace!.committed[0] + f.pace!.committed[1], 0);
+  const twoWay = ps.reduce((a, f) => a + f.pace!.twoWay, 0);
+  const firstEx = ps.map((f) => f.pace!.firstExchange ?? f.length);
+  const cs = { started: sum((x) => x.combos.started), completed: sum((x) => x.combos.completed), steps: sum((x) => x.combos.steps), thrown: sum((x) => x.combos.stepsThrown) };
+  const closed = new Map<string, number>();
+  for (const x of fs) for (const [k, v] of Object.entries(x.combos.closedBy)) closed.set(k, (closed.get(k) ?? 0) + v);
+  const fe = { asked: sum((x) => x.feints.asked), windups: sum((x) => x.feints.windups), reads: sum((x) => x.feints.reads), bites: sum((x) => x.feints.bites) };
+  const lv = new Map<string, { reads: number; bites: number }>();
+  for (const x of fs) for (const [k, v] of Object.entries(x.feints.byLevel)) { const a = lv.get(k) ?? { reads: 0, bites: 0 }; a.reads += v.reads; a.bites += v.bites; lv.set(k, a); }
+  const re = new Map<string, number>();
+  for (const x of fs) for (const [k, v] of Object.entries(x.feints.reactions)) re.set(k, (re.get(k) ?? 0) + v);
+  const base = { windows: sum((x) => x.baseline.windows), bites: sum((x) => x.baseline.bites) };
+  const minds = [...new Set(ps.map((f) => f.mind ?? 'sparring'))].join(', ');
+  return [
+    `pace (${minds}):`,
+    `  committed strikes per minute (both)      ${(committed / Math.max(1e-6, minutes)).toFixed(1)}   target >= 30 thrown, >= 20 landed`,
+    `    by footing (committed, landed share): ${footingLine(ps)}`,
+    `  idle in range                            ${pct(idle / inRange)} of ${inRange.toFixed(0)} fighter-s in range   target <= 20%`,
+    `    why: ${[...by].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v / Math.max(1e-6, idle))}`).join(', ') || '-'}`,
+    `  first two-way exchange                   median ${median(firstEx).toFixed(1)} s; strikes traded within 1 s of one of his ${pct(twoWay / Math.max(1, committed))}`,
+    `  combos                                   ${cs.started} started, ${pct(cs.completed / Math.max(1, cs.started))} complete, steps thrown ${pct(cs.thrown / Math.max(1, cs.steps))} (${[...closed].map(([k, v]) => `${k} ${v}`).join(', ') || '-'})`,
+    `  feints                                   ${fe.asked} asked, ${fe.windups} windups on a feint intent, ${fe.reads} read, bit ${pct(fe.bites / Math.max(1, fe.reads))} (${[...lv].map(([k, v]) => `${k} ${v.bites}/${v.reads}`).join(', ') || '-'}; ${[...re].map(([k, v]) => `${k} ${v}`).join(', ') || '-'})`,
+    `  no-feint baseline                        ${pct(base.bites / Math.max(1, base.windows))} of ${base.windows} windows`,
   ];
 }
 
@@ -671,6 +785,8 @@ async function main(): Promise<void> {
   if (mocap) process.env.SD_MOCAP_FOOTWORK = mocap; // likewise (1 | 0 | steps | style)
   const ring = arg('ring', '');
   if (ring) process.env.SD_RING_IQ = ring; // ring IQ's footwork rules (1 | 0)
+  const mind = arg('mind', '');
+  if (mind) process.env.SD_MIND = mind; // sparring | house
   const fi = process.argv.indexOf('--fight');
   if (fi >= 0) {
     const [red = 'bruiser', blue = 'striker', secs = '120', seed = '1'] = process.argv.slice(fi + 1, fi + 5);
