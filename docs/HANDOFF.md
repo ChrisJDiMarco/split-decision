@@ -120,6 +120,11 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
   - (c) Every measured whiff started in range, so hit rate and aim are the body's job.
   - (d) If mocap kicks turn on with clip-based ranges, keep src/brain/ranges.ts (reads def.range) in sync.
 
+- STRIKE POWER (2026-10-06): audit + plan in docs/design/strike-power.md. Fists land at 2-4.5 m/s against a boxer's 9, mostly because of how strikes are controlled.
+  - FOR THE BALANCE BUILD'S P3 AGENT: implement section 2's control side. That covers burst mode (cut servo damping during the strike), ballistic profiles aimed 25-35 cm through the target, throw distance set for 85-95% extension, a stiff aligned arm, the hip→chest→shoulder→elbow chain, step-in momentum, fast kicks (pre-shift within 1/ω0), joint aim points, and the kick anomalies.
+  - Actuator swaps ONLY as Chris approves them (decision D1, see below).
+  - The damage overhaul (joint loads by channel, physical dents, per-design durability, events with a position) is a separate build waiting for Chris's sign-off.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
