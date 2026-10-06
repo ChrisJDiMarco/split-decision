@@ -127,6 +127,15 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - Damage overhaul APPROVED and running (`damage-overhaul`, task wfqk054jv; to resume: script damage-overhaul-wf_3264ae7f-e60.js with resumeFromRunId wf_3264ae7f-e60): joint loads by channel, physical dents (+ ~2x labelled visual boost), per-design durability, events with a position, VFX/audio by cause. Contact recoil and threshold calibration come after P3 makes strikes fast.
 
+- Damage overhaul DONE (f96f924, reviewed). CALIBRATION AFTER P3 (stage 5b, via `tools/strike-bench.ts --tune DAMAGE_TUNING.*`):
+  - Head pops are too frequent (3-4 in 8 fights, mostly FIRECRACKER's 13 N·s head).
+  - Fights with an injury: 63% (target 25-50%).
+  - On 3-axis shoulders and hips, wear is counted on all three joints.
+  - The rs04 bearing rating's source is inconsistent.
+  - HAYMAKER's forearms gouge from blocking; thicker guards would be a designs change.
+  - Hits to the torso and head never arm the hips or knees.
+- Balance build: p1:reverify DONE; P5 mocap footwork (+ ring IQ) is RUNNING.
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
