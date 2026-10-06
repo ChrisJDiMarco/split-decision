@@ -100,6 +100,8 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - RING IQ (Chris, 23:15): "no awareness of the distance ... their arm length and effective range for strikes". Spec: docs/design/ring-iq.md. BALANCE-ENGINE AGENTS (P5 footwork, pace stage) must implement its body rules: edge/pocket/outside zones, enter WITH a strike, step out after combos, predict the meeting point, no walking into guard contact. The mind side (range facts for Jev/House) is running now as `range-awareness-mind`.
 
+- 2026-10-06: the spend limit (reset Oct 5 10pm) had cut off the balance fix and everything after it, plus the range-awareness mind build. Retried: balance wt48stc28 (resume wf_38bd1af8-d17; p1:build and p1:verify replayed from cache, p1:fix running, told to review the partial feedforward.ts edit) and range-awareness-mind w2dko0n8h (run wf_4aba2ef3-4c1, told to review and finish its partial brain edits: src/brain/ranges.ts and others). Overnight polish and the NEXT GEN Phase 0 test still wait for Chris's "going to bed".
+
 ## Next steps, in order
 
 1. **Build the electric roster** from `docs/research/08-modern-roster.json` (FIRECRACKER 1.30 m/38 kg, SAVATE 1.73 m/83 kg, HAYMAKER 1.82 m/103 kg, PYLON 1.89 m/79 kg; art in `docs/concept-art/modern/`). New humanoid specs, electric catalog motors, robot-kit recipes for their heads/shells/gloves. Make them the default roster; keep Bruiser/Striker/Goliath as an optional "iron age" heavyweight class. Lighter bodies should balance far more easily.
