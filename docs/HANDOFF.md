@@ -125,7 +125,7 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
   - D1 actuator swaps: Chris APPROVED ALL the recommended swaps (2026-10-06). Gantry A/B each one first, then the balance drills.
   - The damage overhaul (joint loads by channel, physical dents, per-design durability, events with a position) is a separate build waiting for Chris's sign-off.
 
-- Damage overhaul APPROVED and running (`damage-overhaul`): joint loads by channel, physical dents (+ ~2x labelled visual boost), per-design durability, events with a position, VFX/audio by cause. Contact recoil and threshold calibration come after P3 makes strikes fast.
+- Damage overhaul APPROVED and running (`damage-overhaul`, task wfqk054jv; to resume: script damage-overhaul-wf_3264ae7f-e60.js with resumeFromRunId wf_3264ae7f-e60): joint loads by channel, physical dents (+ ~2x labelled visual boost), per-design durability, events with a position, VFX/audio by cause. Contact recoil and threshold calibration come after P3 makes strikes fast.
 
 ## Next steps, in order
 
