@@ -21,6 +21,7 @@ export const GYRO_POLICY = {
   bleedInsideM: 0.03, // DCM this deep inside the support before the rotor may bleed
   bleedS: 1.2,
   bleedMarginM: 0.015, // COP shift kept back when sizing the bleed torque
+  bleedFadeS: 0.08, // the bleed fades in after a touchdown and out before a lift-off over this long
 };
 
 export interface GyroCommand {
@@ -36,9 +37,10 @@ export function newGyroCommand(): GyroCommand {
 /**
  * `shortfall`: CMP shift (world, m) the soles could not deliver. `saturation`: the rotor's fill
  * (0..1). `inside`: how deep the DCM sits inside the support (m, negative outside). `torsoOmega`:
- * world angular velocity of the torso.
+ * world angular velocity of the torso. `bleedShare`: 0..1, how much of the bleed the soles may carry
+ * now (two feet down; it fades in and out around the steps, so the COP that carries it never jumps).
  */
-export function gyroPolicy(mass: number, comZ: number, torsoOmega: Vec3, shortfall: P2, saturation: number, inside: number, double: boolean, out: GyroCommand): GyroCommand {
+export function gyroPolicy(mass: number, comZ: number, torsoOmega: Vec3, shortfall: P2, saturation: number, inside: number, bleedShare: number, out: GyroCommand): GyroCommand {
   const mg = mass * GRAVITY;
   const P = GYRO_POLICY;
   const bg = P.damping * mg * Math.max(0.3, comZ);
@@ -55,9 +57,9 @@ export function gyroPolicy(mass: number, comZ: number, torsoOmega: Vec3, shortfa
   out.demand[0] = mg * ey - taper * bg * torsoOmega[0];
   out.demand[1] = -mg * ex - taper * bg * torsoOmega[1];
   out.demand[2] = 0;
-  if (double && inside >= P.bleedInsideM) {
+  if (bleedShare > 0 && inside >= P.bleedInsideM) {
     out.bleedS = P.bleedS;
-    out.bleedMaxNm = mg * Math.max(0, inside - P.bleedMarginM);
+    out.bleedMaxNm = bleedShare * mg * Math.max(0, inside - P.bleedMarginM);
   } else {
     out.bleedS = Infinity;
     out.bleedMaxNm = 0;

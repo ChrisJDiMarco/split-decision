@@ -39,11 +39,15 @@ export function effectiveKp(r: RobotRuntime, index: number): number {
   return scale ? j.kp * scale[index] : j.kp;
 }
 
-/** Servo damping actually in force, over kp (for the velocity feed-forward's target shift). */
-function kdOverKp(r: RobotRuntime, index: number, kp: number): number {
+/**
+ * Target shift that turns the servo's damping on `v` into damping on the tracking error: kd·v/kp,
+ * with the damping actually in force. Evaluated as (kd·scale·v)/kp so that without the balance
+ * engine's scales (the legacy path) the arithmetic is bit-for-bit what it was before them.
+ */
+function dampShift(r: RobotRuntime, index: number, kp: number, v: number): number {
   const j = r.joints[index];
   const scale = r.mem.dampScale as Float64Array | undefined;
-  return (j.kd * (scale && j.state === 'ok' ? scale[index] : 1)) / kp;
+  return (j.kd * (scale && j.state === 'ok' ? scale[index] : 1) * v) / kp;
 }
 
 /** Options of the balance engine's feed-forward (the legacy path passes none). */
@@ -112,7 +116,7 @@ export function addVelocityFeedforward(r: RobotRuntime, targets: Float64Array, q
     if (kp <= 0) continue;
     const j = r.joints[i];
     const v = Math.max(-j.motor.noLoadSpeedRadS, Math.min(j.motor.noLoadSpeedRadS, qd[i]));
-    targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, kdOverKp(r, i, kp) * v));
+    targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, dampShift(r, i, kp, v)));
   }
 }
 
@@ -155,7 +159,7 @@ export class VelocityFeedforward {
       this.prev[i] = targets[i];
       const kp = effectiveKp(r, i);
       if (kp <= 0 || this.hold[i]) continue;
-      const shift = kdOverKp(r, i, kp) * this.rate[i];
+      const shift = dampShift(r, i, kp, this.rate[i]);
       targets[i] += Math.max(-MAX_VEL_SHIFT_RAD, Math.min(MAX_VEL_SHIFT_RAD, shift));
     }
   }

@@ -24,6 +24,10 @@ export const COM_REF = {
   maxErrM: 0.06, // the reference never leads the body by more than this
   track: 1.0, // pelvis displacement per metre of COM error
   trackVel: 0.03, // ...and per m/s of COM velocity error (s)
+  // The CMP never drives the body's own DCM away from the plan: once the body's DCM is this far from
+  // the plan (m), the CMP is kept guardM behind it along the way it has to go (fully at +3 cm).
+  guardFromM: 0.02,
+  guardM: 0.01,
 };
 
 export class ComReference {
@@ -48,7 +52,7 @@ export class ComReference {
    * `gyroReach`: how far past the soles the gyro may carry the CMP right now (m). Writes the
    * commanded CMP, the COP and the gyro's share.
    */
-  step(s: Sense, vel: P2, dt: number, ref: DcmSample, xiRef: P2, gain: number, support: P2[], gyroReach: number, cmp: P2, cop: P2, gyroShare: P2): void {
+  step(s: Sense, vel: P2, dt: number, ref: DcmSample, xiRef: P2, gain: number, support: P2[], gyroReach: number, cmp: P2, cop: P2, gyroShare: P2, xiBody?: P2): void {
     if (!this.primed) this.reset(s, vel);
     const w = s.omega0;
     // Leash to the body.
@@ -62,6 +66,7 @@ export class ComReference {
       this.xi[i] = this.c[i] + this.v[i] / w;
       cmp[i] = ref.r[i] + gain * (this.xi[i] - xiRef[i]);
     }
+    if (xiBody) guardCmp(cmp, xiBody, xiRef);
     const p = support.length >= 3 ? clampToPolygon(support, cmp) : cmp;
     cop[0] = p[0];
     cop[1] = p[1];
@@ -87,4 +92,23 @@ export class ComReference {
     }
     return out;
   }
+}
+
+/**
+ * The reference model leads the body (its leash allows maxErrM), and its CMP is placed for its own
+ * DCM. When the body's DCM lags the plan by more than a couple of centimetres, that CMP can land on
+ * the far side of the body's DCM, and then it drives the body away from the plan (ξ̇ = ω(ξ − CMP))
+ * while the reference waits for it: a stall that ends in a re-plan or a capture step. So the CMP is
+ * held guardM behind the body's own DCM along the way the body has to go.
+ */
+function guardCmp(cmp: P2, xiBody: P2, xiRef: P2): void {
+  const dx = xiRef[0] - xiBody[0], dy = xiRef[1] - xiBody[1];
+  const d = Math.hypot(dx, dy);
+  const k = Math.min(1, Math.max(0, (d - COM_REF.guardFromM) / 0.01));
+  if (k <= 0) return;
+  const ux = dx / d, uy = dy / d;
+  const ahead = (cmp[0] - xiBody[0]) * ux + (cmp[1] - xiBody[1]) * uy + COM_REF.guardM;
+  if (ahead <= 0) return;
+  cmp[0] -= k * ahead * ux;
+  cmp[1] -= k * ahead * uy;
 }

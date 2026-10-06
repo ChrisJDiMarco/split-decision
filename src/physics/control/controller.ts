@@ -47,6 +47,12 @@ export const YAW_TUNING = {
   leadSingle: 0.06, // rad, on one foot...
   leadDouble: 0.25, // ...and on two
   stumbleM: 0.35, // capture point this far outside the feet in double support: clip footwork gives way to capture steps
+  // The balance engine's leads. A lead is a hip yaw torque on the planted sole, whose torsional grip
+  // is a fraction of the servo's: measured, a 0.06 rad lead at full stiffness spun the stance sole
+  // 10-27° a step and the heading drifted 30-60° over a walk. The engine softens the stance hip yaw
+  // (BALANCE_TUNING.stanceHipYawKp) and keeps the leads moderate.
+  dcmLeadSingle: 0.05,
+  dcmLeadDouble: 0.15,
 };
 const NO_TORQUE: Vec3 = [0, 0, 0];
 const DOWN_BLEED_S = 0.3; // lying on the canvas, the gyro desaturates this fast (within its torque cap)
@@ -89,6 +95,8 @@ export const COUNTER_YAW = {
 
 /** The balance engine's stance: 1.02 × the hip offset wide (docs/design/balance-engine.md §4.3). */
 const DCM_STANCE = { widthFraction: 1.02 };
+const GUARD_COM_LEAD_M = 0.07; // the COM sits about this far ahead of the torso origin in the stance
+const GUARD_MEASURE_TAU_S = 1;
 
 export class HumanoidController {
   readonly geo: HumanoidGeometry;
@@ -134,6 +142,10 @@ export class HumanoidController {
   private counterYaw = 0;
   /** The balance engine drove this tick (it does not during the get-up's rise: see stand()). */
   private engineDrove = false;
+  /** How far the guard's front (the furthest fist face) sits ahead of the COM in the stance, m. */
+  private guardFwd: number;
+  /** How far the COM sits ahead of the stance frame's centre toward the opponent, standing, m. */
+  private comFwd = 0.05;
   private massAge = 0;
   /** The design's motion library for playback (null until it has loaded, or none built). */
   mocap: MocapSet | null = null;
@@ -182,6 +194,38 @@ export class HumanoidController {
     const upper = r.joints.flatMap((j, i) => (/^(waist_|shoulder_|elbow_)/.test(j.name) ? [i] : []));
     this.inertia = new Inertializer(r.joints.length, r.joints.map((j) => j.motor.noLoadSpeedRadS), [this.jm.neckYaw], upper);
     this.inertia.enabled = CONTROL.inertialize;
+    // The guard's reach from the stance geometry (the torso turned by the blade and the waist), less
+    // the COM's usual lead over the torso origin; refined from the body once it stands (guardReach).
+    const blade = this.stance.pelvisYaw + this.stance.waistYaw;
+    const fwd = (side: Side) => this.stance.guard[side].fist[0] * Math.cos(blade) - this.stance.guard[side].fist[1] * Math.sin(blade);
+    this.guardFwd = Math.max(fwd('l'), fwd('r')) - GUARD_COM_LEAD_M + this.geo.arms.l.fistHalf;
+  }
+
+  /**
+   * How far the guard reaches ahead of the COM toward the opponent (the furthest fist face), m.
+   * Two guards closer than the sum of their reaches touch (docs/design/ring-iq.md: no walking into
+   * guard contact). Follows the body while it stands in its guard, so loadouts and damage count.
+   */
+  guardReach(): number {
+    return this.guardFwd;
+  }
+
+  /** How far the COM stands ahead of the stance frame's centre toward the opponent (the stance
+   *  goal is a frame: a COM-to-COM range needs it). */
+  comLead(): number {
+    return this.comFwd;
+  }
+
+  /** Tracks the guard's real reach while standing in it (no skill, both feet down). */
+  private measureGuard(s: Sense, dt: number): void {
+    if (this.skills.active() || this.pose.holdFeet || !this.gait.bothPlanted()) return;
+    const ux = Math.cos(this.heading), uy = Math.sin(this.heading);
+    let best = -Infinity;
+    for (const side of SIDES) best = Math.max(best, (s.fists[side][0] - s.com[0]) * ux + (s.fists[side][1] - s.com[1]) * uy);
+    const k = Math.min(1, dt / GUARD_MEASURE_TAU_S);
+    this.guardFwd += (best + this.geo.arms.l.fistHalf - this.guardFwd) * k;
+    const f = this.gait.currentFrame();
+    this.comFwd += ((s.com[0] - f.x) * ux + (s.com[1] - f.y) * uy - this.comFwd) * k;
   }
 
   /** The skill this robot throws for `id`: the mocap version once its library is loaded. */
@@ -208,9 +252,12 @@ export class HumanoidController {
     solveBody(this.cmd, this.geo, this.jm, this.q, { pos: s.pelvisPos, rot: s.pelvisRot, shin: { l: s.feet.l.shinRot, r: s.feet.r.shinRot } });
     this.markSwitches();
     this.inertia.apply(this.q, dt);
-    for (const side of SIDES) this.velFF.hold[this.jm.leg[side].hipYaw] = this.gait.planted(side) ? 1 : 0;
-    this.velFF.apply(this.r, this.q, dt);
     const e = this.engine;
+    // On the balance engine a swinging leg is solved from the measured pelvis too, so its hip yaw
+    // target carries the pelvis's own spin as well: no shift on either hip yaw.
+    const engineLegs = !!e && this.engineDrove;
+    for (const side of SIDES) this.velFF.hold[this.jm.leg[side].hipYaw] = engineLegs || this.gait.planted(side) ? 1 : 0;
+    this.velFF.apply(this.r, this.q, dt);
     const ground = e && ctx.released && this.engineDrove ? { force: e.force, headroom: true } : undefined;
     applyGravityFeedforward(views(ctx), this.r, this.joints, footLoads(this.geo, this.gait, s, this.plannedCop), this.mass, this.q, 1, ground);
     this.r.targets.set(this.q);
@@ -458,6 +505,7 @@ export class HumanoidController {
     const st = this.stance;
     const e = this.engine!;
     const opp = this.opp!;
+    this.measureGuard(s, dt);
     const [wf, wl] = this.pose.weightShift;
     const shift = rot2(wf, wl, this.heading);
     const spec = this.gyro?.spec;
@@ -471,7 +519,7 @@ export class HumanoidController {
     if (e.captured) this.skills.cancel(env, true);
     // Walking squares the hips to the travel; over the last two steps they turn back to the blade.
     const want = e.walking() ? e.planner.travel : bearing + st.pelvisYaw + this.pose.pelvisYaw;
-    const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, want));
+    const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, want), true);
     // Hip and waist bend (only with the gyro damaged): attitude only; the soles carry the COM.
     const bend = this.upperBody.update(s, this.gait.supportPolygon(), s.heading, this.gyroHealth(), dt);
     this.cmd.pelvisPos = [e.pelvis[0], e.pelvis[1], st.pelvisHeight - this.pose.pelvisDrop];
@@ -540,8 +588,9 @@ export class HumanoidController {
     return this.gyro ? clamp(this.r.gyro?.health ?? 0, 0, 1) : 0;
   }
 
-  private yawTarget(s: Sense, want: number): number {
-    const lead = this.gait.bothPlanted() ? YAW_TUNING.leadDouble : YAW_TUNING.leadSingle;
+  private yawTarget(s: Sense, want: number, dcm = false): number {
+    const both = this.gait.bothPlanted();
+    const lead = dcm ? (both ? YAW_TUNING.dcmLeadDouble : YAW_TUNING.dcmLeadSingle) : both ? YAW_TUNING.leadDouble : YAW_TUNING.leadSingle;
     return s.heading + clamp(wrapAngle(want - s.heading), -lead, lead);
   }
 

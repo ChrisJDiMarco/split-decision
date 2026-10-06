@@ -34,6 +34,18 @@ const MOVE_DEADBAND = 0.05; // |move| under this plants the feet
 const MOVE_LOOKAHEAD_S = 0.8; // the goal is where the stance would be this far ahead at the asked speed
 const MOVE_SAFE_SPEED = 0.25; // × √(g·z_c): the design's safe walking speed at |move| = 1
 const MOVE_MIN_RANGE_M = 0.45; // walking at him never plans the stance closer than this (COM to COM)
+// Ring IQ (docs/design/ring-iq.md), balance engine only: footwork never plans the stance into guard
+// contact, and in range it holds its ground instead of chasing every sway of the opponent.
+const GUARD_CLEARANCE_M = 0.08; // the stance stops this far short of the two guards touching (angled, bladed guards reach a little further)
+const CLOSE_MARGIN_M = 0.08; // closing in, the stance aims this much further out (a walk's momentum carries it a few cm on)
+// In range: a hold starts with the range between just short of the guards touching and this far
+// past the goal range, and lasts until the range leaves [touching, goal + RANGE_HOLD_OUT_M].
+const RANGE_HOLD_IN_M = 0.12;
+const RANGE_HOLD_OUT_M = 0.22;
+const RANGE_HOLD_SHORT_M = 0.03; // ...a hold may start this much inside the guards' standoff
+const RANGE_HOLD_GAP_S = 0.05; // a hold not renewed within this long is over
+const RANGE_HOLD_SPEED = 0.25; // m/s: a hold starts only from a body this close to rest
+const GAP_SHARE_PRIOR = 0.3; // m/s: two fighters closing split the gap by their speeds (plus this each)
 
 /**
  * TODO(control-build): safe fallbacks for the fighter-intelligence tactics until the control build
@@ -63,6 +75,9 @@ export class TacticRunner {
   private sidestepUntil = -1;
   private sidestepSign = 1;
   private holdStart = -1;
+  /** The stance frame held in range (balance engine), and when the hold was last renewed. */
+  private held: { x: number; y: number } | null = null;
+  private heldAt = -Infinity;
 
   constructor(private readonly c: HumanoidController) {}
 
@@ -188,7 +203,7 @@ export class TacticRunner {
 
   private footwork(s: Sense, tactic: Tactic, dist: number): void {
     switch (tactic) {
-      case 'close_distance': return this.goalAt(s, this.closeRange(), 0);
+      case 'close_distance': return this.goalAt(s, this.c.engine ? Math.max(this.closeRange(), this.standoff() + CLOSE_MARGIN_M) : this.closeRange(), 0);
       case 'circle_left': return this.goalAt(s, clampRange(dist), CIRCLE_RAD);
       case 'circle_right': return this.goalAt(s, clampRange(dist), -CIRCLE_RAD);
       case 'retreat': return this.goalAt(s, Math.min(dist + RETREAT_M, 2 * APOTHEM), 0);
@@ -212,7 +227,7 @@ export class TacticRunner {
     if (this.c.skills.active()) return this.still();
     const [lo, hi] = def.range(this.c.geo);
     const { sweet, throwAt } = def.approach ?? { sweet: SWEET_SPOT, throwAt: THROW_ZONE };
-    if (dist > lo + throwAt * (hi - lo) || dist < lo) return this.goalAt(s, lo + sweet * (hi - lo), 0);
+    if (dist > lo + throwAt * (hi - lo) || dist < lo) return this.goalAt(s, this.strikeRange(lo + sweet * (hi - lo), lo + throwAt * (hi - lo)), 0, false);
     this.still();
     if (!now && ctx.time < this.nextStrikeAt) return;
     const ready = def.kind === 'leg' ? this.c.readyToKick() : this.c.readyToStrike();
@@ -230,7 +245,7 @@ export class TacticRunner {
     }
     if (this.c.skills.active()) return this.still();
     const [lo, hi] = def.range(this.c.geo);
-    if (dist > lo + THROW_ZONE * (hi - lo)) return this.goalAt(s, lo + SWEET_SPOT * (hi - lo), 0);
+    if (dist > lo + THROW_ZONE * (hi - lo)) return this.goalAt(s, lo + SWEET_SPOT * (hi - lo), 0, false);
     this.still();
     if (this.c.gait.phase !== 'double' || !this.c.gait.bothPlanted()) return;
     if (this.c.startSkill(def, zone, aggression)) this.holdStart = ctx.time;
@@ -251,7 +266,7 @@ export class TacticRunner {
     const def = this.usable('jab') ?? this.usable('cross');
     if (!def || this.c.skills.active()) return this.still();
     const hi = def.range(this.c.geo)[1];
-    if (dist > hi + 0.3) return this.goalAt(s, hi, 0);
+    if (dist > hi + 0.3) return this.goalAt(s, hi, 0, false);
     this.still();
     if (ctx.time < this.nextStrikeAt || this.c.gait.phase !== 'double') return;
     this.feint = this.c.startSkill(def, 'head', 0.5);
@@ -282,27 +297,53 @@ export class TacticRunner {
   }
 
   /**
-   * Where the opponent stands: its COM, or on the balance engine its COM moved by the part of its
-   * DCM lead (ċ/ω₀) along the line between the two, where its approach or retreat carries it. Two
-   * fighters walking in plan against where the other will stop, not where it was, so neither walks
-   * into the other and backs off again. (Across the line it is left out: a stepping opponent's
-   * sway would swing the bearing.)
+   * Balance engine: how far from the opponent to plan the stance so that `d` is where the two end up.
+   * Two fighters closing on each other each re-aim at the other every step: each planning the whole
+   * gap meets the other guard to guard. So the gap beyond `d` is split by their speeds toward each
+   * other (each with a small prior, so two fighters starting together each plan half, and one who
+   * stands still leaves the whole gap to the other).
    */
-  private oppPoint(s: Sense): readonly number[] {
+  private sharedRange(s: Sense, d: number): number {
     const opp = this.c.opp!;
-    if (!this.c.engine) return opp.com;
     const dx = s.com[0] - opp.com[0], dy = s.com[1] - opp.com[1];
-    const d = Math.hypot(dx, dy);
-    if (d < 1e-6) return opp.com;
-    const ux = dx / d, uy = dy / d;
-    const w = Math.sqrt(9.81 / Math.max(0.3, opp.com[2]));
-    const lead = (opp.vel[0] * ux + opp.vel[1] * uy) / w;
-    return [opp.com[0] + ux * lead, opp.com[1] + uy * lead, opp.com[2]];
+    const dist = Math.hypot(dx, dy);
+    if (dist <= d || dist < 1e-6) return d;
+    const ux = dx / dist, uy = dy / dist;
+    const vHim = Math.max(0, opp.vel[0] * ux + opp.vel[1] * uy);
+    const vMe = Math.max(0, -(s.comVel[0] * ux + s.comVel[1] * uy));
+    const share = (vMe + GAP_SHARE_PRIOR) / (vMe + vHim + 2 * GAP_SHARE_PRIOR);
+    return d + (dist - d) * (1 - share);
   }
 
-  /** Stand `d` from the opponent, rotated `turn` around it, facing it, inside the cage. */
-  private goalAt(s: Sense, d: number, turn: number): void {
-    const o = this.oppPoint(s);
+  /**
+   * COM-to-COM range at which the two guards would touch, plus a little clearance (balance engine).
+   * Footwork stops here; a strike that reaches from here is thrown from here, a shorter one walks in.
+   */
+  private standoff(): number {
+    const opp = this.c.opp?.robot.mem.control as HumanoidController | undefined;
+    const mine = this.c.guardReach();
+    return mine + (opp?.guardReach ? opp.guardReach() : mine) + GUARD_CLEARANCE_M;
+  }
+
+  /** Where to stand to throw a strike whose sweet spot is `sweet` and which reaches from `reach`. */
+  private strikeRange(sweet: number, reach: number): number {
+    if (!this.c.engine) return sweet;
+    const off = this.standoff();
+    return off <= reach - 0.03 ? Math.max(sweet, off) : sweet;
+  }
+
+  /**
+   * Stand `d` from the opponent, rotated `turn` around it, facing it, inside the cage. `footwork`:
+   * on the balance engine, footwork shares the gap with an opponent walking in (sharedRange) and
+   * holds its ground once in range (holdInRange). Walking in to throw, feint or clinch does neither:
+   * it needs its own range now, and that may be inside the guards' standoff, where a hold, or a
+   * goal that only ever covers part of the gap to a fighter standing still, stops it short for good
+   * (the feet do not take steps shorter than FOOTWORK_TUNING.holdTol).
+   */
+  private goalAt(s: Sense, dWant: number, turn: number, footwork = true): void {
+    const o = this.c.opp!.com;
+    // (A COM-to-COM range; the goal is the stance frame, whose centre stands behind the COM.)
+    const d = this.c.engine ? (turn === 0 && footwork ? this.sharedRange(s, dWant) : dWant) + this.c.comLead() : dWant;
     const ang = Math.atan2(s.com[1] - o[1], s.com[0] - o[0]) + turn;
     let x = o[0] + Math.cos(ang) * d;
     let y = o[1] + Math.sin(ang) * d;
@@ -311,7 +352,47 @@ export class TacticRunner {
       x *= ARENA_LIMIT_M / rr;
       y *= ARENA_LIMIT_M / rr;
     }
+    if (this.c.engine && turn === 0 && footwork && this.holdInRange(s, dWant)) return;
+    if (!footwork) this.held = null;
     this.c.goal = { x, y, heading: Math.atan2(o[1] - y, o[0] - x) };
+  }
+
+  /**
+   * Balance engine, in range: hold the stance where it stands, facing the opponent, instead of
+   * chasing every sway of his (both fighters re-aim at each other every tick, so two goals that
+   * chase each other never settle). The feet step again once the range is off by more than the
+   * hold band. The held frame stays the goal, so the stance is still a target the feet stand on.
+   * The range is measured from this body's DCM (where its momentum carries it) to his COM.
+   */
+  private holdInRange(s: Sense, d: number): boolean {
+    const g = this.c.gait;
+    const opp = this.c.opp!;
+    const o = opp.com;
+    const xi = this.c.engine!.state.xi;
+    const dist = Math.hypot(o[0] - xi[0], o[1] - xi[1]);
+    const renewed = this.held !== null && s.time - this.heldAt <= RANGE_HOLD_GAP_S;
+    const settled = renewed || (g.phase === 'double' && g.bothPlanted() && Math.hypot(s.comVel[0], s.comVel[1]) < RANGE_HOLD_SPEED);
+    // The band around the goal range, never reaching into the guards (unless the goal itself is
+    // inside them: a short strike walked into).
+    const band = renewed ? RANGE_HOLD_OUT_M : RANGE_HOLD_IN_M;
+    const touch = this.standoff() - (renewed ? 0 : RANGE_HOLD_SHORT_M);
+    const near = d < touch ? d - band : Math.max(touch, d - band);
+    const far = d + band;
+    if (dist < near || dist > far || !settled) {
+      this.held = null;
+      return false;
+    }
+    if (!renewed) {
+      // Where the feet are going to stand: the end of the steps still planned (an arrival's last
+      // drag), else where they stand now.
+      const e = this.c.engine!;
+      const f = e.planner.count > e.planner.next || !g.bothPlanted() ? e.planner.endFrame : g.currentFrame();
+      this.held = { x: f.x, y: f.y };
+    }
+    this.heldAt = s.time;
+    const h = this.held!;
+    this.c.goal = { x: h.x, y: h.y, heading: Math.atan2(opp.com[1] - h.y, opp.com[0] - h.x) };
+    return true;
   }
 }
 

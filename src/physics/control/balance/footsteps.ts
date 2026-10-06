@@ -27,15 +27,16 @@ export type GaitKind = 'hold' | 'walk' | 'drag';
 /** Footwork tuning (exported so tools can sweep it; the worker never changes it). */
 export const FOOTWORK_TUNING = {
   walkBeyondM: 2.4, // opponent this far: walk
-  walkEndM: 1.1, // a walk toward him stops this far from him (outside his reach); step-drag the rest
+  walkEndM: 0, // a walk toward him stops at least this far from him (0: tactics' goal already stops outside his guard)
   minGaitS: 0.3, // hold any gait at least this long
   walkMinM: 0.7, // walk only to a goal at least this far ahead...
   walkMaxAngle: 0.8, // ...within this of the way the body faces (rad)
-  walkSs: 1.5, // single support per walking step, × 1/ω₀ (1.15 swings a heavy leg too hard)
+  walkSs: 1.7, // single support per walking step, × 1/ω₀ (1.15-1.5 swing a heavy leg too hard: its hip
+  //            saturates and the torso pitches with every swing; longer, slower steps walk smoother)
   walkDs: 0.25, // double support between walking steps, × 1/ω₀
   walkSpeedLo: 0.26, // v̂ = v / √(g·z_c) at aggression 0...
   walkSpeedHi: 0.34, // ...and 1 (0.3 at 0.5)
-  walkLift: 0.05, // swing apex, × leg length
+  walkLift: 0.03, // swing apex, × leg length (in the crouch a higher apex folds the knee and swings the hip far)
   // Sole centres either side of the walk line: the soles' inner edges this far apart (a human's
   // ~10 cm step width). The ground force's yaw moment about the COM grows with the lever arm:
   // at 1.05 × the hip offset the planted foot spun 0.25 rad a step on SAVATE and the torso yawed
@@ -43,7 +44,12 @@ export const FOOTWORK_TUNING = {
   walkGapM: 0.02,
   walkToeOut: 0.06, // rad
   walkMaxStep: 0.5, // × leg length between consecutive footholds along the walk
-  walkFirst: 0.55, // from rest the first step is this share of a full one (the second halfway)
+  walkFirst: 1, // from rest the first step is this share of a full one (the second halfway)
+  stopMarginM: 0.03, // a walk's final stance centre lies at least this far past the body's DCM
+  walkLast: 0.5, // the last walking step before the stance is this share of a full one (the one before halfway)
+  arrivalKeepM: 0.25, // a goal within this of the frame a walk is arriving at leaves the arrival as it is
+  slotTolM: 0.04, // a foot this close to its slot is in it
+  arriveSnapM: 0.2, // a lead foot landed this close to its slot is the stance (the rear foot joins it)
   dragSwing: 0.75, // × 1/ω₀
   dragDs: 0.35, // × 1/ω₀ between the two steps of a pair and between pairs
   dragDsAttack: 0.2, // ...at full aggression
@@ -51,7 +57,7 @@ export const FOOTWORK_TUNING = {
   dragStrideAttack: 0.38,
   dragLift: 0.035, // × leg length
   maxTurnPerPair: 0.35, // rad
-  launch: 1.7, // double support before the first step from standing, × 1/ω₀
+  launch: 0.6, // double support before the first step from standing, × 1/ω₀
   finalDs: 0.7, // the CMP slides onto the stance centroid over this, × 1/ω₀
   cmpHeel: -0.25, // walking CMP roll on the stance sole, × half-length from its centre...
   cmpToe: 0.3, // ...to here
@@ -59,7 +65,7 @@ export const FOOTWORK_TUNING = {
   holdTol: { pos: 0.1, yaw: 0.3 }, // a held stance moves only past these...
   moveTol: { pos: 0.05, yaw: 0.15 }, // ...and a moving one stops inside these
   horizon: 8, // footsteps planned ahead
-  swingTorqueShare: 0.55, // a swing may ask the hip for this share of its stall torque at peak
+  swingTorqueShare: 0.55, // a swing may ask the hip for this share of its stall torque at peak (the leg-as-rod model underestimates: FIRECRACKER, whose hips bind first, fell at 0.8)
   swingSpeedShare: 0.6, // ...and this share of its no-load speed
   maxSepL: 0.62, // swing sole within this × L of the stance sole
   minGapL: 0.08, // feet never cross: lateral gap, × L
@@ -90,6 +96,8 @@ export interface PlanInput {
   fromRest: boolean;
   /** The foot that landed last (a walk alternates: the other one swings next). */
   lastSide: Side | null;
+  /** The body's DCM now (a walk under way cannot stop short of it). */
+  xi: P2;
 }
 
 /** What the swing leg's drive can do (from the motor model and the leg's mass). */
@@ -127,11 +135,18 @@ export class FootstepPlanner {
   finalTime = 0;
   /** The goal the last plan was made for (replanning is skipped while it barely moves). */
   readonly planned: StanceFrame = { x: 0, y: 0, heading: 0 };
+  /** The stance frame the planned steps leave the feet in. */
+  endFrame: StanceFrame = { x: 0, y: 0, heading: 0 };
   /** The walk's travel direction (the hips square to it). */
   travel = 0;
+  /** The stance frame a walk's arrival pair is taking the feet to, latched once it is planned (the
+   *  goal moves a little every tick with the opponent: the last two steps must not chase it). */
+  private arrival: StanceFrame | null = null;
 
   private readonly lead: Side;
   private readonly rear: Side;
+  /** The lead and rear feet's slots in the stance frame. */
+  private readonly stanceSlots: { x: number; y: number; rx: number; ry: number; ryaw: number };
 
   /** The swing leg's drive (set by the engine; the default never limits). */
   drive: LegDrive = { stallNm: Infinity, noLoadRadS: Infinity, inertia: 1 };
@@ -139,6 +154,8 @@ export class FootstepPlanner {
   constructor(private readonly geo: HumanoidGeometry, stance: StanceParams, private readonly feet: Gait) {
     this.lead = stance.lead;
     this.rear = other(stance.lead);
+    const rs = stance.slots[this.rear];
+    this.stanceSlots = { x: stance.slots[stance.lead].x, y: stance.slots[stance.lead].y, rx: rs.x, ry: rs.y, ryaw: rs.yaw };
   }
 
   /** The next footstep to lift, or null. */
@@ -180,6 +197,7 @@ export class FootstepPlanner {
     this.planned.heading = goal.heading;
     const walkTo = this.walkTarget(pin, cur, goal);
     const gait = this.chooseGait(pin, cur, goal, walkTo, place);
+    if (gait !== 'walk' || pin.fromRest) this.arrival = null;
     if (gait !== this.gait) {
       this.gait = gait;
       this.gaitSince = pin.time;
@@ -214,6 +232,7 @@ export class FootstepPlanner {
       dcm.add(s.land, s.cmp[1][0], s.cmp[1][1]);
       lastPlace = { ...lastPlace, [s.side]: s.place };
     }
+    this.endFrame = frameOf(this.feet, lastPlace);
     const lp = lastPlace.l, rp = lastPlace.r;
     this.final[0] = (lp.x + rp.x) / 2 + pin.shift[0];
     this.final[1] = (lp.y + rp.y) / 2 + pin.shift[1];
@@ -273,10 +292,10 @@ export class FootstepPlanner {
     const wPos = Math.hypot(walkTo.x - cur.x, walkTo.y - cur.y);
     const dir = Math.atan2(walkTo.y - cur.y, walkTo.x - cur.x);
     const inLine = Math.abs(wrapAngle(dir - cur.heading)) <= T.walkMaxAngle;
-    // A walk under way finishes with its arrival pair (the lead foot, then the rear, into the slots).
-    // (Not once the goal has come back behind the travel: an opponent walking in moves it.)
-    const ahead = (walkTo.x - cur.x) * Math.cos(this.travel) + (walkTo.y - cur.y) * Math.sin(this.travel) > -T.moveTol.pos;
-    const walking = this.gait === 'walk' && underway && wPos > T.moveTol.pos && (inLine || (wPos < T.walkMinM && ahead));
+    // A walk under way finishes with its arrival pair (the lead foot, then the rear, into the slots),
+    // also when the goal has come back on it (an opponent walking in): planWalk puts that stance no
+    // shorter than the body's momentum carries it.
+    const walking = this.gait === 'walk' && underway && (wPos > T.moveTol.pos || !!pin.swing);
     const start = inLine && wPos >= T.walkMinM && pin.oppDist > T.walkBeyondM;
     const want: GaitKind = walking || start ? 'walk' : 'drag';
     if (young && moving && want !== this.gait) return this.gait;
@@ -290,11 +309,39 @@ export class FootstepPlanner {
    * from the feet's midpoint to the goal, alternating either side of it, the count chosen so the
    * lead foot takes the last walking step into its slot and the rear foot then drags into its own.
    */
-  private planWalk(pin: PlanInput, place: Record<Side, FootPlace>, swinging: Side | null, firstLift: number, goal: StanceFrame): boolean {
+  private planWalk(pin: PlanInput, place: Record<Side, FootPlace>, swinging: Side | null, firstLift: number, walkGoal: StanceFrame): boolean {
+    let goal = walkGoal;
     const T = FOOTWORK_TUNING;
     const g = this.geo, L = g.legLength, w = pin.omega;
     const ox = (place.l.x + place.r.x) / 2, oy = (place.l.y + place.r.y) / 2;
+    const kept = this.arrival;
+    goal = kept && Math.hypot(goal.x - kept.x, goal.y - kept.y) < T.arrivalKeepM ? kept : this.stopNoShorter(pin, goal, ox, oy);
     const slotLead = this.feet.slot(this.lead, goal), slotRear = this.feet.slot(this.rear, goal);
+    // The lead foot has landed at (or near) its slot and the rear foot swings next: the walk finishes
+    // with the rear foot's drag into the stance beside the lead foot, wherever the lead landed (a
+    // lead landing a little long or short is the stance: re-aiming it would cost two more steps).
+    const nextSwing = pin.lastSide && !pin.fromRest ? other(pin.lastSide) : null;
+    // (Also with the lead foot's swing into its slot still in the air: the rear foot follows it.)
+    const leadArriving = swinging ? swinging === this.lead : nextSwing === this.rear;
+    if (leadArriving && Math.hypot(place[this.lead].x - slotLead.x, place[this.lead].y - slotLead.y) < T.arriveSnapM) {
+      const lp = place[this.lead];
+      const [sx, sy] = rot2(this.stanceSlots.rx - this.stanceSlots.x, this.stanceSlots.ry - this.stanceSlots.y, goal.heading);
+      const rearSlot: FootPlace = { x: lp.x + sx, y: lp.y + sy, yaw: goal.heading + this.stanceSlots.ryaw };
+      const [ox2, oy2] = rot2(this.stanceSlots.x, this.stanceSlots.y, goal.heading);
+      this.arrival = { x: lp.x - ox2, y: lp.y - oy2, heading: goal.heading };
+      if (Math.hypot(place[this.rear].x - rearSlot.x, place[this.rear].y - rearSlot.y) < T.slotTolM) return false;
+      const s = this.push();
+      s.side = this.rear;
+      s.place = constrainFrom(this.geo, place[this.lead], this.rear, rearSlot, T.maxSepL * L);
+      s.lift = firstLift;
+      s.land = firstLift + T.dragSwing / w;
+      s.clearance = T.dragLift * L;
+      s.source = 'arrive';
+      const [hx, hy] = soleCmp(this.geo, this.lead, lp, -0.15);
+      s.cmp[0][0] = s.cmp[1][0] = hx;
+      s.cmp[0][1] = s.cmp[1][1] = hy;
+      return true;
+    }
     const dx = slotLead.x - ox, dy = slotLead.y - oy;
     const h = Math.hypot(dx, dy) > 0.05 ? Math.atan2(dy, dx) : goal.heading;
     this.travel = h;
@@ -321,9 +368,15 @@ export class FootstepPlanner {
     const dTorque = (T.swingTorqueShare * this.drive.stallNm * tau * tau * reach) / (5.77 * this.drive.inertia);
     const dSpeed = (T.swingSpeedShare * this.drive.noLoadRadS * reach * tau) / 1.875;
     const ell = clamp(Math.min(v * (Tss + Tds), 0.5 * Math.min(dTorque, dSpeed)), 0.08 * L, T.walkMaxStep * L);
-    // From rest the first steps are shorter (the body gets up to speed), else evenly spaced.
-    const ramp = (k: number): number => (!pin.fromRest ? 1 : k === 1 ? T.walkFirst : k === 2 ? 0.5 * (1 + T.walkFirst) : 1);
+    // From rest the first steps are shorter (the body gets up to speed), and the last two walking
+    // steps before the stance shorten too (the body slows over them: an even pace into the arrival
+    // pair asks the last two steps to stop the whole walk, and the body runs on past its slots).
+    const start = (k: number): number => (!pin.fromRest ? 1 : k === 1 ? T.walkFirst : k === 2 ? 0.5 * (1 + T.walkFirst) : 1);
+    const end = (j: number): number => (j === 1 ? T.walkLast : j === 2 ? 0.5 * (1 + T.walkLast) : 1);
+    let nRamp = 2;
+    const ramp = (k: number): number => start(k) * (nRamp >= 3 ? end(nRamp - k) : 1);
     const totalOf = (n: number): number => {
+      nRamp = n;
       let a = 0;
       for (let k = 1; k <= n - 1; k++) a += ramp(k);
       return a;
@@ -338,7 +391,8 @@ export class FootstepPlanner {
     let N = 2;
     while (sideOf(N - 1) !== this.lead || sideOf(N) !== this.rear || lengthOf(N) > maxStep) N++;
     while (N < 400 && cost(lengthOf(N + 2)) < cost(lengthOf(N))) N += 2;
-    const total = totalOf(N);
+    const total = totalOf(N); // (also leaves nRamp = N for cum)
+    this.arrival = N <= 2 ? goal : null;
     const cum = (k: number): number => {
       let a = 0;
       for (let j = 1; j <= k; j++) a += ramp(j);
@@ -395,6 +449,22 @@ export class FootstepPlanner {
       t = s.land + (k === N - 1 ? this.dragDs(pin) / w : Tds);
     }
     return true;
+  }
+
+  /**
+   * A walk under way stops with its arrival pair, and the final DCM rests on the final stance's
+   * centre: that centre cannot lie short of where the body's DCM already is (plus a margin), or the
+   * arrival plan would ask the body to fall backward. A goal that has come back on the walk (an
+   * opponent walking in) is moved out along the travel to there; the stance is squared up from that
+   * frame once the body has stopped.
+   */
+  private stopNoShorter(pin: PlanInput, goal: StanceFrame, ox: number, oy: number): StanceFrame {
+    if (pin.fromRest || this.gait !== 'walk') return goal;
+    const ux = Math.cos(this.travel), uy = Math.sin(this.travel);
+    const aGoal = (goal.x - ox) * ux + (goal.y - oy) * uy;
+    const aStop = (pin.xi[0] - ox) * ux + (pin.xi[1] - oy) * uy + FOOTWORK_TUNING.stopMarginM;
+    if (aGoal >= aStop) return goal;
+    return { x: goal.x + (aStop - aGoal) * ux, y: goal.y + (aStop - aGoal) * uy, heading: goal.heading };
   }
 
   // ---------------------------------------------------------------- step-drag

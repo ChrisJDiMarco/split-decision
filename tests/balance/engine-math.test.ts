@@ -142,7 +142,7 @@ describe('footstep planner', () => {
   };
   const input = (goal: { x: number; y: number; heading: number }, oppDist: number) => ({
     time: 0, omega: W, goal, bearing: 0, oppDist, aggression: 0.5, speed: null, cmpNow: [0, 0] as [number, number],
-    shift: [0, 0] as [number, number], swing: null, doubleS: 0, fromRest: true, lastSide: null, opp: null,
+    shift: [0, 0] as [number, number], swing: null, doubleS: 0, fromRest: true, lastSide: null, opp: null, xi: [0, 0] as [number, number],
   });
 
   it('walks to a far goal and arrives with the lead foot, then the rear foot, in their slots', () => {
