@@ -1,5 +1,20 @@
 # Strike power, impact and damage
 
+> **Chris's decisions (2026-10-06):**
+> - Damage overhaul: build now. Plumbing first; thresholds calibrated after the P3 strikes are fast.
+> - D1 motor swaps: ALL the recommended swaps (shoulders AKE90, waists, elbows after a gantry A/B of the two options, HAYMAKER's hips too), each A/B-tested first.
+> - D6 dents: physical, plus a small labelled visual boost (~2x, toggleable).
+> - D5 recoil: yes, 0.2-0.37 on hard shells; gloves stay soft. Lands with the contact-tuning stage after P3.
+> - Defaults until he says otherwise:
+>   - D2: gantry-test both elbow options.
+>   - D4: a joint injury in 25-50% of full fights, at most 1 seize per 5 fights, head pops rare and earned.
+>   - D7: labelled assumptions where vendors publish no rating.
+>   - D8: get-up targets as in section 4.6.
+>   - D9: superhuman = elite-human limb speed plus superhuman energy.
+>   - D10: the iron-age three get the same strike pass.
+>   - D11: neck pitch and realistic rotor inertia go in with the balance build's tuning.
+
+
 Status: PROPOSAL, 2026-10-06. Audit and design only; no source file was changed to write it.
 
 Chris's ask: punches and kicks thrown by joints at full real power, looking like elite athletes, that move the other robot, dent it where they land, and wreck a joint when the right shot lands on the right part from the right angle. Then (follow-up): fighters built hard like the 2026 China bots, that get knocked down and pop straight back up, with each design taking damage differently according to how it is built.

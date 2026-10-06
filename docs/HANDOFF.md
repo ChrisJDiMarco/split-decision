@@ -122,8 +122,10 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - STRIKE POWER (2026-10-06): audit + plan in docs/design/strike-power.md. Fists land at 2-4.5 m/s against a boxer's 9, mostly because of how strikes are controlled.
   - FOR THE BALANCE BUILD'S P3 AGENT: implement section 2's control side. That covers burst mode (cut servo damping during the strike), ballistic profiles aimed 25-35 cm through the target, throw distance set for 85-95% extension, a stiff aligned arm, the hip→chest→shoulder→elbow chain, step-in momentum, fast kicks (pre-shift within 1/ω0), joint aim points, and the kick anomalies.
-  - Actuator swaps ONLY as Chris approves them (decision D1, see below).
+  - D1 actuator swaps: Chris APPROVED ALL the recommended swaps (2026-10-06). Gantry A/B each one first, then the balance drills.
   - The damage overhaul (joint loads by channel, physical dents, per-design durability, events with a position) is a separate build waiting for Chris's sign-off.
+
+- Damage overhaul APPROVED and running (`damage-overhaul`): joint loads by channel, physical dents (+ ~2x labelled visual boost), per-design durability, events with a position, VFX/audio by cause. Contact recoil and threshold calibration come after P3 makes strikes fast.
 
 ## Next steps, in order
 
