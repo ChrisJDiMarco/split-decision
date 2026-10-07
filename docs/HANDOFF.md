@@ -6,18 +6,6 @@ All three runs were stopped cleanly. No sim processes are left (only the dev ser
 - NEXT GEN Phase 0: just started, no project files written. To resume: script nextgen-phase0-wf_e2427164-3a2.js, run wf_e2427164-3a2.
 - Restart only when Chris says so; heavy CPU runs at night (see memory heavy-cpu-jobs-overnight).
 
-# >>> RESUME HERE (2026-10-06, session paused for tokens) <<<
-
-1. Read this file, then `git log --oneline -15` and `git status`.
-2. The balance engine build was mid-way through **p1:fix**. Its uncommitted edits in src/physics/control/** and tests/balance are on disk, backed up as tests/balance/.out/p1-fix-wip-*.patch.
-3. Resume the balance build: Workflow({scriptPath: "~/.claude/projects/-Users-chrisdimarco-jarvis/35a12cda-55d8-4dbe-b6de-87829408a2a0/workflows/scripts/balance-engine-wf_38bd1af8-d17.js", resumeFromRunId: "wf_38bd1af8-d17"}).
-   - p1:build and p1:verify replay from cache. p1:fix restarts and is told to review the partial edits (git diff) first.
-   - Then come P5 mocap footwork + ring IQ, pace, P3 strikes + speed/impact, P2, P4 and the judge.
-4. Everything else is committed (latest a333ee6).
-5. Waiting on Chris:
-   - "going to bed" starts the overnight move polish (resume wf_34e4f671-4ea with args {runProof: true}) and the NEXT GEN Phase 0 test.
-   - The local model download (decider-4b, 2.71 GB) is parked.
-
 # Handoff: where Split Decision stands (paused 2026-09-29 ~11:00 ET)
 
 Chris paused the session to move back to his apartment. Everything on disk is committed (see `git log`). Resume by reading this file.
