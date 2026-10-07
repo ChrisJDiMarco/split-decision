@@ -1,3 +1,10 @@
+# >>> OVERNIGHT 2026-10-06 (Chris went to bed ~19:30) <<<
+Running (resume any of them with its script plus resumeFromRunId if cut off):
+- Balance build: P3 strikes (speed and impact + approved motor swaps), then P2, P4 and the judge. Script balance-engine-wf_38bd1af8-d17.js, run wf_38bd1af8-d17. Pacing is DONE (6ed7937).
+- Move polish proof (5 moves, 4 workers): script move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true}.
+- NEXT GEN Phase 0: script nextgen-phase0-wf_e2427164-3a2.js, run wf_e2427164-3a2.
+In the morning: commit each one's results, send Chris the polish side-by-side viewer (harness/motions.html), and report.
+
 # >>> RESUME HERE (2026-10-06, session paused for tokens) <<<
 
 1. Read this file, then `git log --oneline -15` and `git status`.
