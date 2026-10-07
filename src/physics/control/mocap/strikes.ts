@@ -18,8 +18,9 @@ import type { Move, MoveLabel } from '../../../robots/motions';
 import { other } from '../gait';
 import type { Side } from '../geometry';
 import { armFK, armIK, legFK, legIKPoint, newArmAngles, newLegAngles, type ArmAngles, type LegAngles } from '../ik';
-import { clamp, minJerk, mulMtV, normalize, sub } from '../math';
+import { clamp, dot, minJerk, mulMtV, normalize, sub } from '../math';
 import type { ClipSkill, ClipStep, SkillEnv, SkillPhase, SkillRun } from '../skills/types';
+import { centroidSet } from './centroid';
 
 const PUNCH_SPEED = 1.8; // wanted time scale at aggression 1 (× the human source); motors cap it
 const KICK_SPEED = 1.6;
@@ -44,6 +45,30 @@ export const PUNCH_TUNING = {
   // into the chest).
   arc: 0.6,
 };
+
+/**
+ * Strikes on the balance engine (docs/design/strike-power.md §2, balance-engine.md §5): played as
+ * fast as the robot's own motors allow at every frame (the centroid tables' inverse dynamics on each
+ * joint's torque-speed line, not a fixed share of no-load speed), the punch's peak-speed frame landing
+ * on the first surface actually in the fist's path (his guard, else the target), then driven on through
+ * it. The legacy path plays them as before. Exported so tools can sweep it; the worker never changes it.
+ */
+export const STRIKE_P3 = {
+  punchRate: 2.5, // wanted time scale at aggression 1 (× the human source): the motors decide below it
+  // A first contact nearer than the clip's own reach shortens every joint's travel: the motors take
+  // that path faster (torque goes with travel × rate², so rate × 1/√(chord ratio)), up to this much.
+  shortChordMax: 1.6,
+  followM: 0.04, // the anchored path reaches the first surface plus this at the impact frame
+  arriveHoldS: 0.06, // a fist that has not arrived waits at the impact frame at most this long
+  guardSlackM: 0.03, // his fist is in the path within his fist's half-size plus mine plus this of the line
+  minTravelM: 0.12, // a first surface nearer than this to where the fist starts is not warped to
+  kickRate: 2.2, // as punchRate, for kicks
+  // The aim warp moves the kicking leg (a quarter of the body) off its clip path, and the COM with it:
+  // the warp is capped so that shift stays within this share of the stance sole's half-length.
+  kickWarpShare: 0.5,
+};
+
+const KICK_CHAIN = (s: Side) => [`hip_yaw_${s}`, `hip_roll_${s}`, `hip_pitch_${s}`, `knee_${s}`];
 
 const MAX_PUNCH_TRAVEL_M = 0.25; // punches that step further than this need footwork of their own
 const SHIFT_FWD_M = 0.07; // the clip's weight transfer, clamped inside the stance's support
@@ -138,11 +163,41 @@ function pickMove(env: SkillEnv, label: MoveLabel, side: Side, speed: number, ma
 }
 
 /** Aim point for a fist in the torso frame: the zone's surface facing us, pushed through. */
-function fistAim(env: SkillEnv, run: SkillRun, side: Side): Vec3 {
+function fistAim(env: SkillEnv, run: SkillRun, side: Side, follow = FOLLOW_M): Vec3 {
   const t = env.toTorso(run.aim ?? env.opp.chest);
   const dir = normalize(sub(t, env.geo.arms[side].shoulder), [1, 0, 0]);
-  const k = FOLLOW_M - env.opp.frontDepth * 0.6;
+  const k = follow - env.opp.frontDepth * 0.6;
   return [t[0] + dir[0] * k, t[1] + dir[1] * k, t[2] + dir[2] * k];
+}
+
+/**
+ * Balance engine: the punch's anchor point (torso frame), the first contact plus STRIKE_P3.followM,
+ * so the clip's peak-speed frame lands on whatever the fist meets first (his guard or the target);
+ * the clip then drives on through it. Followed through the windup, locked in the world once the
+ * strike phase starts (punches are ballistic, as the runner's aim).
+ */
+function punchAim(env: SkillEnv, run: SkillRun, c: { contact: Vec3 | null; fStart: Vec3; f0: Vec3; fImp: Vec3 }, side: Side, phase: SkillPhase): Vec3 {
+  if (c.contact) return env.toTorso(c.contact);
+  const surf = fistAim(env, run, side, 0);
+  const hit = firstContact(env, side, surf, c.fStart);
+  let aim: Vec3;
+  if (hit) {
+    const u = normalize(sub(hit, c.fStart), [1, 0, 0]);
+    aim = [hit[0] + u[0] * STRIKE_P3.followM, hit[1] + u[1] * STRIKE_P3.followM, hit[2] + u[2] * STRIKE_P3.followM];
+  } else aim = fistAim(env, run, side);
+  if (phase !== 'windup') {
+    // Locked: a shorter path than the clip's plays faster (its joints travel less).
+    const clipChord = Math.hypot(c.fImp[0] - c.f0[0], c.fImp[1] - c.f0[1], c.fImp[2] - c.f0[2]);
+    const chord = Math.hypot(aim[0] - c.fStart[0], aim[1] - c.fStart[1], aim[2] - c.fStart[2]);
+    if (env.player && clipChord > 1e-3) env.player.limitScale = clamp(Math.sqrt(clipChord / Math.max(1e-3, chord)), 1, STRIKE_P3.shortChordMax);
+    const R = env.s.torsoRot, o = env.s.torsoPos;
+    c.contact = [
+      o[0] + R[0] * aim[0] + R[1] * aim[1] + R[2] * aim[2],
+      o[1] + R[3] * aim[0] + R[4] * aim[1] + R[5] * aim[2],
+      o[2] + R[6] * aim[0] + R[7] * aim[1] + R[8] * aim[2],
+    ];
+  }
+  return aim;
 }
 
 /**
@@ -260,6 +315,54 @@ function startPose(env: SkillEnv, move: Move, mirror: boolean, side: Side): Clip
   };
 }
 
+/**
+ * The playback rate limits of a move on this robot from its centroid table (null without one): per
+ * frame the slower of the limbs' and the trunk's motor rates (the trunk at the share of the clip's
+ * trunk motion the tracker plays), scaled by what damage, heat and the battery leave of the chain's
+ * torque (the needed torque goes with the rate squared).
+ */
+function motorRates(env: SkillEnv, move: Move, trunkShare: number, chain: readonly string[]): Float32Array | undefined {
+  const t = centroidSet(env.mocap!.lib.design)?.tracks.get(move.id);
+  if (!t || t.n !== move.frames) return undefined;
+  let left = 1;
+  for (const name of chain) {
+    const j = env.joint(name);
+    if (j) left = Math.min(left, clamp(j.availableTorque / j.motor.stallTorqueNm, 0.05, 1));
+  }
+  const k = Math.sqrt(left);
+  const share = Math.max(0.25, trunkShare);
+  const out = new Float32Array(t.n);
+  for (let f = 0; f < t.n; f++) out[f] = k * Math.min(t.rLimb[f], t.rTrunk[f] / share);
+  return out;
+}
+
+/**
+ * Where the striking fist's centre will first touch him (torso frame) on its way from `from` (where
+ * it starts) to `aim` (the zone's surface): one of his fists if it sits in that path (the guard),
+ * else the surface itself. Null when the guard is closer than STRIKE_P3.minTravelM to the fist (the
+ * blow meets it right away whatever the timing).
+ */
+function firstContact(env: SkillEnv, side: Side, aim: Vec3, from: Vec3): Vec3 | null {
+  const d = sub(aim, from);
+  const len = Math.hypot(d[0], d[1], d[2]);
+  if (len < 1e-6) return null;
+  const u: Vec3 = [d[0] / len, d[1] / len, d[2] / len];
+  const R = env.opp.fistHalf + env.geo.arms[side].fistHalf;
+  let along = len;
+  for (const sd of ['l', 'r'] as const) {
+    const rel = sub(env.toTorso(env.opp.fists[sd]), from);
+    const a = dot(rel, u);
+    if (a <= 0 || a >= along + R) continue;
+    const off = Math.hypot(rel[0] - a * u[0], rel[1] - a * u[1], rel[2] - a * u[2]);
+    if (off > R + STRIKE_P3.guardSlackM) continue;
+    // The two fists' centres come within R of each other this far along the path.
+    along = Math.min(along, Math.max(0, a - Math.sqrt(Math.max(0, R * R - off * off))));
+  }
+  return along < STRIKE_P3.minTravelM ? null : [from[0] + u[0] * along, from[1] + u[1] * along, from[2] + u[2] * along];
+}
+
+const PUNCH_CHAIN = (s: Side) => [`shoulder_pitch_${s}`, `shoulder_roll_${s}`, `shoulder_yaw_${s}`, `elbow_${s}`];
+
 // ---------------------------------------------------------------- punches
 
 interface PunchScratch extends ClipPose {
@@ -269,6 +372,9 @@ interface PunchScratch extends ClipPose {
   fImp: Vec3; // clip fist at the impact frame, torso frame
   cmd: Vec3; // the striking fist's commanded position last update, torso frame
   held: number; // s the clip has waited at the impact frame for the fist to arrive
+  /** Balance engine: the first contact, locked (world) once the strike phase starts. */
+  p3: boolean;
+  contact: Vec3 | null;
 }
 
 const armA = newArmAngles();
@@ -281,12 +387,14 @@ export function punchClip(label: MoveLabel, side: Side): ClipSkill {
     begin(env, run) {
       const p = env.player;
       if (!p || !env.mocap) return false;
-      const speed = PUNCH_SPEED * (0.7 + 0.3 * env.aggression);
+      const p3 = !!env.engine;
+      const speed = p3 ? STRIKE_P3.punchRate * (0.85 + 0.15 * env.aggression) : PUNCH_SPEED * (0.7 + 0.3 * env.aggression);
       const pick = pickMove(env, label, side, speed, MAX_PUNCH_TRAVEL_M);
       if (!pick) return false;
       const played = playedSide(pick.move, pick.mirror)!;
       const from = Math.max(0, pick.move.phases.strike - PUNCH_LEAD_IN_S);
-      p.play(pick.move, { mirror: pick.mirror, speed, mask: 'upper', from });
+      const rates = p3 ? motorRates(env, pick.move, Math.max(PUNCH_TRUNK.waist, PUNCH_TRUNK.bend), PUNCH_CHAIN(played)) : undefined;
+      p.play(pick.move, { mirror: pick.mirror, speed, mask: 'upper', from, rates });
       const base = startPose(env, pick.move, pick.mirror, played);
       // The clip fist at the impact frame (torso frame), for the aim warp.
       p.seek(base.impact);
@@ -295,7 +403,7 @@ export function punchClip(label: MoveLabel, side: Side): ClipSkill {
       const f0 = armFK(env.geo.arms[played], readArm(env, p.q, played, armA)).fist;
       const end = Math.min(pick.move.duration, Math.max(pick.move.phases.recover, base.impact) + PUNCH_RECOVER_S);
       const fStart = [...env.stance.guard[played].fist] as Vec3;
-      run.scratch.clip = { ...base, end, f0, fStart, fImp, cmd: [...fStart] as Vec3, held: 0 } satisfies PunchScratch;
+      run.scratch.clip = { ...base, end, f0, fStart, fImp, cmd: [...fStart] as Vec3, held: 0, p3, contact: null } satisfies PunchScratch;
       run.strikers = [`fist_${played}`, `forearm_${played}`];
       return true;
     },
@@ -312,7 +420,7 @@ export function punchClip(label: MoveLabel, side: Side): ClipSkill {
         const lag = Math.hypot(f[0] - c.cmd[0], f[1] - c.cmd[1], f[2] - c.cmd[2]);
         pace = clamp((T.lagStopM - lag) / (T.lagStopM - T.lagSlowM), T.minPace, 1);
       }
-      if (!run.landed && p.tau >= c.impact - 1e-3 && p.tau <= c.impact + 0.05 && c.held < ARRIVE_HOLD_S) {
+      if (!run.landed && p.tau >= c.impact - 1e-3 && p.tau <= c.impact + 0.05 && c.held < (c.p3 ? STRIKE_P3.arriveHoldS : ARRIVE_HOLD_S)) {
         const f = env.toTorso(env.s.fists[c.side]);
         if (Math.hypot(f[0] - c.cmd[0], f[1] - c.cmd[1], f[2] - c.cmd[2]) > ARRIVE_M) {
           pace = 0;
@@ -331,7 +439,7 @@ export function punchClip(label: MoveLabel, side: Side): ClipSkill {
           const k = anchored ? 1 : warpWeight(p.tau, c.impact, s.phase, s.phaseU);
           if (k > 0) {
             const fk = armFK(env.geo.arms[sd], clipArm);
-            const aim = fistAim(env, run, sd);
+            const aim = c.p3 ? punchAim(env, run, c, sd, s.phase) : fistAim(env, run, sd);
             const target: Vec3 = anchored
               ? anchoredFist(fk.fist, c, aim)
               : [fk.fist[0] + k * (aim[0] - c.fImp[0]), fk.fist[1] + k * (aim[1] - c.fImp[1]), fk.fist[2] + k * (aim[2] - c.fImp[2])];
@@ -365,6 +473,9 @@ interface KickScratch extends ClipPose {
   waited: number;
   place: { x: number; y: number; yaw: number }; // where the kicking foot stood
   rewindFrom: number;
+  /** Balance engine: the gait's aborted shifts when the kick began (the lift gate calling it off ends it). */
+  p3: boolean;
+  aborted0: number;
 }
 
 const legA = newLegAngles();
@@ -383,19 +494,30 @@ export function kickClip(label: MoveLabel, side: Side): ClipSkill {
     begin(env, run) {
       const p = env.player;
       if (!p || !env.mocap) return false;
-      const speed = KICK_SPEED * (0.7 + 0.3 * env.aggression);
+      const p3 = !!env.engine;
+      const speed = p3 ? STRIKE_P3.kickRate * (0.85 + 0.15 * env.aggression) : KICK_SPEED * (0.7 + 0.3 * env.aggression);
       const pick = pickMove(env, label, side, speed, Infinity);
       if (!pick) return false;
       const played = playedSide(pick.move, pick.mirror)!;
-      p.play(pick.move, { mirror: pick.mirror, speed, mask: 'legs', limitScale: KICK_LIMIT_SCALE });
+      // Balance engine: the robot's own motor rates (the kicking leg, the arms, the trunk at the clip's
+      // full turn); the lift waits for the gyro to have the kick's angular momentum in hand.
+      const rates = p3 ? motorRates(env, pick.move, Math.max(KICK_TRUNK.waist, KICK_TRUNK.bend), KICK_CHAIN(played)) : undefined;
+      p.play(pick.move, { mirror: pick.mirror, speed, mask: 'legs', ...(rates ? { rates } : { limitScale: KICK_LIMIT_SCALE }) });
       const base = startPose(env, pick.move, pick.mirror, played);
+      if (rates && env.engine) {
+        const t = centroidSet(env.mocap.lib.design)?.tracks.get(pick.move.id);
+        const lift = liftOf(pick.move, pick.mirror, played);
+        let r = speed;
+        for (let f = Math.floor(lift * pick.move.fps); f <= Math.min(rates.length - 1, Math.ceil(base.impact * pick.move.fps)); f++) r = Math.min(r, rates[f]);
+        env.engine.kickNeedNms = (t?.Lpk ?? 0) * r;
+      }
       p.seek(base.impact);
       const aImp = legFK(env.geo.legs[played], readLeg(env, p.q, played, legA)).ankle;
       p.seek(0);
       const f = env.gait.feet[played].place;
       run.scratch.clip = {
         ...base, stage: 'shift', liftAt: liftOf(pick.move, pick.mirror, played), aImp, waited: 0, cmd: [...aImp] as Vec3, held: 0,
-        place: { x: f.x, y: f.y, yaw: f.yaw }, rewindFrom: 0,
+        place: { x: f.x, y: f.y, yaw: f.yaw }, rewindFrom: 0, p3, aborted0: env.gait.abortedShifts,
       } satisfies KickScratch;
       run.strikers = [`foot_${played}`, `shin_${played}`];
       return true;
@@ -409,7 +531,9 @@ export function kickClip(label: MoveLabel, side: Side): ClipSkill {
       env.pose.holdFeet = true;
       const granted = gait.skillLegActive() === c.side;
       if (c.stage === 'shift') {
-        // The weight goes onto the stance foot first; the clip waits at its first frame.
+        // The weight goes onto the stance foot first; the clip waits at its first frame. (Balance
+        // engine: a shift its lift gate called off is the end of this kick.)
+        if (c.p3 && gait.abortedShifts !== c.aborted0) return { phase: 'windup', u: 0, progress: 0, done: true };
         if (!gait.requestSkillLeg(c.side, LEG_SHIFT_WAIT_S)) {
           c.waited += dt;
           upperBody(env, c, Math.min(1, c.t / 0.3) * 0.5);
@@ -456,7 +580,19 @@ export function kickClip(label: MoveLabel, side: Side): ClipSkill {
       if (k > 0.001) {
         const fk = legFK(env.geo.legs[c.side], clipLeg);
         const aim = kickAim(env, run, c.side);
-        const target: Vec3 = [fk.ankle[0] + k * (aim[0] - c.aImp[0]), fk.ankle[1] + k * (aim[1] - c.aImp[1]), fk.ankle[2] + k * (aim[2] - c.aImp[2])];
+        const w: Vec3 = [aim[0] - c.aImp[0], aim[1] - c.aImp[1], aim[2] - c.aImp[2]];
+        if (c.p3) {
+          // Capped so the leg's share of the COM stays over the stance sole (warping the chain moves a
+          // quarter of the body's mass with it).
+          const legShare = env.s.legs[c.side].mass / Math.max(1, env.s.mass);
+          const cap = (STRIKE_P3.kickWarpShare * Math.max(0.02, env.geo.legs[other(c.side)].footHalfLength - 0.015)) / Math.max(0.05, legShare);
+          const n = Math.hypot(w[0], w[1]);
+          if (n > cap) {
+            w[0] *= cap / n;
+            w[1] *= cap / n;
+          }
+        }
+        const target: Vec3 = [fk.ankle[0] + k * w[0], fk.ankle[1] + k * w[1], fk.ankle[2] + k * w[2]];
         const hip = env.geo.legs[c.side].hip;
         const pole = sub(fk.knee, [(hip[0] + fk.ankle[0]) / 2, (hip[1] + fk.ankle[1]) / 2, (hip[2] + fk.ankle[2]) / 2]);
         legIKPoint(env.geo.legs[c.side], target, pole, legB);

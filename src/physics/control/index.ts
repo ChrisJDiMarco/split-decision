@@ -40,6 +40,10 @@ export const controlSystem: SimSystem = {
   },
   telemetry(_ctx, r, out) {
     const c = controllerOf(r);
-    if (c) out.balance = c.balanceMargin();
+    if (!c) return;
+    out.balance = c.balanceMargin();
+    out.committed = c.skills.committed();
+    const combo = c.tactics.combo;
+    if (combo) out.comboStep = combo.i;
   },
 };

@@ -35,6 +35,7 @@ import { clampToPolygon, convexHull, footCorners, type P2 } from './support';
 import { Rise } from './rise';
 import { rollKeysFor } from './roll-keys';
 import { UpperBodyStrategy } from './strategies';
+import { StrikeDrive } from './strike-drive';
 import { TacticRunner } from './tactics';
 import { Walker } from './walk';
 
@@ -134,6 +135,8 @@ export class HumanoidController {
   readonly engine: BalanceEngine | null;
   /** Servo-target switches decay instead of jumping (balance/inertialize.ts). */
   readonly inertia: Inertializer;
+  /** The striking chain's burst damping and inertial feed-forward (strike-drive.ts; balance engine only). */
+  readonly drive: StrikeDrive | null;
   /** Requested ground speed from Intent.move (m/s), or null (the gait's own pace). */
   moveSpeed: number | null = null;
   /** Ring IQ: a walk toward the opponent ends this far from him (COM to COM, m; 0: at the goal). */
@@ -216,6 +219,7 @@ export class HumanoidController {
     this.upperJoints = upper;
     this.inertia = new Inertializer(r.joints.length, r.joints.map((j) => j.motor.noLoadSpeedRadS), [this.jm.neckYaw], upper);
     this.inertia.enabled = CONTROL.inertialize;
+    this.drive = dcm ? new StrikeDrive(ctx, r, upper) : null;
     // The guard's reach from the stance geometry (the torso turned by the blade and the waist), less
     // the COM's usual lead over the torso origin; refined from the body once it stands (guardReach).
     const blade = this.stance.pelvisYaw + this.stance.waistYaw;
@@ -252,7 +256,7 @@ export class HumanoidController {
 
   /** The skill this robot throws for `id`: the mocap version once its library is loaded. */
   skillFor(id: SkillId): SkillDef | undefined {
-    return mocapSkill(this.mocap, id) ?? SKILLS[id];
+    return mocapSkill(this.mocap, id, !!this.engine) ?? SKILLS[id];
   }
 
   /** The newest read of this fighter's feints (the openings system's): a combination's payoff answers it. */
@@ -285,6 +289,7 @@ export class HumanoidController {
     const engineLegs = !!e && this.engineDrove;
     for (const side of SIDES) this.velFF.hold[this.jm.leg[side].hipYaw] = engineLegs || this.gait.planted(side) ? 1 : 0;
     this.velFF.apply(this.r, this.q, dt);
+    if (this.drive && this.engineDrove) this.drive.inertia(ctx, this.q, this.velFF, dt);
     const ground = e && ctx.released && this.engineDrove ? { force: e.force, headroom: true } : undefined;
     applyGravityFeedforward(views(ctx), this.r, this.joints, footLoads(this.geo, this.gait, s, this.plannedCop), this.mass, this.q, 1, ground);
     this.r.targets.set(this.q);
@@ -329,6 +334,7 @@ export class HumanoidController {
     this.gyro?.release(views(ctx).xfrc, this.ids.torso);
     this.engine?.reset(null);
     this.engine?.clearImpedance();
+    this.drive?.reset();
     this.inertia.reset();
     this.r.down = true;
     ctx.events.push({ kind: 'fall', corner: this.r.corner });
@@ -468,7 +474,7 @@ export class HumanoidController {
     return {
       s, geo: this.geo, stance: this.stance, opp: this.opp!, zone: 'head', aggression: this.r.intent?.aggression ?? 0.6,
       heading: this.heading, cmd: this.cmd, pose: this.pose, gait: this.gait,
-      mocap: this.mocap, player: this.strikePlayer, jm: this.jm, rng: this.rng,
+      mocap: this.mocap, player: this.strikePlayer, jm: this.jm, rng: this.rng, engine: this.engine,
       toTorso: (p: Vec3) => mulMtV(T, sub(p, tp)),
       joint: (name: string) => {
         const i = this.r.jointIndex.get(name);
@@ -561,6 +567,8 @@ export class HumanoidController {
       gyroTorqueNm: spec?.maxTorqueNm ?? 0, gyroMomentumNms: spec?.momentumNms ?? 1, legs: this.cmd.legs,
     });
     if (e.captured) this.skills.cancel(env, true);
+    // The striking chain tracks the blow's velocity instead of braking it (strike-drive.ts).
+    this.drive?.impedance(this.skills.run);
     // Mocap style (arms, waist, pelvis bob, tilt and sway from the clip the feet are taking, or the
     // guard idle), only while nothing else owns the body.
     if (styled) {

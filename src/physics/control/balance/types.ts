@@ -51,6 +51,8 @@ export interface BalanceState {
   canKick: boolean;
   /** Where the DCM will be at the touchdown of the swing in the air (single support); else the DCM. */
   xiTouch: P2;
+  /** Seconds to that touchdown (-1 with no swing in the air). */
+  touchIn: number;
 }
 
 /** What the tools read every control tick (both modes fill it). */

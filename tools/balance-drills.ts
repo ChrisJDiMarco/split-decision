@@ -5,14 +5,22 @@
 //
 //   approach   two fighters of one design, 3-6 m apart across the cage centre, each turned 0, ±15 or
 //              ±30° off the line, both on close_distance (no strikes) for 14 s: they walk in and
-//              hold. Both are measured.
+//              hold. Both are measured. (The pace stage turns close_distance at the edge of range into
+//              a step-in jab, tactics.ts PACE.edgeJabAggression: off here, the drill is footwork only.)
 //   push       a lone fighter shoved at the torso for 0.1 s from 8 directions: standing, mid-swing
 //              walking, or just arrived. ΔV rises by 0.1 m/s to the first fall (--quick: 1.1 m/s only).
 //   shuffle    at 1.4 m from a standing opponent: a 0.4 m square (forward, back, left, right, each
 //              back to the start), then circling each way.
+//   strikes    (§8, "20 of each strike and kick at a standing opponent"; P3 speed and impact) every
+//              strike ability of a design thrown --trials times at a mirror opponent standing in its
+//              guard, from the distances its tactics throw it at (the skill's own throw window), a
+//              little off-line each time: lands, contact speed and impulse (the damage model's impact
+//              event), peak striker speed before contact, start to contact, elbow at contact, the
+//              thrower's centre-of-mass speed into the shot, falls and capture steps.
 //
 // usage:
-//   npx tsx tools/balance-drills.ts [--drills approach,push,shuffle] [--designs firecracker,savate,haymaker,pylon]
+//   npx tsx tools/balance-drills.ts [--drills approach,push,shuffle,strikes] [--designs firecracker,savate,haymaker,pylon]
+//                                   [--trials 8] [--skills jab,cross,...] [--window range|guard]
 //                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance]
 //   npx tsx tools/balance-drills.ts --job '<json>'        one drill in this process, JSON on stdout
 //   --tune BALANCE_TUNING.stanceAnkleKp=1,FOOTWORK_TUNING.walkGapM=0.03   A/B a tuning table value
@@ -30,12 +38,17 @@ import { CONTROL } from '../src/physics/control/balance/config';
 import { COM_REF } from '../src/physics/control/balance/com-ref';
 import { FOOTWORK_TUNING } from '../src/physics/control/balance/footsteps';
 import { GYRO_POLICY } from '../src/physics/control/balance/gyro-policy';
-import { BALANCE_TUNING } from '../src/physics/control/balance/index';
+import { BALANCE_TUNING, KICK_GATE } from '../src/physics/control/balance/index';
 import { INERTIA } from '../src/physics/control/balance/inertialize';
 import { MOCAP_STEPS } from '../src/physics/control/balance/mocap-steps';
 import { MOCAP_STYLE } from '../src/physics/control/balance/mocap-style';
 import { STEP_ADJUST } from '../src/physics/control/balance/step-adjust';
 import { COUNTER_YAW, YAW_TUNING } from '../src/physics/control/controller';
+import { PACE } from '../src/physics/control/tactics';
+import { isStrikeSkill, SKILLS, type SkillId } from '../src/physics/control/skills';
+import { BURST } from '../src/physics/control/strike-drive';
+import { STRIKE_P3 } from '../src/physics/control/mocap/strikes';
+import { MOCAP_KICKS } from '../src/physics/control/mocap/skills';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
 import { BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
@@ -57,12 +70,36 @@ type Situation = 'stance' | 'walk' | 'arrive';
 export type Job =
   | { kind: 'approach'; design: string; dist: number; angle: number; seconds: number; seed: number }
   | { kind: 'push'; design: string; situation: Situation; dir: number; dv: number; seed: number }
-  | { kind: 'shuffle'; design: string; seed: number };
+  | { kind: 'shuffle'; design: string; seed: number }
+  | { kind: 'strike'; design: string; skill: SkillId; trial: number; seed: number };
 
 export interface ApproachOut { kind: 'approach'; job: Job; robots: BalanceMetrics[]; controlUs: number; blowup: boolean }
 export interface PushOut { kind: 'push'; job: Job; survived: boolean; steps: number; stableAfter: number; satPeak: number; applied: boolean }
 export interface ShuffleOut { kind: 'shuffle'; job: Job; metrics: BalanceMetrics; legs: Array<{ leg: string; arrived: number; steps: number }>; controlUs: number; blowup: boolean }
-export type DrillOut = ApproachOut | PushOut | ShuffleOut;
+export interface StrikeOut {
+  kind: 'strike';
+  job: Job;
+  started: boolean;
+  mocap: boolean;
+  dist: number; // COM to COM at the start, m
+  landed: boolean; // the runner saw its striker touch him at speed
+  impact: boolean; // ...and the damage model booked an impact from it
+  vContact: number; // closing speed at the first impact (damage model), m/s
+  vRunner: number; // striker speed the runner saw at contact
+  vPeak: number; // fastest striker body speed before contact (or over the whole blow on a miss)
+  impulse: number; // first impact's impulse, N·s
+  workJ: number;
+  part: string | null; // where it landed
+  tContact: number; // s from the start to contact
+  elbow: number; // striking elbow at contact, rad (0 = straight)
+  comAlong: number; // thrower's COM speed toward him at contact, m/s
+  torsoYawRate: number; // peak torso yaw rate before contact, rad/s
+  fell: boolean;
+  captureSteps: number;
+  gyroPeak: number;
+  end: string;
+}
+export type DrillOut = ApproachOut | PushOut | ShuffleOut | StrikeOut;
 
 // ------------------------------------------------------------------ one drill (child process)
 
@@ -112,6 +149,7 @@ async function approach(job: Extract<Job, { kind: 'approach' }>): Promise<Approa
   sim.release(1);
   const recs = [new BalanceRecorder(sim.ctx, 0, LEAN_S), new BalanceRecorder(sim.ctx, 1, LEAN_S)];
   let ok = run(sim, LEAN_S, recs);
+  PACE.edgeJabAggression = Infinity; // footwork only: no step-in jab at the edge
   for (const r of sim.ctx.robots) r.intent = intent('close_distance', 'head', 0.5);
   if (ok) ok = run(sim, job.seconds, recs);
   const out: ApproachOut = { kind: 'approach', job, robots: recs.map((r) => r.result()), controlUs: t.us(), blowup: !ok };
@@ -255,7 +293,133 @@ async function shuffle(job: Extract<Job, { kind: 'shuffle' }>): Promise<ShuffleO
   return out;
 }
 
-const TABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE };
+const STRIKE_ZONE: Partial<Record<SkillId, 'head' | 'torso' | 'left_leg'>> = { front_kick: 'torso', low_kick: 'left_leg' };
+const STRIKE_AGGRESSION = 0.8;
+const STRIKE_WATCH_S = 1.5;
+const STRIKE_MAX_S = 3.5;
+
+/** The distances (COM to COM) the tactics throw `id` from: its sweet spot to its throw edge (tactics.ts). */
+async function strikeWindow(design: string, id: SkillId): Promise<[number, number] | null> {
+  const sim = await makeSim({ design, x: 0, y: 0, yaw: 0 }, { design, x: 8, y: 0, yaw: Math.PI }, { systems: SYSTEMS });
+  sim.seconds(0.6); // the motion library attaches
+  sim.release(0);
+  sim.seconds(1.2); // standing in its guard: the guard's measured reach
+  const c = controllerOf(sim.ctx.robots[0])!;
+  const def = c.skillFor(id);
+  const guard = c.guardReach();
+  sim.dispose();
+  if (!def) return null;
+  const [lo, hi] = def.range(c.geo);
+  // Never inside the guards' standoff (tactics.ts: footwork stops there; strikes thrown closer come
+  // from a step, not a stance): spawned closer, the two guards start interlocked.
+  const standoff = 2 * guard + 0.04;
+  // --window guard (straight punches): from where his guard (a mirror's, as mine) is 75-95% of my
+  // straight reach away, so the fist meets it near full extension.
+  if (process.env.SD_STRIKE_WINDOW === 'guard' && def.kind === 'arm' && (id === 'jab' || id === 'cross' || id === 'overhand')) {
+    const reach = hi - 0.8 * c.geo.torsoHalf[0];
+    return [Math.max(standoff, guard + 0.75 * reach), Math.max(standoff + 0.06, guard + 0.95 * reach)];
+  }
+  const { sweet, throwAt } = def.approach ?? { sweet: 0.6, throwAt: 0.85 };
+  const a = lo + sweet * (hi - lo), b = lo + throwAt * (hi - lo);
+  return [Math.max(standoff, a), Math.max(standoff + 0.06, b)];
+}
+
+async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<StrikeOut> {
+  const win = await strikeWindow(job.design, job.skill);
+  const k = job.trial;
+  // Deterministic spread over the throw window, a little off-line and turned.
+  const u = ((k * 0.618034) % 1);
+  const dist = win ? win[0] + (win[1] - win[0]) * u : 1;
+  const dy = [0, 0.1, -0.1, 0.05, -0.05][k % 5];
+  const dyaw = [0, 0.15, -0.15, -0.08, 0.08][k % 5];
+  const out: StrikeOut = {
+    kind: 'strike', job, started: false, mocap: false, dist, landed: false, impact: false, vContact: NaN, vRunner: NaN, vPeak: 0, impulse: NaN, workJ: NaN,
+    part: null, tContact: NaN, elbow: NaN, comAlong: NaN, torsoYawRate: 0, fell: false, captureSteps: 0, gyroPeak: 0, end: '',
+  };
+  if (!win) return out;
+  const sim = await makeSim({ design: job.design, x: -dist / 2, y: 0, yaw: 0 }, { design: job.design, x: dist / 2, y: dy, yaw: Math.PI + dyaw }, { seed: job.seed, systems: SYSTEMS });
+  const { ctx } = sim;
+  const [me, opp] = ctx.robots;
+  sim.seconds(0.5);
+  sim.release(0);
+  sim.release(1);
+  sim.seconds(1.0, () => { ctx.events.length = 0; });
+  const c = controllerOf(me)!;
+  const def = c.skillFor(job.skill)!;
+  const z0 = comPos(ctx, me)[2];
+  const cap0 = c.gait.captureSteps;
+  out.mocap = !!def.clip;
+  out.started = c.startSkill(def, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
+  if (!out.started) {
+    sim.dispose();
+    return out;
+  }
+  const t0 = ctx.time;
+  const torso = me.parts.get('torso')!.body;
+  const cv = () => ctx.data.cvel as Float64Array;
+  const xp = () => ctx.data.xpos as Float64Array;
+  let tips: number[] = [];
+  const prev = new Map<number, Vec3>();
+  let ended = -1;
+  const n = Math.round((STRIKE_MAX_S + STRIKE_WATCH_S) / ctx.dt);
+  for (let i = 0; i < n; i++) {
+    sim.step();
+    const now = ctx.time - t0;
+    for (const e of ctx.events as SimEvent[]) {
+      if (e.kind === 'fall' && e.corner === me.corner) out.fell = true;
+      if (e.kind === 'impact' && e.striker === me.corner && e.victim === opp.corner && !e.push && !out.impact && c.skills.run) {
+        out.impact = true;
+        out.vContact = e.speed;
+        out.impulse = e.impulseNs;
+        out.workJ = e.workJ ?? NaN;
+        out.part = e.part;
+      }
+    }
+    ctx.events.length = 0;
+    if (isDown(ctx, me, z0)) out.fell = true;
+    out.gyroPeak = Math.max(out.gyroPeak, c.gyro?.saturation ?? 0);
+    const run = c.skills.run;
+    if (run && !tips.length) {
+      const parts = run.strikers ?? def.strikers;
+      tips = parts.filter((p) => /fist|foot|shin/.test(p)).map((p) => me.parts.get(p)?.body ?? -1).filter((b) => b >= 0);
+    }
+    if (run && !out.landed) {
+      for (const b of tips) {
+        const p: Vec3 = [xp()[b * 3], xp()[b * 3 + 1], xp()[b * 3 + 2]];
+        const q = prev.get(b);
+        if (q) out.vPeak = Math.max(out.vPeak, Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) / ctx.dt);
+        prev.set(b, p);
+      }
+      if (xp()[torso * 3 + 2] > 0.3) out.torsoYawRate = Math.max(out.torsoYawRate, Math.abs(cv()[torso * 6 + 2]));
+    }
+    if (run?.landed && !out.landed) {
+      out.landed = true;
+      out.vRunner = run.landedSpeed;
+      out.tContact = now;
+      const side = (run.strikers?.[0] ?? def.strikers[0]).slice(-1);
+      const ei = me.jointIndex.get(`elbow_${side}`);
+      if (ei !== undefined) out.elbow = (ctx.data.qpos as Float64Array)[me.joints[ei].qadr];
+      const a = comPos(ctx, me), b = comPos(ctx, opp);
+      const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const v = ctx.data.subtree_linvel as Float64Array;
+      out.comAlong = (v[me.rootBody * 3] * (b[0] - a[0]) + v[me.rootBody * 3 + 1] * (b[1] - a[1])) / d;
+    }
+    if (!run && ended < 0) {
+      ended = now;
+      out.end = c.skills.lastEnd;
+    }
+    if (ended >= 0 && now > ended + STRIKE_WATCH_S) break;
+    if (now > STRIKE_MAX_S && ended < 0) {
+      ended = now;
+      out.end = 'timeout';
+    }
+  }
+  out.captureSteps = c.gait.captureSteps - cap0;
+  sim.dispose();
+  return out;
+}
+
+const TABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE, PACE, BURST, STRIKE_P3, MOCAP_KICKS, KICK_GATE };
 
 /** SD_TUNE='TABLE.key=value,...': set numeric tunables before a drill (A/B runs). */
 function applyTune(spec: string | undefined): void {
@@ -276,6 +440,7 @@ export async function runJob(job: Job): Promise<DrillOut> {
     case 'approach': return approach(job);
     case 'push': return pushTrial(job);
     case 'shuffle': return shuffle(job);
+    case 'strike': return strikeTrial(job);
   }
 }
 
@@ -291,7 +456,7 @@ function runChild(job: Job, balance: string): Promise<DrillOut> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...process.execArgv, script, '--job', JSON.stringify(job)], {
       stdio: ['ignore', 'pipe', 'inherit'],
-      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
+      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('window', '') ? { SD_STRIKE_WINDOW: arg('window', '') } : {}), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
     });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -388,6 +553,32 @@ export function summarizeShuffle(outs: ShuffleOut[], design: string): string[] {
   ];
 }
 
+const pctile = (xs: number[], q: number) => {
+  const v = xs.filter(Number.isFinite).sort((a, b) => a - b);
+  return v.length ? v[Math.min(v.length - 1, Math.floor(q * v.length))] : NaN;
+};
+
+export function summarizeStrikes(outs: StrikeOut[], design: string): string[] {
+  const rs = outs.filter((o) => o.job.design === design && o.started);
+  if (!rs.length) return [];
+  const lines: string[] = ['  strikes (standing mirror opponent, from the throw window):'];
+  const ids = [...new Set(rs.map((o) => (o.job as Extract<Job, { kind: 'strike' }>).skill))];
+  for (const id of ids) {
+    const t = rs.filter((o) => (o.job as Extract<Job, { kind: 'strike' }>).skill === id);
+    const hit = t.filter((o) => o.impact);
+    const v = hit.map((o) => o.vContact), imp = hit.map((o) => o.impulse);
+    const clean = hit.filter((o) => o.part === 'head' || o.part === 'torso' || o.part === 'pelvis' || /thigh|shin/.test(o.part ?? '')).length;
+    lines.push(`    ${id.padEnd(10)} ${t[0].mocap ? 'mocap' : 'proc '} landed ${hit.length}/${t.length} (clean ${clean}), falls ${t.filter((o) => o.fell).length}, capture steps ${t.reduce((a, o) => a + o.captureSteps, 0)}`
+      + `; contact p50/p90 ${f1(pctile(v, 0.5))}/${f1(pctile(v, 0.9))} m/s (peak ${f1(pctile(t.map((o) => o.vPeak), 0.5))}), impulse p50/p90 ${f1(pctile(imp, 0.5))}/${f1(pctile(imp, 0.9))} N·s`
+      + `, start→contact ${f2(pctile(hit.map((o) => o.tContact), 0.5))} s, elbow ${f2(pctile(hit.map((o) => o.elbow), 0.5))} rad, COM into it ${f2(pctile(hit.map((o) => o.comAlong), 0.5))} m/s, torso yaw ${f1(pctile(t.map((o) => o.torsoYawRate), 0.5))} rad/s, gyro ${f2(pctile(t.map((o) => o.gyroPeak), 0.9))}`);
+  }
+  const punches = rs.filter((o) => SKILLS[(o.job as Extract<Job, { kind: 'strike' }>).skill]?.kind === 'arm');
+  const kicks = rs.filter((o) => SKILLS[(o.job as Extract<Job, { kind: 'strike' }>).skill]?.kind === 'leg');
+  const per = (xs: StrikeOut[], k: number) => (xs.length ? (k * xs.filter((o) => o.fell).length) / xs.length : NaN);
+  lines.push(`    falls per 50 punches ${f2(per(punches, 50))} (${punches.length}), per 10 kicks ${f2(per(kicks, 10))} (${kicks.length})   target <= 1 / <= 1`);
+  return lines;
+}
+
 async function main(): Promise<void> {
   const ji = process.argv.indexOf('--job');
   if (ji >= 0) {
@@ -418,11 +609,18 @@ async function main(): Promise<void> {
       for (const dist of dists) for (const angle of angles) add({ kind: 'approach', design, dist, angle, seconds: APPROACH_S, seed });
     }
     if (drills.includes('shuffle')) add({ kind: 'shuffle', design, seed });
+    if (drills.includes('strikes')) {
+      const want = arg('skills', '').split(',').filter(Boolean);
+      const trials = Number(arg('trials', '8'));
+      const d = (await import('../src/robots/designs')).design(design);
+      const ids = (d.abilities as string[]).filter((a) => SKILLS[a as SkillId] && isStrikeSkill(SKILLS[a as SkillId]!) && (!want.length || want.includes(a))) as SkillId[];
+      for (const skill of ids) for (let trial = 0; trial < trials; trial++) add({ kind: 'strike', design, skill, trial, seed: seed + trial });
+    }
     if (drills.includes('push')) {
       for (const situation of situations) {
         for (let dir = 0; dir < 360; dir += 45) {
           // A ladder: 0.6 m/s up by 0.1 to the first fall (quick: 1.1 only).
-          const ladder = (dv: number): void => add({ kind: 'push', design, situation, dir, dv, seed }, (o) => {
+          const ladder = (dv: number): void => void add({ kind: 'push', design, situation, dir, dv, seed }, (o) => {
             const p = o as PushOut;
             if (!quick && p.survived && p.applied && dv < 2.45) {
               ladder(Math.round((dv + 0.1) * 10) / 10);
@@ -443,6 +641,7 @@ async function main(): Promise<void> {
     lines.push(...summarizeApproach(results.filter((o): o is ApproachOut => o.kind === 'approach'), design));
     lines.push(...summarizeShuffle(results.filter((o): o is ShuffleOut => o.kind === 'shuffle'), design));
     for (const situation of situations) lines.push(...summarizePush(results.filter((o): o is PushOut => o.kind === 'push'), design, situation));
+    lines.push(...summarizeStrikes(results.filter((o): o is StrikeOut => o.kind === 'strike'), design));
   }
   console.log(lines.join('\n'));
   mkdirSync(OUT_DIR, { recursive: true });

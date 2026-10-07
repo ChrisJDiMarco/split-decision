@@ -3,6 +3,7 @@
 import type { TargetZone } from '../../../core/protocol';
 import type { Vec3 } from '../../../core/types';
 import type { JointRuntime } from '../../sim-context';
+import type { BalanceEngine } from '../balance/index';
 import type { Gait } from '../gait';
 import type { HumanoidGeometry, Side } from '../geometry';
 import type { MocapSet } from '../mocap/library';
@@ -52,6 +53,8 @@ export interface SkillEnv {
   player: MotionPlayer | null;
   jm: JointMap;
   rng: () => number;
+  /** The balance engine (CONTROL.balance = 'dcm'); null on the legacy path, whose strikes are as they were. */
+  engine?: BalanceEngine | null;
 }
 
 export interface SkillRun {

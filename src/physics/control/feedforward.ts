@@ -145,6 +145,11 @@ export class VelocityFeedforward {
     this.rate.fill(0);
   }
 
+  /** The filtered rate of change of each target (rad/s, r.joints order), as of the last apply. */
+  get rates(): Float64Array {
+    return this.rate;
+  }
+
   apply(r: RobotRuntime, targets: Float64Array, dt: number): void {
     if (!this.prev) {
       this.prev = Float64Array.from(targets);

@@ -47,6 +47,8 @@
 //   --mind sparring|house   who decides: the sparring stand-in (default; an intent every 0.5 s) or
 //                           the real Brain with the House Mind (src/brain, no network: combos, setups,
 //                           feints, reflexes), fed 60 Hz telemetry with the game's 0.3 s reaction delay
+//   --combos body           House Mind runs: drop the brain-sequenced combo steps (what the brain would
+//                           send with COMBO_SEQUENCING = 'body'; the body runs each combination whole)
 //   pace (tests/balance/pace-recorder.ts): idle-in-range share and why, the first two-way exchange,
 //   committed strikes per minute, combo completion, feint reads and bites against a no-feint baseline
 import loadMujoco from '@mujoco/mujoco';
@@ -239,7 +241,11 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   const delayTicks = Math.round(setup.reactionDelayS / ctx.dt);
   const frameEvery = Math.max(1, Math.round(FRAME_S / ctx.dt));
   const frameEvents: SimEvent[] = [];
+  // --combos body: what COMBO_SEQUENCING = 'body' (src/brain/sequencer.ts) would send: the combination
+  // intent only, none of the brain-sequenced steps (the brain still holds its cadence while its plan runs).
+  const bodyCombos = process.env.SD_COMBOS === 'body';
   const brains = mind === 'house' ? houseBrains(ctx, setup, (c, intent, issuedAtTick) => {
+    if (bodyCombos && intent.comboPlan?.step !== undefined) return;
     ctx.robots[c].pendingIntents.push({ applyAtTick: Math.max(ctx.tick, issuedAtTick + delayTicks), intent });
   }) : [];
   const damageRec = new DamageRecorder(ctx);
@@ -720,6 +726,13 @@ function footingLine(fights: FightReport[]): string {
   return [...by].map(([k, v]) => `${k} ${v.committed} (${pct(v.landed / Math.max(1, v.committed))})`).join(', ') || '-';
 }
 
+function outLine(fs: PaceReport['fighters'][number][]): string {
+  const m = new Map<string, number>();
+  for (const x of fs) for (const [k, v] of Object.entries(x.outOfRange ?? {})) m.set(k, (m.get(k) ?? 0) + v);
+  const tot = [...m.values()].reduce((a, b) => a + b, 0);
+  return [...m].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${pct(v / Math.max(1e-6, tot))}`).join(', ') || '-';
+}
+
 /** Pacing and commitment (tests/balance/pace-recorder.ts). */
 function paceLines(fights: FightReport[], minutes: number): string[] {
   const ps = fights.filter((f) => f.pace);
@@ -749,6 +762,7 @@ function paceLines(fights: FightReport[], minutes: number): string[] {
     `    by footing (committed, landed share): ${footingLine(ps)}`,
     `  idle in range                            ${pct(idle / inRange)} of ${inRange.toFixed(0)} fighter-s in range   target <= 20%`,
     `    why: ${[...by].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v / Math.max(1e-6, idle))}`).join(', ') || '-'}`,
+    `    out of its range by: ${outLine(fs)}`,
     `  first two-way exchange                   median ${median(firstEx).toFixed(1)} s; strikes traded within 1 s of one of his ${pct(twoWay / Math.max(1, committed))}`,
     `  combos                                   ${cs.started} started, ${pct(cs.completed / Math.max(1, cs.started))} complete, steps thrown ${pct(cs.thrown / Math.max(1, cs.steps))} (${[...closed].map(([k, v]) => `${k} ${v}`).join(', ') || '-'})`,
     `  feints                                   ${fe.asked} asked, ${fe.windups} windups on a feint intent, ${fe.reads} read, bit ${pct(fe.bites / Math.max(1, fe.reads))} (${[...lv].map(([k, v]) => `${k} ${v.bites}/${v.reads}`).join(', ') || '-'}; ${[...re].map(([k, v]) => `${k} ${v}`).join(', ') || '-'})`,
@@ -787,6 +801,8 @@ async function main(): Promise<void> {
   if (ring) process.env.SD_RING_IQ = ring; // ring IQ's footwork rules (1 | 0)
   const mind = arg('mind', '');
   if (mind) process.env.SD_MIND = mind; // sparring | house
+  const combos = arg('combos', '');
+  if (combos) process.env.SD_COMBOS = combos; // brain | body (House Mind runs: see runFight)
   const fi = process.argv.indexOf('--fight');
   if (fi >= 0) {
     const [red = 'bruiser', blue = 'striker', secs = '120', seed = '1'] = process.argv.slice(fi + 1, fi + 5);

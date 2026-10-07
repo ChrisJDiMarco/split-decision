@@ -18,6 +18,9 @@ export interface OpponentView {
   upperArm: Record<Side, Vec3>;
   thigh: Record<Side, Vec3>; // mid-thigh (low-kick target)
   knee: Record<Side, Vec3>;
+  /** His fists (the guard: often the first surface a punch meets), and their half-size. */
+  fists: Record<Side, Vec3>;
+  fistHalf: number;
   frontDepth: number; // body half-depth toward the attacker, for aiming at the surface
   windup: number;
   skill: string;
@@ -32,6 +35,7 @@ interface OpponentBodies {
   upper: Record<Side, number>;
   thigh: Record<Side, number>;
   shin: Record<Side, number>;
+  fist: Record<Side, number>;
 }
 
 const cache = new WeakMap<RobotRuntime, OpponentBodies>();
@@ -49,6 +53,7 @@ function bodiesOf(r: RobotRuntime): OpponentBodies {
     upper: { l: body('upperarm_l'), r: body('upperarm_r') },
     thigh: { l: body('thigh_l'), r: body('thigh_r') },
     shin: { l: body('shin_l'), r: body('shin_r') },
+    fist: { l: body('fist_l'), r: body('fist_r') },
   };
   cache.set(r, b);
   return b;
@@ -80,6 +85,7 @@ export function opponentView(ctx: SimContext, opp: RobotRuntime): OpponentView {
     r: g ? at(v.xpos, v.xmat, b.thigh.r, [0, 0, -g.legs.r.thigh * 0.6]) : pelvis,
   };
   const knee = { l: readVec(v.xpos, b.shin.l), r: readVec(v.xpos, b.shin.r) };
+  const fists = { l: readVec(v.xpos, b.fist.l), r: readVec(v.xpos, b.fist.r) };
   return {
     robot: opp,
     com,
@@ -91,6 +97,8 @@ export function opponentView(ctx: SimContext, opp: RobotRuntime): OpponentView {
     upperArm,
     thigh,
     knee,
+    fists,
+    fistHalf: g ? g.arms.l.fistHalf : 0.07,
     frontDepth: g ? g.torsoHalf[0] : 0.2,
     windup: opp.windup,
     skill: opp.skill,

@@ -22,6 +22,11 @@ export interface PlayOptions {
   from?: number;
   /** Scale on the per-frame joint-speed limit (< 1 for heavy limbs that cannot accelerate to it). */
   limitScale?: number;
+  /**
+   * Per-frame rate limits to use instead of the library's speed-only table (mocap/centroid.ts: what
+   * the robot's motors allow on their torque-speed lines, and the balance warp). Read during the play.
+   */
+  rates?: Float32Array;
 }
 
 export class MotionPlayer {
@@ -58,7 +63,7 @@ export class MotionPlayer {
     this.mirror = !!opts.mirror;
     this.speed = opts.speed ?? 1;
     this.limitScale = opts.limitScale ?? 1;
-    this.table = this.set.rates(move, opts.mask ?? 'all');
+    this.table = opts.rates ?? this.set.rates(move, opts.mask ?? 'all');
     this.tau = Math.max(0, Math.min(move.duration, opts.from ?? 0));
     this.rate = 0;
     this.evaluate();

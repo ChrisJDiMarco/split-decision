@@ -46,6 +46,7 @@ function punchEnd(env: SkillEnv): void {
 /** A kick cancelled or finished: the leg goes back to the gait where it stood. */
 function kickEnd(env: SkillEnv, run: SkillRun): void {
   env.player?.stop();
+  if (env.engine) env.engine.kickNeedNms = 0;
   const side = (run.scratch.clip as { side?: Side } | undefined)?.side ?? run.def.side!;
   const place = (run.scratch.clip as { place?: { x: number; y: number; yaw: number } } | undefined)?.place;
   if (env.gait.skillLegActive() === side) env.gait.returnSkillLeg(place ?? env.gait.partnerSlot(side), RETURN_SWING, env.s);
@@ -75,13 +76,31 @@ function kick(base: SkillDef, side: Side): SkillDef {
 }
 
 /**
+ * The same kick on the balance engine: the procedural kick's range and approach, which are the leg's
+ * own reach from a planted stance (the brain's range facts, src/brain/ranges.ts, read those too). The
+ * clips' own distances include the actor stepping 0.5-1.1 m into the kick, which the robot does not.
+ */
+function engineKick(base: SkillDef, side: Side): SkillDef {
+  return { ...kick(base, side), range: base.range, approach: base.approach };
+}
+
+/**
  * Mocap kicks are built (kickClip) but off: in the strike drill (every modern design, 12 s per
  * kick at a standing opponent) they landed 4 of 21 with 9 falls, against 11 of 28 with 6 falls for
  * the procedural kicks. A heavy leg lags the actors' roundhouse path (the foot arrives late and
  * low) and the swinging leg's momentum throws the capture point off the stance sole before the
  * impact. The procedural kicks stay until that is solved.
  */
-export const MOCAP_KICKS = { enabled: false };
+export const MOCAP_KICKS = {
+  enabled: false,
+  /**
+   * On the balance engine the mocap kicks play (P3: motor-rate playback from the centroid tables, the
+   * pre-position over 1/ω₀, the lift gate and the cancel, the landing by the step adjuster). The strike
+   * drill (tools/balance-drills.ts --drills strikes) is the gate: they land at least as often as the
+   * procedural kicks with no more falls (numbers in the build report).
+   */
+  engine: 1,
+};
 
 const PUNCHES: Partial<Record<SkillId, SkillDef>> = {
   jab: punch(JAB),
@@ -97,12 +116,18 @@ const KICK_DEFS: Partial<Record<SkillId, SkillDef>> = {
   head_kick: kick(HEAD_KICK, 'r'),
 };
 
+const ENGINE_KICK_DEFS: Partial<Record<SkillId, SkillDef>> = {
+  front_kick: engineKick(FRONT_KICK, 'r'),
+  low_kick: engineKick(LOW_KICK, 'r'),
+  head_kick: engineKick(HEAD_KICK, 'r'),
+};
+
 export const MOCAP_SKILLS: Partial<Record<SkillId, SkillDef>> = { ...PUNCHES, ...KICK_DEFS };
 
-/** The mocap version of a skill if this library has moves for it. */
-export function mocapSkill(set: MocapSet | null, id: SkillId): SkillDef | null {
+/** The mocap version of a skill if this library has moves for it (`engine`: on the balance engine). */
+export function mocapSkill(set: MocapSet | null, id: SkillId, engine = false): SkillDef | null {
   if (!set || !mocapStrikesEnabled()) return null;
-  const def = PUNCHES[id] ?? (MOCAP_KICKS.enabled ? KICK_DEFS[id] : undefined);
+  const def = PUNCHES[id] ?? (engine && MOCAP_KICKS.engine ? ENGINE_KICK_DEFS[id] : MOCAP_KICKS.enabled ? KICK_DEFS[id] : undefined);
   if (!def) return null;
   return (set.byLabel.get(id as never)?.length ?? 0) > 0 ? def : null;
 }

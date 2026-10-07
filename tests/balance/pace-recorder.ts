@@ -43,6 +43,8 @@ export interface PaceFighter {
   inRangeS: number;
   idleS: number;
   idleBy: Partial<Record<IdleCause, number>>;
+  /** Idle with a strike that does not reach: seconds by kind and by how far out (m past its throw edge, 5 cm bins). */
+  outOfRange: Record<string, number>;
   combos: { started: number; completed: number; steps: number; stepsThrown: number; closedBy: Record<string, number> };
   feints: { asked: number; windups: number; reads: number; bites: number; byLevel: Record<string, { reads: number; bites: number }>; reactions: Record<string, number> };
   baseline: { windows: number; bites: number };
@@ -56,7 +58,7 @@ interface ComboRec { list: string; steps: number; thrown: number; until: number 
 interface BaseWatch { w: FeintWatch; end: number }
 
 const newFighter = (): PaceFighter => ({
-  inRangeS: 0, idleS: 0, idleBy: {},
+  inRangeS: 0, idleS: 0, idleBy: {}, outOfRange: {},
   combos: { started: 0, completed: 0, steps: 0, stepsThrown: 0, closedBy: {} },
   feints: { asked: 0, windups: 0, reads: 0, bites: 0, byLevel: {}, reactions: {} },
   baseline: { windows: 0, bites: 0 },
@@ -74,6 +76,7 @@ export class PaceRecorder {
   private readonly base: Array<BaseWatch | null> = [null, null];
   private readonly nextBase = [0, 0];
   private readonly torso: Array<{ p: Vec3; t: number; avg: Vec3 } | null> = [null, null];
+  private lastOut = '';
 
   constructor(private readonly ctl: HumanoidController[]) {
     this.rings = ctl.map((c) => new RingIq(c));
@@ -181,6 +184,7 @@ export class PaceRecorder {
     f.idleS += dt;
     const why = this.cause(ctx, c, d);
     f.idleBy[why] = (f.idleBy[why] ?? 0) + dt;
+    if (why === 'strike out of its range' && this.lastOut) f.outOfRange[this.lastOut] = (f.outOfRange[this.lastOut] ?? 0) + dt;
   }
 
   private cause(ctx: SimContext, c: 0 | 1, d: number): IdleCause {
@@ -197,7 +201,11 @@ export class PaceRecorder {
     if (!def) return 'cooldown or other';
     const [lo, hi] = def.range(me.geo);
     const throwAt = def.approach?.throwAt ?? 0.85;
-    if (d > lo + throwAt * (hi - lo)) return 'strike out of its range';
+    const edge = lo + throwAt * (hi - lo);
+    if (d > edge) {
+      this.lastOut = `${def.kind} +${(Math.floor((d - edge) / 0.05) * 5).toFixed(0)}cm`;
+      return 'strike out of its range';
+    }
     if (d < lo) return 'strike too close';
     if (!(me.gait.phase === 'double' && me.gait.bothPlanted())) return 'mid-step';
     if (!(def.kind === 'leg' ? me.readyToKick() : me.readyToStrike())) return 'balance gate';

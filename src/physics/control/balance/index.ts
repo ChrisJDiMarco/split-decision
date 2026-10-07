@@ -65,9 +65,7 @@ export const BALANCE_TUNING = {
   lateTouchS: 0.12,
   touchdownM: 0.006, // sole this close to the canvas: contact
   liftedM: 0.01,
-  kickPreW: 1.0, // weight onto the stance foot over this × 1/ω₀ before a kick
-  kickGrantDepth: 0.3, // DCM this deep inside the stance sole (× its half-width) frees the leg
-  kickGrantSpeed: 0.35, // m/s COM speed
+  kickPreW: 1.0, // weight onto the stance foot over this × 1/ω₀ before a kick (then KICK_GATE decides the lift)
   stanceAnkleKp: 0.3, // stance ankle gain scale (kv scales with its square root)
   stanceHipYawKp: 0.35, // stance hip yaw gain scale (§3.6: a pivot's 0.35)
   forceFF: 1, // share of the planned horizontal ground force fed forward through Jᵀ·F
@@ -91,10 +89,25 @@ export const BALANCE_TUNING = {
   strikeInsideM: 0.02,
   strikeRate: 0.5,
   strikeErrM: 0.12,
-  stepStrikeS: 0.25,
+  stepStrikeS: 0.4,
   stepStrikeInsideM: 0.02,
   copSlewM: 0.018, // the planned COP (and the ground force's CMP) moves at most this far per control tick
   noPickS: 0.6, // a clip step that waited out liftWaitS blocks mocap picks this long
+};
+
+/**
+ * The kick gate (docs/design/balance-engine.md §5.3), exported so tools can sweep it. The weight goes
+ * onto the stance foot over kickPreW/ω₀ (the DCM plan's CMP slides onto that sole), then the leg lifts
+ * only when the DCM sits within xiM of that CMP, the body is stable (Euphoria's 0.3 m/s and rad/s), the
+ * stance sole is flat, its leg's joints are healthy and the gyro's free momentum covers the kick's
+ * (the centroid table's peak angular momentum at the rate it will play). Not ready waitS after the
+ * pre-position: the kick is called off (the fighter's mind sees a cancelled kick, not a fall).
+ */
+export const KICK_GATE = {
+  minPre: 0.8, // × kickPreW/ω₀ of weight shift before a lift
+  xiM: 0.02,
+  flat: 0.97,
+  waitS: 0.3,
 };
 
 export interface EngineInput {
@@ -126,7 +139,7 @@ export class BalanceEngine {
   readonly ref = newDcmSample();
   readonly state: BalanceState = {
     xi: [0, 0], xiRef: [0, 0], margin: 1, gyroReserve: 1, mode: 'steady', clipRate: 1, clipSync: { hold: false },
-    steady: false, canStrike: false, canKick: false, xiTouch: [0, 0],
+    steady: false, canStrike: false, canKick: false, xiTouch: [0, 0], touchIn: -1,
   };
   readonly gyro = newGyroCommand();
   /** The COM the posture tracks (an inverted pendulum under the CMP the soles can make). */
@@ -185,6 +198,12 @@ export class BalanceEngine {
   private noPickUntil = -Infinity;
   private readonly rollProc = newRolloutResult();
   private readonly rollClip = newRolloutResult();
+  /** The kick under way needs this much free gyro momentum to lift its leg (N·m·s; the kick sets it). */
+  kickNeedNms = 0;
+  /** Kicks the gate called off (diagnostics). */
+  kickCancels = 0;
+  /** The gyro core's momentum capacity, N·m·s (from the controller every tick). */
+  private gyroH = 1;
   /** A flashy move's take-off being prepared (takeoff.ts), and its readiness. */
   private takeoff: TakeoffRequest | null = null;
   private takeoffFresh = false;
@@ -330,6 +349,7 @@ export class BalanceEngine {
     const w = s.omega0;
     const T = BALANCE_TUNING;
     this.captured = false;
+    this.gyroH = inp.gyroMomentumNms;
     if (!this.driveSet) this.setDrive(s);
     g.maintain(s);
     this.senseXi(s);
@@ -841,6 +861,9 @@ export class BalanceEngine {
     if ((u > early && touching && f.lifted) || (u >= 1 && touching) || s.time > sw.t0 + sw.T + BALANCE_TUNING.lateTouchS) {
       g.engineTouchdown(side, s);
       sw.stop();
+      // (A lift that was waiting before this step is history: the next plan starts from a landing,
+      // not from rest.)
+      this.waitSince = -1;
       this.mocap?.onTouchdown();
       this.swingSide = null;
       this.lastLanded = side;
@@ -910,6 +933,7 @@ export class BalanceEngine {
     const inner = footCorners(this.geo, other(plan.side), g.feet[other(plan.side)].place, BALANCE_TUNING.copShrinkM);
     if (polygonDistance(inner, this.cop).d > BALANCE_TUNING.captureCopM && s.time - this.captureSince < BALANCE_TUNING.captureUnloadS) return;
     this.captureSide = null;
+    this.waitSince = -1;
     this.mocap?.cancel();
     this.cancelTakeoff();
     const lift = FOOTWORK_TUNING.walkLift * this.geo.legLength;
@@ -943,7 +967,11 @@ export class BalanceEngine {
     this.probe.gait = 'capture';
   }
 
-  /** Kicks: shift onto the stance foot, free the leg once the body sits over that sole. */
+  /**
+   * Kicks: the weight onto the stance foot (planHold slides the CMP onto that sole over kickPreW/ω₀),
+   * then the leg is lent only when the body is ready for single support (KICK_GATE); a kick that is
+   * not ready in time is called off.
+   */
   private kick(s: Sense): void {
     const g = this.gait;
     if (g.phase !== 'shift') {
@@ -956,16 +984,25 @@ export class BalanceEngine {
     const stance = other(side);
     const since = s.time - this.kickSince;
     const T = BALANCE_TUNING.kickPreW / s.omega0;
-    const depth = BALANCE_TUNING.kickGrantDepth * this.geo.legs[stance].footHalfWidth;
+    const K = KICK_GATE;
+    const p = g.feet[stance].place;
+    const err = Math.hypot(this.xiM[0] - p.x, this.xiM[1] - p.y);
     const speed = Math.hypot(s.comVel[0], s.comVel[1]);
-    if (since >= 0.5 * T && speed < BALANCE_TUNING.kickGrantSpeed && g.insideFoot(stance, this.xiM, depth)) {
+    const rate = Math.hypot(s.torsoOmega[0], s.torsoOmega[1]);
+    const stable = speed < BALANCE_TUNING.stableSpeed && rate < BALANCE_TUNING.stableSpeed;
+    const flat = s.feet[stance].flat > K.flat;
+    const m = this.jm.leg[stance];
+    const healthy = [m.hipYaw, m.hipRoll, m.hipPitch, m.knee, m.anklePitch, m.ankleRoll].every((i) => this.r.joints[i].state === 'ok');
+    const reserve = this.state.gyroReserve * this.gyroH >= this.kickNeedNms;
+    if (since >= K.minPre * T && err <= K.xiM && stable && flat && healthy && reserve) {
       g.grantSkillLeg();
       this.kickSince = -1;
       return;
     }
-    if (since > g.shiftLimit()) {
+    if (since > T + K.waitS || since > g.shiftLimit()) {
       g.cancelShift();
       this.kickSince = -1;
+      this.kickCancels++;
     }
   }
 
@@ -1090,6 +1127,7 @@ export class BalanceEngine {
     const reserve = noGyro || st.gyroReserve >= T.strikeReserve;
     // Where the DCM is heading: the swing's touchdown, with the CMP held where the stance sole has it.
     const tRem = g.phase === 'single' && g.swingSide && this.swing.active ? Math.max(0, this.swing.t0 + this.swing.T - s.time) : -1;
+    st.touchIn = tRem;
     if (tRem >= 0) {
       const k = Math.exp(s.omega0 * tRem);
       st.xiTouch[0] = this.cmpSoles[0] + (this.xiM[0] - this.cmpSoles[0]) * k;

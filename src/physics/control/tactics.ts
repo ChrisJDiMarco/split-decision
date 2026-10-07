@@ -7,17 +7,19 @@
 //   reflex     counterIfLunge is armed in advance and fires here, without a brain round trip,
 //              the moment the opponent's windup crosses REFLEX_WINDUP inside striking range
 //   aggression faster footwork, shorter windups (the skill runner), shorter pauses between strikes
-//   combos     an intent with tactic 'combo' runs whole in the body (combo.ts): steps chained from
-//              the last blow's recovery, tempo beats, sold feints, an adapted payoff
-//   feints     the real strike's windup, sold and telegraphed past the reflex threshold, pulled by
-//              choice (feint.ts); a low feint is a kick's weight shift and hip turn
-// Pace (balance engine): a strike in range starts from the footing the body has (canStrikeNow: still
-// moving with the DCM settled inside the soles, or from a step whose landing catches it); mid-step it
-// finishes that step and throws (no new step lifts meanwhile, at most STRIKE_WAIT_S); walking in, the
-// lead step that brings it in range carries an arm strike (enter WITH the blow), the stance goal
-// always a real step in (no stall just outside range); close_distance at the edge of range is a
-// step-in jab; aggression past PRESSURE_AGG presses (holds the pocket, cuts the cage, stays in after
-// a combination), below it a combination ends with a step back out to the edge (docs/design/ring-iq.md).
+//   combos     balance engine: an intent with tactic 'combo' runs whole in the body (combo.ts): steps
+//              chained from the last blow's recovery, tempo beats, sold feints, an adapted payoff
+//   feints     balance engine: the real strike's windup, sold and telegraphed past the reflex
+//              threshold, pulled by choice (feint.ts); a low feint is a kick's weight shift and hip turn
+// Pace (balance engine, PACE): a strike in range starts from the footing the body has (canStrikeNow:
+// still moving with the DCM settled inside the soles, or from a step whose landing catches it); mid-
+// step it finishes that step and throws (no new step lifts meanwhile, for at most PACE.strikeWaitS);
+// walking in, the lead step that brings it in range carries an arm strike (enter WITH the blow), the
+// stance goal always a real step from the feet (no stall just outside range); close_distance at the
+// edge of range is a step-in jab; from PACE.pressureAggression footwork presses (holds the pocket,
+// cuts off a fighter near the fence, stays in after a combination), below it a combination ends with
+// a step back out to the edge (docs/design/ring-iq.md). The legacy path is as it was: its pacing, its
+// jab feint (legacyFeint) and its combinations (the first strike, the brain sequencing the rest).
 import type { Intent, MoveVector, Tactic, TargetZone } from '../../core/protocol';
 import { APOTHEM } from '../../core/arena-spec';
 import type { SimContext } from '../sim-context';
@@ -42,6 +44,7 @@ const SIDESTEP_S = 0.7;
 const SWEET_SPOT = 0.6; // where in a skill's range the feet aim
 const THROW_ZONE = 0.85; // walking in, throw once this far into the range (not at its very edge)
 const MAX_HOLD_S = { defense: 3, grapple: 2.5 } as const;
+const LEGACY_FEINT_AT = 0.6; // legacy path: a feint is pulled at this fraction of its windup
 // Intent.move (player mode): a velocity request in the opponent-locked frame.
 const MOVE_DEADBAND = 0.05; // |move| under this plants the feet
 const MOVE_LOOKAHEAD_S = 0.8; // the goal is where the stance would be this far ahead at the asked speed
@@ -72,11 +75,13 @@ export const PACE = {
   strikeWaitS: 0.45, // a strike in range holds the feet at most this long for the body to be ready...
   strikeReleaseS: 0.25, // ...then lets the footwork square the stance this long before holding again
   stepInMinM: 0.13, // walking in to strike, the stance goal is at least this much nearer (a real step)
-  stepInReachM: 0.06, // a step whose touchdown DCM is within the throw edge plus this carries the blow
+  stepInReachM: 0.02, // a step whose touchdown DCM is within the throw edge plus this carries the blow...
+  stepInLeadS: 0.2, // ...started this close to the touchdown (the blow lands with the foot, not short of him)
   edgeJabAggression: 0.45, // close_distance at the edge of range is a step-in jab from this aggression
   pressureAggression: 0.7, // from here footwork presses: the pocket, the cage cut, no step out after combos
   pressInM: 0.04, // pressing, hold_range keeps the lead weapon's throw edge less this
-  cutRad: 0.35, // pressing, the approach swings at most this far toward the cage centre
+  cutRad: 0.35, // pressing, the approach swings at most this far toward the cage centre...
+  cutFenceM: 1.5, // ...once he is within this of the fence limit (fully 0.5 m from it)
 };
 
 /**
@@ -122,6 +127,8 @@ export class TacticRunner {
   /** The feint on show (pulled at its sold share), and when the last one was pulled. */
   private feintRun: SkillRun | null = null;
   private feintPulledAt = -Infinity;
+  /** Legacy path: a feint's jab windup on show (legacyFeint), as before the pace stage. */
+  private legacyFeinting = false;
   /** A strike due in range is holding the feet since then; and no holding again before. */
   private pendingSince = -1;
   private pendingOffUntil = -1;
@@ -163,7 +170,7 @@ export class TacticRunner {
     if (!this.reflex(ctx, s, env, intent, dist)) {
       if (this.combo) this.runCombo(ctx, s, env, intent, dist);
       else if (ctx.time < this.exitUntil) this.exit(s, dist);
-      else this.run(ctx, s, env, intent.tactic, intent.target, aggression, dist, intent.comboPlan?.step !== undefined);
+      else this.run(ctx, s, env, intent.tactic, intent.target, aggression, dist, !!this.c.engine && intent.comboPlan?.step !== undefined);
     }
     // Player mode: the footwork follows Intent.move; the tactic only picked the strike or defence.
     if (intent.move) this.followMove(s, intent.move, dist);
@@ -221,6 +228,7 @@ export class TacticRunner {
     // Nothing from before the break carries over into FIGHT (a pulled feint, a sidestep, a latched
     // reflex, a combination under way, a strike waiting for the feet).
     this.feintRun = null;
+    this.legacyFeinting = false;
     this.latched = false;
     this.sidestepUntil = -1;
     this.pendingSince = -1;
@@ -250,7 +258,7 @@ export class TacticRunner {
     this.exitUntil = -1;
     const key = comboKey(intent);
     if (this.combo && this.combo.key !== key) this.endCombo(false);
-    if (wholeCombo(intent) && !this.combo) {
+    if (wholeCombo(intent) && !this.combo && this.c.engine) {
       this.combo = new ComboRun(intent, ctx.time, this.c.feintRead(ctx)?.seq ?? 0);
       this.comboStats.started++;
     }
@@ -295,19 +303,21 @@ export class TacticRunner {
 
   /** `now`: throw without the single-strike cooldown (a reflex, a brain-sequenced combination step). */
   private run(ctx: SimContext, s: Sense, env: SkillEnv, wanted: Tactic, zone: TargetZone, aggression: number, dist: number, now: boolean): void {
-    // (A brain-sequenced step, comboPlan.step set, runs as a single tactic without the cooldown, also
-    // when the body has run that combination whole already: the brain is behind the body.)
+    // (A brain-sequenced step, comboPlan.step set, runs as a single tactic: on the balance engine
+    // without the cooldown, also when the body has run that combination whole already, the brain
+    // being behind the body.)
     const intent = this.c.r.intent;
-    if (wanted === 'feint_left' || wanted === 'feint_right') return void this.feint(ctx, s, zone, wanted === 'feint_left' ? 'l' : 'r', aggression, dist, false);
+    if (this.c.engine && (wanted === 'feint_left' || wanted === 'feint_right')) return void this.feint(ctx, s, zone, wanted === 'feint_left' ? 'l' : 'r', aggression, dist, false);
     const tactic = fallbackTactic(wanted, intent?.combo); // TODO(control-build)
     const runner = this.c.skills;
     // A defensive call abandons a strike that has not been committed yet (a feint on show is pulled at its point).
     const running = runner.run;
-    if (running && running.phase === 'windup' && isStrikeSkill(running.def) && DEFENSIVE.has(tactic) && running !== this.feintRun) runner.cancel(env);
+    const feintOnShow = this.c.engine ? !!running && running === this.feintRun : this.legacyFeinting;
+    if (running && running.phase === 'windup' && isStrikeSkill(running.def) && DEFENSIVE.has(tactic) && !feintOnShow) runner.cancel(env);
     if (tactic === 'sidestep_counter') return this.sidestepCounter(ctx, s, env, zone, aggression, dist);
     if (tactic === 'close_distance' && this.edgeJab(ctx, s, aggression, dist)) return;
     if (FOOTWORK.has(tactic)) return this.footwork(s, tactic, dist, aggression);
-    if (tactic === 'feint') return void this.feint(ctx, s, zone, undefined, aggression, dist, false);
+    if (tactic === 'feint') return this.c.engine ? void this.feint(ctx, s, zone, undefined, aggression, dist, false) : this.legacyFeint(ctx, s, env, dist);
     const id = TACTIC_SKILL[tactic];
     const def = id ? this.usable(id) : null;
     if (!def) return this.footwork(s, 'close_distance', dist, aggression);
@@ -413,9 +423,11 @@ export class TacticRunner {
     if (!player && (dist > edge || dist < lo)) {
       this.pendingSince = -1;
       const want = this.strikeRange(lo + sweet * (hi - lo), edge);
-      // Walking in, the goal is always a real step nearer (a goal inside the feet's tolerance stalls
-      // the body just short of range for good); the step that brings an arm strike in range carries it.
-      this.goalAt(s, e && dist > edge ? Math.min(want, dist - PACE.stepInMinM) : want, 0, false);
+      // Walking in, the goal is always a real step nearer for the feet (a goal inside their hold
+      // tolerance stalls the body just short of range, leaning in on planted feet); the step that
+      // brings an arm strike in range carries it.
+      // (A kick keeps its own approach: it wants a set stance at its distance, not a step through it.)
+      this.goalAt(s, e && dist > edge && def.kind === 'arm' ? Math.min(want, this.stepInRange(dist)) : want, 0, false);
       if (e && def.kind === 'arm' && dist > edge && (now || ctx.time >= this.nextStrikeAt) && this.stepInReady(edge)) return this.start(def, zone, aggression);
       return false;
     }
@@ -423,9 +435,22 @@ export class TacticRunner {
     if (!now && ctx.time < this.nextStrikeAt) return false;
     const ready = def.kind === 'leg' ? this.c.readyToKick() : this.c.canStrikeNow();
     if (ready && (e || (this.c.gait.phase === 'double' && this.c.gait.bothPlanted()))) return this.start(def, zone, aggression);
-    // Not yet: the step in the air lands, then the blow (no new step meanwhile, for a while).
-    if (e) this.pend(ctx);
+    // Not yet: the step in the air lands, then the blow (no new step meanwhile, for a while). A kick
+    // lets the feet square the stance first: it is thrown from a set stance.
+    if (e && def.kind === 'arm') this.pend(ctx);
     return false;
+  }
+
+  /**
+   * The COM-to-COM range whose stance goal lies PACE.stepInMinM nearer him than the frame the feet
+   * stand in now (the body may lean ahead of its feet: the step is measured from the feet).
+   */
+  private stepInRange(dist: number): number {
+    const g = this.c.gait;
+    if (!g.bothPlanted()) return dist - PACE.stepInMinM;
+    const f = g.currentFrame();
+    const o = this.c.opp!.com;
+    return Math.hypot(o[0] - f.x, o[1] - f.y) - this.c.comLead() - PACE.stepInMinM;
   }
 
   private start(def: SkillDef, zone: TargetZone, aggression: number): boolean {
@@ -454,9 +479,10 @@ export class TacticRunner {
   private stepInReady(edge: number): boolean {
     const e = this.c.engine!;
     const g = this.c.gait;
-    if (g.phase !== 'single' || !e.state.canStrike) return false;
+    const st = e.state;
+    if (g.phase !== 'single' || !st.canStrike || st.touchIn < 0 || st.touchIn > PACE.stepInLeadS) return false;
     const o = this.c.opp!.com;
-    const t = e.state.xiTouch;
+    const t = st.xiTouch;
     return Math.hypot(o[0] - t[0], o[1] - t[1]) <= edge + PACE.stepInReachM && this.c.canStrikeNow();
   }
 
@@ -481,6 +507,30 @@ export class TacticRunner {
     this.still();
     if (this.c.gait.phase !== 'double' || !this.c.gait.bothPlanted()) return;
     if (this.c.startSkill(def, zone, aggression)) this.holdStart = ctx.time;
+  }
+
+  /**
+   * Legacy path (unchanged by the pace stage): a jab windup shown to LEGACY_FEINT_AT of it and pulled.
+   * The balance engine's feints are feint() (sold, telegraphed, read).
+   */
+  private legacyFeint(ctx: SimContext, s: Sense, env: SkillEnv, dist: number): void {
+    const run = this.c.skills.run;
+    if (run && this.legacyFeinting) {
+      if (run.phase === 'windup' && run.t >= LEGACY_FEINT_AT * run.durations.windup) {
+        this.c.skills.cancel(env);
+        this.legacyFeinting = false;
+        this.nextStrikeAt = ctx.time + 0.4;
+      }
+      return this.still();
+    }
+    this.legacyFeinting = false;
+    const def = this.usable('jab') ?? this.usable('cross');
+    if (!def || this.c.skills.active()) return this.still();
+    const hi = def.range(this.c.geo)[1];
+    if (dist > hi + 0.3) return this.goalAt(s, hi, 0, false);
+    this.still();
+    if (ctx.time < this.nextStrikeAt || this.c.gait.phase !== 'double') return;
+    this.legacyFeinting = this.c.startSkill(def, 'head', 0.5);
   }
 
   /**
@@ -568,11 +618,13 @@ export class TacticRunner {
     const aggression = cb.payoff() ? Math.max(intent.aggression, COMBO.payoffAggression) : intent.aggression;
     let started = false;
     if (FEINT_TACTICS.has(step)) {
+      const hand = step === 'feint_left' ? 'l' : step === 'feint_right' ? 'r' : undefined;
+      if (!feintSkill(this.c, zone, hand)) return this.advance(cb, t, null); // nothing to fake it with
       if (run && this.chainable(run)) {
         this.c.skills.handOff(env);
         if (cb.current === run) this.stepEnded(t);
       }
-      started = this.feint(ctx, s, zone, step === 'feint_left' ? 'l' : step === 'feint_right' ? 'r' : undefined, aggression, dist, true);
+      started = this.feint(ctx, s, zone, hand, aggression, dist, true);
     } else {
       const tactic = fallbackTactic(step);
       const id = TACTIC_SKILL[tactic];
@@ -702,11 +754,13 @@ export class TacticRunner {
 
   /**
    * Cutting the cage: the angle (rad) to swing the approach toward the side of him that faces the
-   * cage centre, more the nearer he is to the fence (none with him in the middle).
+   * cage centre, once he is within PACE.cutFenceM of the fence (more the nearer he is): he is pinned
+   * there instead of followed round it. None with him in the open (two fighters pressing in the
+   * middle would only circle each other).
    */
   private cageCut(ang: number, o: readonly number[]): number {
     const r = Math.hypot(o[0], o[1]);
-    const near = Math.min(1, Math.max(0, (r - 0.5) / Math.max(0.5, ARENA_LIMIT_M - 0.5)));
+    const near = Math.min(1, Math.max(0, (r - (ARENA_LIMIT_M - PACE.cutFenceM)) / Math.max(0.1, PACE.cutFenceM - 0.5)));
     if (near <= 0) return 0;
     const toCentre = Math.atan2(-o[1], -o[0]);
     const off = Math.atan2(Math.sin(toCentre - ang), Math.cos(toCentre - ang));
