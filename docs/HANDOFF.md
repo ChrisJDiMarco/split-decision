@@ -1,9 +1,10 @@
-# >>> OVERNIGHT 2026-10-06 (Chris went to bed ~19:30) <<<
-Running (resume any of them with its script plus resumeFromRunId if cut off):
-- Balance build: P3 strikes (speed and impact + approved motor swaps), then P2, P4 and the judge. Script balance-engine-wf_38bd1af8-d17.js, run wf_38bd1af8-d17. Pacing is DONE (6ed7937).
-- Move polish proof (5 moves, 4 workers): script move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true}.
-- NEXT GEN Phase 0: script nextgen-phase0-wf_e2427164-3a2.js, run wf_e2427164-3a2.
-In the morning: commit each one's results, send Chris the polish side-by-side viewer (harness/motions.html), and report.
+# >>> PAUSED 2026-10-06 ~21:10 by Chris ("pause for now") <<<
+All three runs were stopped cleanly. No sim processes are left (only the dev server on :5297). Last commit: 73bd3fc.
+- The balance build was early in **P3 strikes** (speed and impact, plus the motor swaps Chris approved). Its partial edits are UNCOMMITTED in src/robots/catalog.ts, src/robots/humanoid.ts, src/core/protocol.ts and tools/balance-drills.ts, backed up in tests/balance/.out/paused-wip-20261006-2112.patch.
+  - To resume: script balance-engine-wf_38bd1af8-d17.js with resumeFromRunId wf_38bd1af8-d17. Every stage through pace replays from cache; P3 restarts and should review the partial edits first.
+- Move polish proof: just started, no project files written. To resume: script move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true}.
+- NEXT GEN Phase 0: just started, no project files written. To resume: script nextgen-phase0-wf_e2427164-3a2.js, run wf_e2427164-3a2.
+- Restart only when Chris says so; heavy CPU runs at night (see memory heavy-cpu-jobs-overnight).
 
 # >>> RESUME HERE (2026-10-06, session paused for tokens) <<<
 
