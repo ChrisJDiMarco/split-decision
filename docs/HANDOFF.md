@@ -1,10 +1,11 @@
-# >>> RUNNING 2026-10-07 in SPEED MODE (Chris approved full CPU in the day) <<<
-Four parallel tracks. Resume any one with its script plus resumeFromRunId if cut off:
-- Balance build, P3 strikes (motor swaps approved), then P2, P4 and the judge: balance-engine-wf_38bd1af8-d17.js, run wf_38bd1af8-d17 (up to 7 processes).
-- Move polish proof: move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true} (up to 5 workers).
+# >>> PAUSED 2026-10-07 13:50 by Chris ("pause everything") <<<
+All four tracks were stopped minutes after launch. No sim processes are left (only the dev server). Nothing new was written. The only uncommitted work is still the early P3 edits (catalog.ts qdd.rs06x2, humanoid.ts per-joint motor overrides, protocol.ts, balance-drills.ts), backed up in tests/balance/.out/paused2-wip-20261007-1350.patch.
+Resume any track with its script plus resumeFromRunId (the speed-mode caps are already in the scripts):
+- Balance (P3 strikes, then P2, P4 and the judge): balance-engine-wf_38bd1af8-d17.js, run wf_38bd1af8-d17.
+- Move polish proof: move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true}.
 - NEXT GEN Phase 0: nextgen-phase0-wf_e2427164-3a2.js, run wf_3ba424db-5f3.
-- Brain aggression pass: brain-aggression-wf_8748d109-072.js, run wf_8748d109-072.
-After P3: damage calibration (strike-power.md stage 5b) + hit recoil (D5). After the engine: the flashy-moves stage, then a live critic, then switch the default to dcm.
+- Brain aggression: brain-aggression-wf_8748d109-072.js, run wf_8748d109-072.
+Restart only when Chris says so.
 
 # Handoff: where Split Decision stands (paused 2026-09-29 ~11:00 ET)
 
