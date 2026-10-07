@@ -1,10 +1,10 @@
-# >>> PAUSED 2026-10-06 ~21:10 by Chris ("pause for now") <<<
-All three runs were stopped cleanly. No sim processes are left (only the dev server on :5297). Last commit: 73bd3fc.
-- The balance build was early in **P3 strikes** (speed and impact, plus the motor swaps Chris approved). Its partial edits are UNCOMMITTED in src/robots/catalog.ts, src/robots/humanoid.ts, src/core/protocol.ts and tools/balance-drills.ts, backed up in tests/balance/.out/paused-wip-20261006-2112.patch.
-  - To resume: script balance-engine-wf_38bd1af8-d17.js with resumeFromRunId wf_38bd1af8-d17. Every stage through pace replays from cache; P3 restarts and should review the partial edits first.
-- Move polish proof: just started, no project files written. To resume: script move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true}.
-- NEXT GEN Phase 0: just started, no project files written. To resume: script nextgen-phase0-wf_e2427164-3a2.js, run wf_e2427164-3a2.
-- Restart only when Chris says so; heavy CPU runs at night (see memory heavy-cpu-jobs-overnight).
+# >>> RUNNING 2026-10-07 in SPEED MODE (Chris approved full CPU in the day) <<<
+Four parallel tracks. Resume any one with its script plus resumeFromRunId if cut off:
+- Balance build, P3 strikes (motor swaps approved), then P2, P4 and the judge: balance-engine-wf_38bd1af8-d17.js, run wf_38bd1af8-d17 (up to 7 processes).
+- Move polish proof: move-polish-poc-wf_12353dce-98f.js, run wf_34e4f671-4ea, args {runProof: true} (up to 5 workers).
+- NEXT GEN Phase 0: nextgen-phase0-wf_e2427164-3a2.js, run wf_3ba424db-5f3.
+- Brain aggression pass: brain-aggression-wf_8748d109-072.js, run wf_8748d109-072.
+After P3: damage calibration (strike-power.md stage 5b) + hit recoil (D5). After the engine: the flashy-moves stage, then a live critic, then switch the default to dcm.
 
 # Handoff: where Split Decision stands (paused 2026-09-29 ~11:00 ET)
 
