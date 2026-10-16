@@ -40,7 +40,15 @@ export interface HumanoidSpec {
   bulk: number; // 1.0 = athletic, 1.4 = heavyweight (widens armor and limbs)
   armor: MaterialId;
   frame: MaterialId;
-  motors: { leg: string; knee: string; arm: string; elbow: string; waist: string; neck: string };
+  /**
+   * Actuators by joint group. The optional per-joint entries override their group for one joint (a
+   * stronger module where one joint is the bottleneck, docs/research/08-modern-roster.md); left out,
+   * the design compiles exactly as before.
+   */
+  motors: {
+    leg: string; knee: string; arm: string; elbow: string; waist: string; neck: string;
+    shoulderPitch?: string; waistYaw?: string; hipPitch?: string; hipYaw?: string;
+  };
   fist: 'block' | 'spiked' | 'piston';
   head: 'visor' | 'dome' | 'slit' | 'twin';
   gyro: { maxTorqueNm: number; momentumNms: number; massKg: number } | null;
@@ -225,7 +233,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
   parts.push({
     id: 'torso', parent: 'pelvis', pos: [0, 0, L.pelvisHalf[2]], tags: torsoTags, hp: 1400,
     joints: [
-      hinge('waist_yaw', [0, 0, 1], R.waistYaw, spec.motors.waist, onLegCircuit(spec.motors.waist)),
+      hinge('waist_yaw', [0, 0, 1], R.waistYaw, spec.motors.waistYaw ?? spec.motors.waist, onLegCircuit(spec.motors.waistYaw ?? spec.motors.waist)),
       // Deep forward fold: getting up off the canvas needs knees to chest and a torso over the feet.
       hinge('waist_pitch', [0, 1, 0], R.waistPitch, spec.motors.waist, onLegCircuit(spec.motors.waist)),
     ],
@@ -250,7 +258,7 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     parts.push({
       id: `upperarm_${tag}`, parent: 'torso', pos: [0, s * L.shoulderY, L.shoulderZ], tags: ['upperarm', t], hp: 500,
       joints: [
-        hinge(`shoulder_pitch_${tag}`, [0, 1, 0], R.shoulderPitch, spec.motors.arm),
+        hinge(`shoulder_pitch_${tag}`, [0, 1, 0], R.shoulderPitch, spec.motors.shoulderPitch ?? spec.motors.arm),
         hinge(`shoulder_roll_${tag}`, [1, 0, 0], mirrored(tag, R.shoulderRoll), spec.motors.arm),
         hinge(`shoulder_yaw_${tag}`, [0, 0, 1], mirrored(tag, R.shoulderYaw), spec.motors.arm),
       ],
@@ -275,9 +283,9 @@ export function buildHumanoid(spec: HumanoidSpec): RobotDesign {
     parts.push({
       id: `thigh_${tag}`, parent: 'pelvis', pos: [0, s * L.hipY, -L.pelvisHalf[2]], tags: ['thigh', t, ...legTags], hp: 700,
       joints: [
-        hinge(`hip_yaw_${tag}`, [0, 0, 1], mirrored(tag, R.hipYaw), spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_yaw_${tag}`, [0, 0, 1], mirrored(tag, R.hipYaw), spec.motors.hipYaw ?? spec.motors.leg, onLegCircuit(spec.motors.hipYaw ?? spec.motors.leg)),
         hinge(`hip_roll_${tag}`, [1, 0, 0], mirrored(tag, R.hipRoll), spec.motors.leg, onLegCircuit(spec.motors.leg)),
-        hinge(`hip_pitch_${tag}`, [0, 1, 0], R.hipPitch, spec.motors.leg, onLegCircuit(spec.motors.leg)),
+        hinge(`hip_pitch_${tag}`, [0, 1, 0], R.hipPitch, spec.motors.hipPitch ?? spec.motors.leg, onLegCircuit(spec.motors.hipPitch ?? spec.motors.leg)),
       ],
       geoms: [weigh({ shape: { type: 'capsule', from: [0, 0, 0], to: [0, 0, -L.thigh], radius: L.legR * 1.15 }, material: spec.frame, role: 'structure' }, shell?.frameMm ?? 0, shell?.fillKgM3 ?? 0)],
       visual: { kit: 'leg.thigh' },

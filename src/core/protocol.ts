@@ -303,6 +303,14 @@ export interface RobotTelemetry {
   referee?: RefereeTelemetry; // referee break state (src/physics/systems/referee.ts)
   /** The most recent physical dents on this robot (src/physics/damage), oldest first, by seq. */
   dents?: DentTelemetry[];
+  /** The current skill is past its windup (a strike on its way: it can no longer be pulled). Control fills it. */
+  committed?: boolean;
+  /**
+   * While the body runs a whole combination (Intent.combo, docs/design/fighter-iq-control-contract.md
+   * §2): the index of the next step to throw (equal to the step count while the last one finishes).
+   * Absent otherwise. Control fills it.
+   */
+  comboStep?: number;
 }
 
 // ---------------------------------------------------------------- fighter IQ (src/physics/openings)

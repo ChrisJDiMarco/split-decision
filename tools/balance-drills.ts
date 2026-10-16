@@ -20,7 +20,7 @@
 //
 // usage:
 //   npx tsx tools/balance-drills.ts [--drills approach,push,shuffle,strikes] [--designs firecracker,savate,haymaker,pylon]
-//                                   [--trials 8] [--skills jab,cross,...] [--window range|guard]
+//                                   [--trials 8] [--skills jab,cross,...] [--window range|guard] [--approach]
 //                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance]
 //   npx tsx tools/balance-drills.ts --job '<json>'        one drill in this process, JSON on stdout
 //   --tune BALANCE_TUNING.stanceAnkleKp=1,FOOTWORK_TUNING.walkGapM=0.03   A/B a tuning table value
@@ -98,6 +98,7 @@ export interface StrikeOut {
   captureSteps: number;
   gyroPeak: number;
   end: string;
+  step?: boolean; // --approach: the blow started from a step
 }
 export type DrillOut = ApproachOut | PushOut | ShuffleOut | StrikeOut;
 
@@ -327,9 +328,11 @@ async function strikeWindow(design: string, id: SkillId): Promise<[number, numbe
 async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<StrikeOut> {
   const win = await strikeWindow(job.design, job.skill);
   const k = job.trial;
-  // Deterministic spread over the throw window, a little off-line and turned.
+  // Deterministic spread over the throw window, a little off-line and turned. --approach: a stride
+  // or so beyond the throw edge, on an intent: the tactics walk in and throw (a step-in blow).
   const u = ((k * 0.618034) % 1);
-  const dist = win ? win[0] + (win[1] - win[0]) * u : 1;
+  const approachMode = process.env.SD_STRIKE_APPROACH === '1';
+  const dist = !win ? 1 : approachMode ? win[1] + 0.25 + 0.2 * u : win[0] + (win[1] - win[0]) * u;
   const dy = [0, 0.1, -0.1, 0.05, -0.05][k % 5];
   const dyaw = [0, 0.15, -0.15, -0.08, 0.08][k % 5];
   const out: StrikeOut = {
@@ -349,7 +352,19 @@ async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<Strik
   const z0 = comPos(ctx, me)[2];
   const cap0 = c.gait.captureSteps;
   out.mocap = !!def.clip;
-  out.started = c.startSkill(def, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
+  if (approachMode) {
+    me.intent = intent(job.skill as never, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
+    const n0 = Math.round(STRIKE_MAX_S / ctx.dt);
+    for (let i = 0; i < n0 && !c.skills.run; i++) {
+      sim.step();
+      for (const e of ctx.events as SimEvent[]) if (e.kind === 'fall' && e.corner === me.corner) out.fell = true;
+      ctx.events.length = 0;
+    }
+    me.intent = null;
+    out.started = !!c.skills.run && c.skills.run.def.id === job.skill;
+    out.step = c.gait.phase === 'single';
+    out.dist = Math.hypot(comPos(ctx, opp)[0] - comPos(ctx, me)[0], comPos(ctx, opp)[1] - comPos(ctx, me)[1]);
+  } else out.started = c.startSkill(def, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
   if (!out.started) {
     sim.dispose();
     return out;
@@ -456,7 +471,7 @@ function runChild(job: Job, balance: string): Promise<DrillOut> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...process.execArgv, script, '--job', JSON.stringify(job)], {
       stdio: ['ignore', 'pipe', 'inherit'],
-      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('window', '') ? { SD_STRIKE_WINDOW: arg('window', '') } : {}), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
+      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('window', '') ? { SD_STRIKE_WINDOW: arg('window', '') } : {}), ...(process.argv.includes('--approach') ? { SD_STRIKE_APPROACH: '1' } : {}), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
     });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -559,16 +574,18 @@ const pctile = (xs: number[], q: number) => {
 };
 
 export function summarizeStrikes(outs: StrikeOut[], design: string): string[] {
-  const rs = outs.filter((o) => o.job.design === design && o.started);
-  if (!rs.length) return [];
-  const lines: string[] = ['  strikes (standing mirror opponent, from the throw window):'];
+  const all = outs.filter((o) => o.job.design === design);
+  const rs = all.filter((o) => o.started);
+  if (!all.length) return [];
+  const lines: string[] = [`  strikes (standing mirror opponent${process.argv.includes('--approach') ? ', walked in on an intent' : ', from the throw window'}; ${all.length - rs.length} not started):`];
   const ids = [...new Set(rs.map((o) => (o.job as Extract<Job, { kind: 'strike' }>).skill))];
   for (const id of ids) {
     const t = rs.filter((o) => (o.job as Extract<Job, { kind: 'strike' }>).skill === id);
     const hit = t.filter((o) => o.impact);
     const v = hit.map((o) => o.vContact), imp = hit.map((o) => o.impulse);
     const clean = hit.filter((o) => o.part === 'head' || o.part === 'torso' || o.part === 'pelvis' || /thigh|shin/.test(o.part ?? '')).length;
-    lines.push(`    ${id.padEnd(10)} ${t[0].mocap ? 'mocap' : 'proc '} landed ${hit.length}/${t.length} (clean ${clean}), falls ${t.filter((o) => o.fell).length}, capture steps ${t.reduce((a, o) => a + o.captureSteps, 0)}`
+    const steps = t.filter((o) => o.step).length;
+    lines.push(`    ${id.padEnd(10)} ${t[0].mocap ? 'mocap' : 'proc '} landed ${hit.length}/${t.length}${steps ? ` (${steps} from a step)` : ''} (clean ${clean}), falls ${t.filter((o) => o.fell).length}, capture steps ${t.reduce((a, o) => a + o.captureSteps, 0)}`
       + `; contact p50/p90 ${f1(pctile(v, 0.5))}/${f1(pctile(v, 0.9))} m/s (peak ${f1(pctile(t.map((o) => o.vPeak), 0.5))}), impulse p50/p90 ${f1(pctile(imp, 0.5))}/${f1(pctile(imp, 0.9))} N·s`
       + `, start→contact ${f2(pctile(hit.map((o) => o.tContact), 0.5))} s, elbow ${f2(pctile(hit.map((o) => o.elbow), 0.5))} rad, COM into it ${f2(pctile(hit.map((o) => o.comAlong), 0.5))} m/s, torso yaw ${f1(pctile(t.map((o) => o.torsoYawRate), 0.5))} rad/s, gyro ${f2(pctile(t.map((o) => o.gyroPeak), 0.9))}`);
   }
