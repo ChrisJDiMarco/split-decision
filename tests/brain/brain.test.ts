@@ -186,9 +186,10 @@ describe('fallback', () => {
     expect(h.brain.decisionSource).toBe('fallback');
     expect(h.brain.source).toBe('jev');
     expect(h.brain.linkStatus).toEqual({ kind: 'offline', label: 'JEV OFFLINE → HOUSE' });
-    // A combination the House Mind throws commits it for its steps (sequenced, no re-decisions), and
-    // these static frames never show the body throwing, so each step runs to its timeout.
-    expect(h.intents.length).toBeGreaterThan(6);
+    // A combination the House Mind throws commits it for its steps (no re-decisions); these static
+    // frames never show the body running it (no intent, no comboStep), so after BODY_WAIT_S the brain
+    // steps it itself and each step runs to its timeout.
+    expect(h.intents.length).toBeGreaterThan(3);
     expect(h.intents.every((i) => i.intent.source === 'fallback')).toBe(true);
     await run(h.brain, sc, clock, 5, RETRY_MS / 1000 + 0.5, 1.0);
     expect(hits.n).toBe(2);

@@ -62,3 +62,25 @@ The physics reads a feint as **a strike windup of the setup limb, cancelled by c
 - a head kick over hands that dropped for a low fake.
 
 It's thrown with the whole body, hips first, the support leg driving and the arms counter-rotating for balance, and it snaps back to guard.
+
+## Note (2026-10-20): body sequencing is on
+
+`COMBO_SEQUENCING = 'body'` (src/brain/sequencer.ts).
+- **What the brain sends.** One combo intent per combination, with no `comboPlan.step`. The body throws every step.
+- **What the brain does while the combo runs.** It only follows `RobotTelemetry.comboStep` and the read, for the plan and READ lines. A retreat read shows the long shot the body throws instead.
+- **When it decides again.** Once `comboStep` reaches the step count AND the last blow is past its windup (`RobotTelemetry.committed`), so the next intent lands while the last blow does. For a model mind (Jev or LOCAL), a `hold_range` reset goes out meanwhile (also when the plan is dropped mid-way); the answer still applies.
+- **Review fix (2026-10-20).** The first version decided at the last step's windup start. The body pulls a strike still in its windup for a defensive intent (`hold_range`, `guard`, a circle: `TacticRunner.run`), so the reset, or the House Mind's next guard, pulled the payoff. Measured on dcm (`tests/brain/review-combo-cancel.ts`, 8 fights of 40 s): last steps pulled in their windup 37% (22 of 59) with a model mind and 19% (14 of 75) with the House Mind before the fix, 2% (1 of 47) and 6% (2 of 31) after; earlier steps 0-4% throughout. A House-run combination is also no longer aborted when the model comes back mid-way (the body is running it whole anyway).
+- **Fallback for a body that does not run combos whole.** Such a body shows the intent applied and no `comboStep` for `BODY_PROOF_S` (the legacy path). The brain then steps the combo as before.
+- **Measured.** House-Mind fights on `SD_BALANCE=dcm`, 8 fights each run (`tests/brain/measure-combos.ts`):
+
+| | before | after |
+|---|---|---|
+| Brain step intents | 121 | 0 |
+| Combos with a step thrown again | 16% (12 of 76) | 6% (6 of 107) |
+
+**For the control build (body side).** What is left of the re-throws comes from the body:
+- When a whole combo ends (done, or dropped for a reflex), the standing `tactic: 'combo'` intent runs `fallbackTactic('combo')`, its first step, as a single tactic until the next intent arrives.
+- A finished whole combo could hold instead.
+- A new intent identical to the combination already running is absorbed, then replays step 0 the same way.
+
+Also, `tests/balance/pace-recorder.ts` labels idle time under a whole combo intent by its first step, so a setup that opens with a feint shows its idle gaps as 'feint'.

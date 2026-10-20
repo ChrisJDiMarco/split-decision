@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  AnswerError, applyHysteresis, commitMode, decide, parseAnswers, sampleTemperature, seededSample,
+  AGGRESSION_FLOOR, aggressionOf, AnswerError, applyHysteresis, commitMode, decide, parseAnswers, sampleTemperature, seededSample,
 } from '../../src/brain/policy';
 import { buildQuestions } from '../../src/brain/questions';
 import { makeFighterContext, readSituation } from '../../src/brain/situation';
@@ -78,13 +78,36 @@ describe('gating and hysteresis', () => {
     const commit = decide({ ...base, parsed: parseAnswers(answerFor(qs.questions, 'hook', 0.8), qs) });
     expect(commit.mode).toBe('commit');
     expect(commit.tactic).toBe('hook');
-    expect(commit.aggression).toBeCloseTo(0.5);
+    expect(commit.aggression).toBeCloseTo(0.625); // 'balanced' on the body's scale (AGGRESSION_FLOOR 0.25)
     const probe = decide({ ...base, parsed: parseAnswers(answerFor(qs.questions, 'hook', 0.45), qs) });
     expect(probe.mode).toBe('probe');
-    expect(probe.aggression).toBeCloseTo(0.35);
+    expect(probe.aggression).toBeCloseTo(0.5);
     const guard = decide({ ...base, parsed: parseAnswers(answerFor(qs.questions, 'hook', 0.2), qs) });
     expect(guard.mode).toBe('guard');
     expect(guard.tactic).toBe('guard');
+  });
+
+  test('decide: unsure in range, a favourite that lands is thrown as a probe; with him coming it covers up', () => {
+    const sc = scene('savate', 'pylon');
+    const fc = makeFighterContext(0, sc.red, sc.blue, { ...RED_SETUP, design: 'savate' });
+    const f = frame(sc, 3, 0.66);
+    const s = readSituation(fc, f);
+    expect(s.range?.mine.find((w) => w.tactic === 'jab')?.fit).toBe('lands');
+    const qs = buildQuestions(fc, f.telemetry[1], { range: s.range });
+    const base = { situation: s, current: null, temperature: 0.3, seed: 1, corner: 0, tick: 100 };
+    const res = answerFor(qs.questions, 'jab', 0.2);
+    if (res.answers.opp_commit?.type === 'noul') res.answers.opp_commit.noul = 0.2;
+    const unsure = decide({ ...base, parsed: parseAnswers(res, qs) });
+    expect(unsure).toMatchObject({ tactic: 'jab', mode: 'probe' });
+    const coming = readSituation(fc, frame(sc, 3, 0.66, { blue: { windup: 0.4, skill: 'cross' } }));
+    expect(decide({ ...base, situation: coming, parsed: parseAnswers(res, qs) }).tactic).toBe('guard');
+  });
+
+  test('aggression levels on the body scale: balanced is 0.625, pressing passes the body\'s pressure line', () => {
+    expect(aggressionOf(0)).toBeCloseTo(AGGRESSION_FLOOR);
+    expect(aggressionOf(0.5)).toBeCloseTo(0.625);
+    expect(aggressionOf(0.75)).toBeGreaterThan(0.7);
+    expect(aggressionOf(1)).toBe(1);
   });
 
   test('decide: low confidence out of range circles instead of covering', () => {

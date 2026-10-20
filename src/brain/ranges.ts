@@ -35,6 +35,14 @@ const CM_ROUND = 5;
  */
 export const RANGE_FACTS = { enabled: true };
 
+/**
+ * How a weapon one step out reads to the mind: 'needs' ("head kick needs a step in", the first
+ * version) or 'lands' ("jab lands with a step in"). From the edge Jev mostly closed or held on
+ * 'needs'; the step is the body's to take WITH the blow (the pace stage throws a punch off the step),
+ * so the words say it lands. Picked by the live A/B in tests/brain/live-edge.ts.
+ */
+export const RANGE_WORDING: { step: 'needs' | 'lands' } = { step: 'lands' };
+
 /** Where a weapon stands from the current gap: lands now, one step in, too close, too far. */
 export type RangeFit = 'lands' | 'step' | 'close' | 'far';
 
@@ -190,13 +198,14 @@ function names(fits: readonly WeaponFit[], fit: RangeFit): string[] {
 
 const FIT_ORDER: readonly RangeFit[] = ['lands', 'step', 'close', 'far'];
 const MINE_ALL: Record<RangeFit, string> = { lands: 'everything lands', step: 'everything needs a step in', close: 'too close for everything', far: 'everything too far' };
+const STEP_LANDS = 'lands with a step in';
 
 function mineGroup(names: readonly string[], fit: RangeFit, rest = false): string {
   const many = rest || names.length > 1;
   const who = rest ? 'the rest' : list(names);
   switch (fit) {
     case 'lands': return `${who} ${many ? 'land' : 'lands'}`;
-    case 'step': return `${who} ${many ? 'need' : 'needs'} a step in`;
+    case 'step': return RANGE_WORDING.step === 'lands' ? `${who} ${many ? 'land' : 'lands'} with a step in` : `${who} ${many ? 'need' : 'needs'} a step in`;
     case 'close': return `${who} too close`;
     default: return `${who} too far`;
   }
@@ -209,7 +218,7 @@ function mineGroup(names: readonly string[], fit: RangeFit, rest = false): strin
 export function fromHereWords(mine: readonly WeaponFit[]): string | null {
   if (!mine.length) return null;
   const groups = FIT_ORDER.map((fit) => ({ fit, names: names(mine, fit) })).filter((g) => g.names.length);
-  if (groups.length === 1) return MINE_ALL[groups[0].fit];
+  if (groups.length === 1) return groups[0].fit === 'step' && RANGE_WORDING.step === 'lands' ? `everything ${STEP_LANDS}` : MINE_ALL[groups[0].fit];
   const biggest = groups.reduce((a, b) => (b.names.length >= a.names.length ? b : a));
   const parts = groups.filter((g) => g !== biggest).map((g) => mineGroup(g.names, g.fit));
   return [...parts, mineGroup(biggest.names, biggest.fit, true)].join('; ');
@@ -246,5 +255,6 @@ const FIT_NOTE: Record<StrikeFit, string> = { lands: 'lands from here', step: 'n
 
 /** A tactic option's range note ('lands from here'), or null for footwork and bodies without skill ranges. */
 export function fitNote(fit: StrikeFit | null): string | null {
+  if (fit === 'step' && RANGE_WORDING.step === 'lands') return STEP_LANDS;
   return fit ? FIT_NOTE[fit] : null;
 }

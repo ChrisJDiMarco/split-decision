@@ -70,6 +70,12 @@ export interface BrainDecision {
   read?: string | null;
   /** The mind link at read-out time (JEV, LOCAL · model, HOUSE, or X OFFLINE → HOUSE). */
   link?: MindLinkStatus;
+  /**
+   * Which mind made this decision: 'jev' (cloud), 'local' (the LOCAL model, or a rule tick while
+   * LOCAL is the mind) or 'house' (the House Mind: chosen, or standing in for an offline model).
+   * `source` keeps saying how it was made (a model answer 'jev', a rule tick 'local', the House Mind 'fallback').
+   */
+  mind?: MindSource;
 }
 
 /** An opening move (or creative gamble) the fighter went for. */

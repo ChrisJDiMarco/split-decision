@@ -109,3 +109,128 @@ Live Jev A/B, 12 requests (6 frozen states from the fixed tree, old vs new; `tes
 - Share of strike probability on misfits: 49% before, 20% after.
 - Input tokens: about 1,590-1,690 before, 1,640-1,750 after.
 
+
+## Edge, pressure and the House Mind's temperament, mind side (2026-10-20)
+
+Chris: "they need to be going at each other, this is a fight not dancing and hesitating", "more aggressive and clever".
+
+**Edge wording (live Jev A/B, `tests/brain/live-edge.ts`, 20 requests).** Ten edge states (none of my weapons lands, the longest one step out), across five modern matchups, with him standing or advancing. Log: `tests/brain/.out/live-edge-2026-10-20.json`.
+
+| | A: "needs a step in" | B: "lands with a step in" |
+|---|---|---|
+| Top choice a step-in strike | 3/10 | 6/10 |
+| Top choice close_distance | 7/10 | 4/10 |
+| Probability on step-in strikes and the combo | 0.33 | 0.66 |
+| Out-of-range strikes on top | 0 | 0 |
+
+B is in (`RANGE_WORDING.step = 'lands'`, ranges.ts). It applies to `from_here` ("everything lands with a step in") and to the tactic options. 'Too far' and 'too close' did not change, so nothing out of range gets promoted. HAYMAKER at 1.03 m and FIRECRACKER still mostly close the distance.
+
+**House Mind** (house-mind.ts):
+- **Pressure.** Base aggression is 0.7 + 0.5 × damage lead, clamped to 0.45-0.95. When even it sits at the body's pressure line. It falls below that when losing badly. Closing and step-in entries run at 0.75 or more.
+- **Weapon choice.** Strikes are weighted by a prior from the measured landing rates (jab 2, cross and hook 1.3, uppercut 1.2, overhand 1, low kick 0.6, front kick 0.5, head kick 0.35). That prior is multiplied by the fight's own record, `FightMemory.landingFactor`: committed throws by weapon, landed when an impact of ours of at least 4 N·s arrives during the swing or within 0.1 s after. Feints never commit, so they are not counted.
+- **Combos and setups.** These are weighted by the geometric mean of their strikes' weights, so one strike that keeps whiffing drags the whole combo down.
+- **Never the combo the body is still finishing.** The House does not send the combination the body is still throwing; the body would treat it as the same one and then throw its first step again.
+- **From the edge.** It steps in WITH a strike, by preference a punch: a kick one step out weighs 0.1, a punch 0.5. Now and then (12%) it runs a setup that opens with a feint, and 5% of the time a lone feint.
+- **His windup in range.** 45% of the time it beats him to it with the straight that has been landing best (cross, jab or hook, only if it lands from there). Otherwise it slips and counters, or covers.
+- **His blow already in the air.** It slips and counters (65%) or covers. It never swings into the blow, and it takes no creative gamble then either.
+- **Armed lunge answer.** Half the time it is a counter straight that lands from here, otherwise the slip.
+- **Pinned on the cage.** Half the time it fights off the fence with what lands, otherwise it circles out.
+
+**Jev and LOCAL** (policy.ts, shared by both):
+- The aggression answer maps to 0.25 + 0.75 × level, so 'balanced' is 0.625 and 'pressing' is 0.81.
+- An unsure answer (confidence under 0.35) is thrown as a probe when its favourite is a strike that lands from right here and he is not coming. Before, it was always guard and circle.
+- The `record` line now also gives the most-thrown weapons' landing ("your head kicks: 0 of 6 landed").
+
+LOCAL vs House on 10 edge and pocket states (`tests/brain/live-minds.ts`, local model, no cloud calls):
+- LOCAL attacked in 9 of 10, all in commit mode, mean aggression 0.69. The House attacked in 10 of 10 at 0.72.
+- LOCAL answered in about 3 s per decision (one prompt per question on a loaded Mac). That is past `LOCAL_SLOW_MS`, so in play the link goes offline and the House Mind fights. This is a bridge and latency problem, not a mind one.
+
+**Measured** (`tools/fight-metrics.ts --mind house --balance dcm`):
+- Setup: 4 modern matchups × 4 seeds × 60 s. Before and after ran on the same frozen physics tree; only `src/brain` differs.
+
+| | before | after |
+|---|---|---|
+| Committed strikes per minute (both) | 23.2 | 28.2 |
+| Landed per minute | 18.2 | 25.1 |
+| Whiffs per minute (share) | 5.0 (22%) | 3.1 (11%) |
+| Idle in range | 39% | 34% |
+| First two-way exchange, median | 9.5 s | 7.8 s |
+| Strikes traded within 1 s of his | 25% | 47% |
+| Strikes started too far | 34 of 594 | 16 of 472 |
+| Pocket entries with a strike | 52% | 60% |
+| Self-falls (strict) per minute | 0.86 (12) | 1.14 (13) |
+| Fights stopped | 3 | 6 (5 FIRECRACKER head pops, 1 down after a self-fall) |
+
+Landed per fight: 19.2 ± 6.8 before, 23.1 ± 9.9 after (SD). The difference is about 1.3 SE, so it is suggestive only. The whiff share and the trading share moved clearly.
+
+Head kicks went from 103 thrown with 0 landed to 27 thrown with 0 landed. Kicks on the dcm path still almost never land: 1 of 187 before, 0 of 74 after. That is the body's to fix (strike-power P3).
+
+More landed blows mean more FIRECRACKER head pops (its 13 N·s head). That is the damage-calibration item in HANDOFF.
+
+Idle in range is still above the pace target (20%). The causes are the body's: the balance gate 29%, strikes out of their range (the walk-in) 24%, and mid-step 19%.
+
+### Review (2026-10-20, independent)
+
+**Defect fixed: the payoff was pulled.** The brain decided again as soon as the body *started* the last step, while that blow was still in its windup. The next intent (the `hold_range` reset for Jev or LOCAL, or the House Mind's guard, circle or hold) reached the body 0.3 s later, and the body pulls a strike still in its windup for a defensive tactic (`TacticRunner.run`). So the combination lost its payoff.
+- Measured with `tests/brain/review-combo-cancel.ts` (dcm, 4 matchups × 2 seeds × 40 s), last steps pulled in their windup:
+  - Model mind (a fake Jev answering in 0.5 s): 37% (22 of 59) before the fix, 2% (1 of 47) after.
+  - House Mind: 19% (14 of 75) before, 6% (2 of 31) after.
+  - Earlier steps stayed at 0-4% throughout.
+- **Fix.** `ComboSequencer.follow` waits for `RobotTelemetry.committed` on the last step.
+- **Also changed:**
+  - A plan that drops mid-way also resets for a model mind.
+  - When the model comes back, it no longer aborts a House combination the body is running whole. Before, the panel went blank while the body kept throwing, and nothing reset the standing intent.
+  - Tests are in `combo-body.test.ts`.
+- **Cost.** Re-throws in House fights went from 4% (4 of 113) to 7% (7 of 106) of combos (`measure-combos.ts`, 8 fights). The decision now comes later, so the body more often finishes before the next intent arrives. That is still the body-side item in the control contract.
+
+**Re-measured.** `tools/fight-metrics.ts --mind house --balance dcm`, 4 matchups × 4 seeds × 60 s. All three arms ran on one snapshot of today's physics tree (14:31), which has moved since the builder's run:
+- before: the HEAD brain
+- builder: the builder's brain
+- after: the builder's brain plus the review fixes
+
+| | before | builder | after |
+|---|---|---|---|
+| Fight time (min) | 9.6 | 7.7 | 8.7 |
+| Landed per minute | 27.8 | 35.1 | 32.6 |
+| Landed per minute per fight, mean ± SD | 24.8 ± 14.9 | 29.6 ± 12.3 | 28.8 ± 13.7 |
+| Committed per minute | 35.7 | 43.9 | 40.2 |
+| Whiffs per minute (share of committed) | 7.9 (22%) | 8.7 (20%) | 7.7 (19%) |
+| Idle in range | 46% | 53% | 52% |
+| First two-way exchange, median | 6.3 s | 6.0 s | 6.1 s |
+| Strikes traded within 1 s of his | 33% | 49% | 50% |
+| Jabs landed | 97 of 125 | 133 of 191 | 131 of 199 |
+| Kicks landed | 1 of 108 | 0 of 73 | 1 of 71 |
+| Head kicks landed | 0 of 41 | 0 of 26 | 0 of 26 |
+| Self-falls (strict) | 11 | 6 | 4 |
+| Strikes started too far | 14 of 497 | 14 of 492 | 20 of 520 |
+| Fight ends: head pop / down / time | 9 / 1 / 6 | 11 / 0 / 5 | 9 / 2 / 5 |
+
+What held up on today's physics:
+- More throwing and trading, and fewer head kicks.
+- Landed per minute is up about 17%, but under 1 SE per fight.
+
+What did not:
+- The halved whiff share: it is 22% → 19%.
+- The idle drop: idle in range rose 46% → 52%. Part of that is the pace recorder's 'feint' label for gaps inside setup combos, 5% → 11% of idle; even without it, idle did not drop.
+- The head pops are not only FIRECRACKER's now: SAVATE's head popped in 3 of the 4 SAVATE v PYLON fights.
+
+Determinism: the same fight run twice gave identical results (the wall-clock control µs aside).
+
+**His windup** (House Mind, `tests/brain/review-windup-answers.ts`, 16 fights; outcome within 1 s):
+
+| House answer | He landed | We landed |
+|---|---|---|
+| "beat him to it" (78) | 68% | 55% |
+| "cover up" (54) | 74% | 28% |
+| "slip and counter" (163) | 71% | 28% |
+
+The counter-straight does not eat more than slipping or covering does, and lands about twice as often. With the 0.3 s reaction delay, none of the three avoids much.
+
+**Live Jev** (10 requests, 'lands with a step in'; `tests/brain/review-live-edge.ts`, log in `tests/brain/.out/review-live-edge-2026-10-20.json`):
+- **Mixed gap** (the jab lands, the rest a step out): 5 of 5 took a strike that lands. It never took a step-in kick over it.
+- **At the edge with him winding up:**
+  - Jab stepping in: 2
+  - Closing: 2
+  - PYLON's front kick from a step out: 1
+  - Slipping: 0
+- No out-of-range strikes. The step-in kick is the wording's soft spot: kicks from a step out land 0-1% on dcm.

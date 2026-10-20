@@ -221,7 +221,7 @@ export class Brain {
   get latest(): BrainDecision | null {
     const d = this.history[this.history.length - 1] ?? null;
     if (!d) return null;
-    const plan = this.seq.view() ?? (COMBO_SEQUENCING === 'body' ? d.plan ?? null : null);
+    const plan = this.seq.view();
     const s = this.situation;
     const r = s ? freshRead(s.me, s.time) : null;
     const read = r ? readHud(r) : null;
@@ -258,17 +258,25 @@ export class Brain {
     if (interrupts.length && this.pendingTrigger === null) this.pendingTrigger = interrupts[0];
     const onBreak = breakRole(s) !== null;
     if (onBreak !== this.onBreak) this.refereeEdge(onBreak);
-    if (this.seq.active && this.mind === 'local' && this.planOrigin?.source === 'fallback' && !this.offline) {
-      // The local model is back: it takes over from the House Mind's combination (Jev keeps its old behaviour).
+    if (this.seq.active && !this.seq.following && this.mind !== 'house' && this.planOrigin?.source === 'fallback' && (!this.offline || this.canSend())) {
+      // The chosen model is back (LOCAL's health probe said so), or Jev's retry probe is due: the model
+      // takes over from the House Mind's combination (the probe is a real question, asked now). Not
+      // from one the body runs whole: that is in the air already and ends within a second or two, and
+      // its end resets the standing intent while the model decides (below).
       this.seq.abort();
       this.planOrigin = null;
       this.pendingTrigger ??= 'mind_online';
     }
     if (this.seq.active) {
       // A combination is running: the fighter is committed to it; no cadence questions until it ends.
+      const following = this.seq.following;
       const out = this.seq.update(s, interrupts, this.fc.design);
       if (out === null) return;
       if (out !== 'done' && out !== 'aborted') return this.emitStep(out, s);
+      // The body threw the last step of its combination (or the plan was dropped): while a model
+      // decides what comes next, a standing combo intent would have the body throw its first step
+      // again (and again, as long as the model takes). Reset meanwhile.
+      if (following && !this.offline) this.emitReset(s, out === 'done' ? 'plan_done' : 'plan_aborted');
       this.planOrigin = null;
       this.pendingTrigger ??= out === 'done' ? 'plan_done' : 'plan_aborted';
     }
@@ -315,7 +323,7 @@ export class Brain {
     // Offline (or the House Mind chosen), the House Mind owns every tick (obvious ones included), so the HUD shows it.
     if (this.offline && (obvious || !this.canSend())) {
       this.stats.fallbackDecisions++;
-      this.emitRule(obvious ?? houseMind(this.fc, s, this.opts.seed), 'fallback', s, trigger);
+      this.emitRule(obvious ?? houseMind(this.fc, s, this.opts.seed, this.memory), 'fallback', s, trigger);
       return;
     }
     if (this.inFlight >= MAX_IN_FLIGHT || !this.canSend()) return; // stay due; retry next frame
@@ -408,7 +416,7 @@ export class Brain {
     const g = decideGambles({ extras: parseExtras(res, req.qs), qs: req.qs, appetite: req.appetite, temperature: this.fc.setup.temperament, kipRisk: req.kipRisk, seed: this.opts.seed, corner: this.corner, tick: req.tick });
     this.getupStyle = g.getupStyle ?? 'safe';
     const kipYes = res.answers.getup_style?.type === 'noul' ? res.answers.getup_style.noul : null;
-    const rule = obviousDecision(this.fc, now, this.opts.seed) ?? houseMind(this.fc, now, this.opts.seed);
+    const rule = obviousDecision(this.fc, now, this.opts.seed) ?? houseMind(this.fc, now, this.opts.seed, this.memory);
     const pct = (p: number) => `${Math.round(p * 100)}%`;
     const odds = kipYes === null || g.kipP === null ? '' : ` (Jev ${pct(kipYes)}, appetite ${pct(g.kipP)})`;
     const reason = `${this.getupStyle === 'kip_up' ? 'down: going for the kip-up' : 'down: safe get-up'}${odds}`;
@@ -465,13 +473,16 @@ export class Brain {
     if (combo) this.startPlan(combo, comboPlan, intent, now);
   }
 
-  /** Sequence a combination the body cannot run by itself yet (plain ones: every strike, no setup). */
+  /**
+   * Commit to a combination (plain ones: every strike, no setup): the body runs it whole and the brain
+   * follows it for the MIND panel (COMBO_SEQUENCING 'body'), or the brain steps it for a body that cannot.
+   */
   private startPlan(combo: Tactic[], plan: Intent['comboPlan'], intent: Intent, s: Situation) {
-    if (COMBO_SEQUENCING !== 'brain' || combo.length < 2 || !this.seq.canStart(s)) return;
+    if (combo.length < 2 || !this.seq.canStart(s)) return;
     const spec: PlanSpec = plan
       ? { steps: combo, zones: plan.zones, setup: plan.setup, payoffZone: plan.payoffZone, ...(plan.fishing ? { fishing: plan.fishing } : {}), ...(plan.tempo ? { tempo: plan.tempo } : {}) }
       : { steps: combo, zones: combo.map(() => intent.target), setup: 0, payoffZone: intent.target };
-    this.seq.start(spec, intent, s);
+    this.seq.start(spec, intent, s, COMBO_SEQUENCING === 'body');
     this.planOrigin = this.history[this.history.length - 1] ?? null;
     // Any answer still in flight was asked before the fighter committed to this plan: drop it on
     // arrival, or it would cut into the plan's first step (Jev is often slower than the 0.25 s cadence).
@@ -492,6 +503,26 @@ export class Brain {
     }, s);
   }
 
+  /**
+   * The body has thrown every step of its combination (the last one past its windup, so this cannot
+   * pull it), or the plan was dropped, and a model is about to be asked what next:
+   * hold range meanwhile (the pocket when pressing, else back to the edge, as the body steps out after
+   * a combination). No Jev call, and the answer that follows still applies (lastAppliedTick and the
+   * cadence are untouched, so is the tactic the hysteresis compares against).
+   */
+  private emitReset(s: Situation, trigger: 'plan_done' | 'plan_aborted') {
+    const origin = this.planOrigin;
+    if (!origin) return;
+    const base = this.history[this.history.length - 1];
+    const intent: Intent = { tactic: 'hold_range', target: origin.target, aggression: origin.aggression, counterIfLunge: origin.counterIfLunge, confidence: 1, source: origin.source === 'fallback' ? 'fallback' : 'jev' };
+    const current = this.currentTactic;
+    this.emit(intent, s.tick, {
+      ...(base ?? origin), tick: s.tick, time: s.time, tactic: 'hold_range', combo: null, plan: null, onOpening: null, gamble: null,
+      reason: trigger === 'plan_done' ? 'combination thrown: reset while deciding' : 'combination dropped: reset while deciding', trigger, latencyMs: null, openings: s.me.openings ?? [],
+    }, s);
+    this.currentTactic = current;
+  }
+
   /** Jev failed (the link is now offline): the House Mind takes this decision immediately. */
   private onFailure(req: PendingRequest, decrement = true) {
     if (req.gen !== this.generation) return;
@@ -500,7 +531,7 @@ export class Brain {
     const s = this.situation;
     if (!s || !this.active) return;
     this.stats.fallbackDecisions++;
-    this.emitRule(houseMind(this.fc, s, this.opts.seed), 'fallback', s, req.trigger);
+    this.emitRule(houseMind(this.fc, s, this.opts.seed, this.memory), 'fallback', s, req.trigger);
   }
 
   // ------------------------------------------------------------ output
@@ -537,7 +568,9 @@ export class Brain {
     if (rule.combo && rule.tactic === 'combo') this.startPlan(rule.combo, rule.comboPlan, intent, s);
   }
 
-  private emit(intent: Intent, issuedAtTick: number, d: BrainDecision, s: Situation) {
+  private emit(intent: Intent, issuedAtTick: number, decision: BrainDecision, s: Situation) {
+    // Which mind made it: a model answer (or a rule tick) belongs to the chosen mind, the House Mind's own to 'house'.
+    const d: BrainDecision = { ...decision, mind: decision.source === 'fallback' || this.mind === 'house' ? 'house' : this.mind };
     this.memory.onIntent(intent, s.time, isFlashy(intent.tactic), s.me.down);
     this.lastAggression = intent.aggression;
     this.currentTactic = intent.tactic;

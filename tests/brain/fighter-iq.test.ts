@@ -199,10 +199,14 @@ function fighter(sc: Scene, prefer: Record<string, string>) {
 
 type Fighter = ReturnType<typeof fighter>;
 
+/**
+ * Frames at 60 Hz. The body is a legacy one by default: its telemetry shows the last intent applied
+ * (no reaction delay) and never a comboStep, so the brain steps combinations itself.
+ */
 async function play(f: Fighter, sc: Scene, from: number, to: number, red: (t: number) => Partial<RobotTelemetry>, blue: Partial<RobotTelemetry> = {}) {
   for (let t = from; t < to; t += 1 / 60) {
     f.clock.t = t * 1000;
-    f.brain.onFrame(frame(sc, t, 1.0, { red: red(t), blue }));
+    f.brain.onFrame(frame(sc, t, 1.0, { red: { intent: f.intents[f.intents.length - 1] ?? null, ...red(t) }, blue }));
     await flush();
   }
 }
@@ -210,7 +214,7 @@ async function play(f: Fighter, sc: Scene, from: number, to: number, red: (t: nu
 /** The body throwing the feint: its jab windup shows from t0 and is pulled 0.1 s later. */
 const feintAt = (t0: number) => (t: number) => (t >= t0 && t < t0 + 0.1 ? 'jab' : 'stance');
 
-describe('a setup → payoff combination, step by step', () => {
+describe('a setup → payoff combination, step by step (a body that cannot run it whole)', () => {
   test('feint high → he bites (covered) → low kick to his failing knee, shown on the MIND panel', async () => {
     const sc = scene('savate', 'pylon');
     const f = fighter(sc, { tactic: 'combo', combo: 'fake_high_go_low' });
@@ -235,7 +239,7 @@ describe('a setup → payoff combination, step by step', () => {
     const now = f.brain.latest as MindView;
     expect(now.plan?.phase).toBe('payoff');
     expect(readLine(now)).toBe('READ · HE BIT: COVERED HIGH');
-    expect(COMBO_SEQUENCING).toBe('brain');
+    expect(COMBO_SEQUENCING).toBe('body'); // stepped by the brain only because this body never showed a comboStep
   });
 
   test('Jev answers "feint" as the tactic and a fake in the combo answer: it runs the fake as a setup', async () => {

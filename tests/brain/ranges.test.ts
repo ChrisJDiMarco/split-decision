@@ -5,7 +5,7 @@ import { houseMind } from '../../src/brain/house-mind';
 import { buildQuestions, TACTIC_OPTION_MAX_WORDS } from '../../src/brain/questions';
 import { readFileSync } from 'node:fs';
 import {
-  fitAt, fromHereWords, hisWeaponsWords, meetWords, RANGE_FACTS, rangeTable, reachEdgeWords, STEP_LEG_FRACTION, tacticFit, THROW_ZONE, weaponFit, type StrikeFit,
+  fitAt, fitNote, fromHereWords, hisWeaponsWords, meetWords, RANGE_FACTS, RANGE_WORDING, rangeTable, reachEdgeWords, STEP_LEG_FRACTION, tacticFit, THROW_ZONE, weaponFit, type StrikeFit,
 } from '../../src/brain/ranges';
 import { distanceWords, serializeState } from '../../src/brain/serializer';
 import { makeFighterContext, readSituation } from '../../src/brain/situation';
@@ -149,7 +149,18 @@ describe('range table: one source of truth with the body', () => {
 describe('range words', () => {
   test('from here: grouped by fit, the biggest group folded into "the rest"', () => {
     expect(fromHereWords([{ tactic: 'jab', fit: 'lands' }, { tactic: 'cross', fit: 'lands' }])).toBe('everything lands');
-    expect(fromHereWords([{ tactic: 'jab', fit: 'lands' }, { tactic: 'cross', fit: 'lands' }, { tactic: 'head_kick', fit: 'step' }])).toBe('head kick needs a step in; the rest land');
+    expect(fromHereWords([{ tactic: 'jab', fit: 'lands' }, { tactic: 'cross', fit: 'lands' }, { tactic: 'head_kick', fit: 'step' }])).toBe('head kick lands with a step in; the rest land');
+    // The edge wording the live A/B picked (tests/brain/live-edge.ts); the first version still reads as before.
+    expect(RANGE_WORDING.step).toBe('lands');
+    expect(fromHereWords([{ tactic: 'jab', fit: 'step' }, { tactic: 'cross', fit: 'step' }])).toBe('everything lands with a step in');
+    RANGE_WORDING.step = 'needs';
+    try {
+      expect(fromHereWords([{ tactic: 'jab', fit: 'lands' }, { tactic: 'cross', fit: 'lands' }, { tactic: 'head_kick', fit: 'step' }])).toBe('head kick needs a step in; the rest land');
+      expect(fitNote('step')).toBe('needs a step in');
+    } finally {
+      RANGE_WORDING.step = 'lands';
+    }
+    expect(fitNote('step')).toBe('lands with a step in');
     expect(fromHereWords([{ tactic: 'uppercut', fit: 'close' }, { tactic: 'jab', fit: 'lands' }, { tactic: 'head_kick', fit: 'far' }])).toBe('jab lands; uppercut too close; the rest too far');
     expect(fromHereWords([])).toBeNull();
   });
@@ -233,7 +244,7 @@ describe('tactic options annotated by range', () => {
         const text = criteria[t];
         expect(text.split(/\s+/).length).toBeLessThanOrEqual(TACTIC_OPTION_MAX_WORDS);
         const fit = tacticFit(fc.design, t, d);
-        if (fit && t !== 'combo') expect(text).toMatch(/(lands from here|needs a step in|too close for it|too far from here)$/);
+        if (fit && t !== 'combo') expect(text).toMatch(/(lands from here|lands with a step in|too close for it|too far from here)$/);
         else expect(text).toBe(TACTIC_INFO[t].description);
       }
     }

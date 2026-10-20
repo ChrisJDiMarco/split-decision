@@ -13,8 +13,14 @@ import type { CommitMode } from './types';
 export const COMMIT_CONFIDENCE = 0.6;
 export const PROBE_CONFIDENCE = 0.35;
 export const HYSTERESIS_MARGIN = 0.15;
-export const PROBE_AGGRESSION_SCALE = 0.7;
+export const PROBE_AGGRESSION_SCALE = 0.8;
 export const GUARD_AGGRESSION_CAP = 0.3;
+/**
+ * The aggression answer's levels on the body's 0..1 scale (Chris: "this is a fight, not dancing and
+ * hesitating"): 'fully defensive' 0.25 .. 'balanced' 0.625 .. 'pressing' 0.81 .. 'all-out' 1. The body
+ * presses (holds the pocket, cuts the cage, no step out after a combination) from 0.7.
+ */
+export const AGGRESSION_FLOOR = 0.25;
 const OPP_COMMIT_GUARD = 0.5;
 const MIN_TEMPERATURE = 0.05;
 
@@ -77,9 +83,14 @@ export function parseAnswers(result: JevResult, qs: QuestionSet): ParsedAnswers 
     targetProbs,
     oppCommit: commit,
     counter: counterProbs ? (argmax(counterProbs) as Tactic) : undefined,
-    aggression: scoreFrac(a.aggression, AGGRESSION_LEVELS) ?? 0.5,
+    aggression: aggressionOf(scoreFrac(a.aggression, AGGRESSION_LEVELS) ?? 0.5),
     winning: scoreFrac(a.winning, WINNING_LEVELS),
   };
+}
+
+/** The aggression answer (0..1 over its levels) on the body's scale: from AGGRESSION_FLOOR up. */
+export function aggressionOf(level: number): number {
+  return AGGRESSION_FLOOR + (1 - AGGRESSION_FLOOR) * Math.max(0, Math.min(1, level));
 }
 
 /** Samples an option from p^(1/T), renormalized, using a uniform draw u in [0, 1). */
@@ -145,10 +156,28 @@ export interface PolicyOutput {
   reason: string;
 }
 
+/** He is coming (winding up, throwing, or Jev expects him to commit): no time to swing on a hunch. */
+function underThreat(s: Situation, oppCommit: number | null): boolean {
+  return s.oppPhase === 'windup' || s.oppPhase === 'striking' || (oppCommit ?? 0) > OPP_COMMIT_GUARD;
+}
+
+/**
+ * Unsure, but the favourite is a strike that lands from right here (the body's own ranges) and he is
+ * not coming: throw it as a probe instead of covering up (a fighter in range who is not sure what to
+ * do jabs; he does not stand and wait). Null otherwise.
+ */
+function probeInsteadOfGuard(parsed: ParsedAnswers, s: Situation): Tactic | null {
+  if (underThreat(s, parsed.oppCommit)) return null;
+  const fav = argmax(parsed.tacticProbs) as Tactic;
+  return s.range?.mine.some((w) => w.tactic === fav && w.fit === 'lands') ? fav : null;
+}
+
 export function decide(input: PolicyInput): PolicyOutput {
   const { parsed, situation, current, temperature, seed, corner, tick } = input;
   const mode = commitMode(parsed.tacticConfidence);
   const target = argmax(parsed.targetProbs) as TargetZone;
+  const probe = mode === 'guard' ? probeInsteadOfGuard(parsed, situation) : null;
+  if (probe) return { tactic: probe, target, aggression: parsed.aggression * PROBE_AGGRESSION_SCALE, mode: 'probe', reason: 'unsure, but it lands from here: probe with it' };
   if (mode === 'guard') {
     return { tactic: guardTactic(situation, parsed.oppCommit), target, aggression: Math.min(parsed.aggression, GUARD_AGGRESSION_CAP), mode, reason: 'low confidence: guard and circle' };
   }
