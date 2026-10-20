@@ -1,0 +1,732 @@
+{
+ "O": {
+  "back": {
+   "lie": "back",
+   "clip": "getup_back.140_08.0076",
+   "rollouts": 183,
+   "wallS": 379.843,
+   "baselineScore": 10.71580756352775,
+   "bestScore": 4.455,
+   "successes": 5,
+   "medianStandS": 4.53,
+   "bestStandS": 4.4,
+   "peakTauFrac": 0.9999047688829402,
+   "peakSpeedFrac": 0.42413628649215673,
+   "peakTempC": 33.95013257659411,
+   "worstJoints": [
+    "shoulder_pitch_r",
+    "elbow_r"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 4.51,
+     "why": "",
+     "progress": 0.9834706128370574,
+     "peakTauFrac": 0.9998968470701481,
+     "worstJoint": "shoulder_pitch_r",
+     "peakSpeedFrac": 0.4241362864920886,
+     "peakTempC": 33.564873207511035,
+     "derated": [],
+     "maxSatS": 0.36300000000000027
+    },
+    {
+     "ok": true,
+     "standS": 4.4,
+     "why": "",
+     "progress": 0.9930988194762262,
+     "peakTauFrac": 0.9998964892895044,
+     "worstJoint": "shoulder_pitch_r",
+     "peakSpeedFrac": 0.42413628649206103,
+     "peakTempC": 33.57401236420768,
+     "derated": [],
+     "maxSatS": 0.32200000000000023
+    },
+    {
+     "ok": true,
+     "standS": 4.5600000000000005,
+     "why": "",
+     "progress": 0.979977325553371,
+     "peakTauFrac": 0.9998969713293355,
+     "worstJoint": "shoulder_pitch_r",
+     "peakSpeedFrac": 0.42413628649215673,
+     "peakTempC": 33.647668585441274,
+     "derated": [],
+     "maxSatS": 0.36700000000000027
+    },
+    {
+     "ok": true,
+     "standS": 4.7700000000000005,
+     "why": "",
+     "progress": 0.9774650293785011,
+     "peakTauFrac": 0.9999047688829402,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.42413628649204965,
+     "peakTempC": 33.95013257659411,
+     "derated": [],
+     "maxSatS": 0.3870000000000003
+    },
+    {
+     "ok": true,
+     "standS": 4.53,
+     "why": "",
+     "progress": 0.9843485208255925,
+     "peakTauFrac": 0.9999046198358592,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.4241362864921506,
+     "peakTempC": 33.54080383603611,
+     "derated": [],
+     "maxSatS": 0.34900000000000025
+    }
+   ],
+   "params": {
+    "pace": 0.8962990914530483,
+    "cut": 0.8906808960046394,
+    "rise": 0.7755995682530452,
+    "waist": 0.008187924163237867,
+    "hip": 0.07358222013063198,
+    "knee": -0.06619244449535687,
+    "ankle": -0.03422973697807304,
+    "arm": 0.006169588590177234
+   }
+  },
+  "face_down": {
+   "lie": "face_down",
+   "clip": "getup_face_down.140_02.0128",
+   "rollouts": 200,
+   "wallS": 179.454,
+   "baselineScore": 14,
+   "bestScore": 2.5300000000000002,
+   "successes": 4,
+   "medianStandS": 2.56,
+   "bestStandS": 2.5100000000000002,
+   "peakTauFrac": 0.999962285213365,
+   "peakSpeedFrac": 0.686948318651505,
+   "peakTempC": 37.21195398000686,
+   "worstJoints": [
+    "elbow_r"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 2.5500000000000003,
+     "why": "",
+     "progress": 0.9966859732244643,
+     "peakTauFrac": 0.999962285213365,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.526720867994243,
+     "peakTempC": 35.07041273392933,
+     "derated": [],
+     "maxSatS": 0.9180000000000007
+    },
+    {
+     "ok": true,
+     "standS": 2.5100000000000002,
+     "why": "",
+     "progress": 0.9981872031179515,
+     "peakTauFrac": 0.999962285213365,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.5318161366925183,
+     "peakTempC": 35.00686176488778,
+     "derated": [],
+     "maxSatS": 0.9070000000000007
+    },
+    {
+     "ok": true,
+     "standS": 2.56,
+     "why": "",
+     "progress": 0.9968942242736579,
+     "peakTauFrac": 0.999962285213365,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.5298079027426444,
+     "peakTempC": 35.113618253819546,
+     "derated": [],
+     "maxSatS": 0.9270000000000007
+    },
+    {
+     "ok": false,
+     "standS": null,
+     "why": "no stand",
+     "progress": 0.9954748490894616,
+     "peakTauFrac": 0.999962285213365,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.686948318651505,
+     "peakTempC": 37.21195398000686,
+     "derated": [],
+     "maxSatS": 2.55099999999983
+    },
+    {
+     "ok": true,
+     "standS": 2.56,
+     "why": "",
+     "progress": 0.9966857319736109,
+     "peakTauFrac": 0.999962285213365,
+     "worstJoint": "elbow_r",
+     "peakSpeedFrac": 0.5266163543750327,
+     "peakTempC": 35.09279688988475,
+     "derated": [],
+     "maxSatS": 0.9170000000000007
+    }
+   ],
+   "params": {
+    "pace": 1.3369850605790763,
+    "cut": 0.9009373128218314,
+    "rise": 0.841528453731517,
+    "waist": 0.04675025578459244,
+    "hip": -0.04547215255060817,
+    "knee": 0.12704235127880678,
+    "ankle": 0.05427276107212234,
+    "arm": 0.22311609441949426
+   }
+  }
+ },
+ "P": {
+  "back": {
+   "lie": "back",
+   "clip": "getup_back.140_08.0076",
+   "rollouts": 163,
+   "wallS": 135.8,
+   "baselineScore": 11.90681080166672,
+   "bestScore": 4.225,
+   "successes": 5,
+   "medianStandS": 4.3,
+   "bestStandS": 4.17,
+   "peakTauFrac": 0.9999385248423253,
+   "peakSpeedFrac": 0.42244160733805697,
+   "peakTempC": 34.271002822524686,
+   "worstJoints": [
+    "elbow_l"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 4.28,
+     "why": "",
+     "progress": 0.9987236360932603,
+     "peakTauFrac": 0.9999385135698365,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.4224416073379917,
+     "peakTempC": 34.183801337091495,
+     "derated": [],
+     "maxSatS": 0.3880000000000003
+    },
+    {
+     "ok": true,
+     "standS": 4.17,
+     "why": "",
+     "progress": 0.9982299944092772,
+     "peakTauFrac": 0.9999380521864683,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.4224416073379911,
+     "peakTempC": 34.06042277563074,
+     "derated": [],
+     "maxSatS": 0.3920000000000003
+    },
+    {
+     "ok": true,
+     "standS": 4.33,
+     "why": "",
+     "progress": 0.9990945998771074,
+     "peakTauFrac": 0.9999381636677879,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.42244160733799396,
+     "peakTempC": 34.268976675604215,
+     "derated": [],
+     "maxSatS": 0.3750000000000003
+    },
+    {
+     "ok": true,
+     "standS": 4.53,
+     "why": "",
+     "progress": 0.9991376272815243,
+     "peakTauFrac": 0.9999381433344989,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.42244160733805697,
+     "peakTempC": 34.271002822524686,
+     "derated": [],
+     "maxSatS": 0.34400000000000025
+    },
+    {
+     "ok": true,
+     "standS": 4.3,
+     "why": "",
+     "progress": 0.9988633796158194,
+     "peakTauFrac": 0.9999385248423253,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.42244160733799024,
+     "peakTempC": 34.20122470336429,
+     "derated": [],
+     "maxSatS": 0.3790000000000003
+    }
+   ],
+   "params": {
+    "pace": 1.0011542433721665,
+    "cut": 0.8840657184641194,
+    "rise": 0.7367451872616938,
+    "waist": 0.17211356937631456,
+    "hip": -0.039686195937001525,
+    "knee": 0.1364332575934217,
+    "ankle": -0.0124671595380965,
+    "arm": 0.09346642573985313
+   }
+  },
+  "face_down": {
+   "lie": "face_down",
+   "clip": "getup_face_down.140_02.0128",
+   "rollouts": 199,
+   "wallS": 171.595,
+   "baselineScore": 13.80440078507489,
+   "bestScore": 2.5250000000000004,
+   "successes": 5,
+   "medianStandS": 2.57,
+   "bestStandS": 2.5,
+   "peakTauFrac": 0.9999613810370266,
+   "peakSpeedFrac": 0.5318966083385285,
+   "peakTempC": 35.93374649051178,
+   "worstJoints": [
+    "waist_pitch"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 2.5500000000000003,
+     "why": "",
+     "progress": 0.9941202103811321,
+     "peakTauFrac": 0.9999613810370266,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5234062387970976,
+     "peakTempC": 35.47885786626551,
+     "derated": [],
+     "maxSatS": 0.8150000000000006
+    },
+    {
+     "ok": true,
+     "standS": 2.5,
+     "why": "",
+     "progress": 0.994843551108035,
+     "peakTauFrac": 0.9999613810370266,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5318966083385285,
+     "peakTempC": 35.475281985584886,
+     "derated": [],
+     "maxSatS": 0.8370000000000006
+    },
+    {
+     "ok": true,
+     "standS": 2.57,
+     "why": "",
+     "progress": 0.9946951884214171,
+     "peakTauFrac": 0.9999613810370266,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5234062387970921,
+     "peakTempC": 35.47777603526879,
+     "derated": [],
+     "maxSatS": 0.8170000000000006
+    },
+    {
+     "ok": true,
+     "standS": 2.7600000000000002,
+     "why": "",
+     "progress": 0.9985468036626836,
+     "peakTauFrac": 0.9999613810370266,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5234062387970876,
+     "peakTempC": 35.93374649051178,
+     "derated": [],
+     "maxSatS": 0.9870000000000008
+    },
+    {
+     "ok": true,
+     "standS": 2.57,
+     "why": "",
+     "progress": 0.9878513993511574,
+     "peakTauFrac": 0.999961381034118,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5234060193893545,
+     "peakTempC": 35.477223825055404,
+     "derated": [],
+     "maxSatS": 0.8100000000000006
+    }
+   ],
+   "params": {
+    "pace": 1.3322631992603993,
+    "cut": 0.938284424587913,
+    "rise": 0.8528125633650854,
+    "waist": 0.05660217795235344,
+    "hip": 0.04475262363658397,
+    "knee": 0.141333824482222,
+    "ankle": -0.027674172672351977,
+    "arm": 0.21861396993568918
+   }
+  }
+ },
+ "P2": {
+  "back": {
+   "lie": "back",
+   "clip": "getup_back.140_08.0076",
+   "rollouts": 150,
+   "wallS": 145.286,
+   "baselineScore": 11.756580350189722,
+   "bestScore": 3.795,
+   "successes": 5,
+   "medianStandS": 3.85,
+   "bestStandS": 3.74,
+   "peakTauFrac": 0.9999686432988859,
+   "peakSpeedFrac": 0.45383749138263224,
+   "peakTempC": 34.29633909694019,
+   "worstJoints": [
+    "waist_pitch",
+    "shoulder_pitch_l"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 3.85,
+     "why": "",
+     "progress": 0.9778328800690049,
+     "peakTauFrac": 0.999968635116421,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.4480554314593636,
+     "peakTempC": 34.0523398385814,
+     "derated": [],
+     "maxSatS": 0.4020000000000003
+    },
+    {
+     "ok": true,
+     "standS": 3.74,
+     "why": "",
+     "progress": 0.9883740388054438,
+     "peakTauFrac": 0.9999686432988859,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.45383749138263224,
+     "peakTempC": 34.17318449609412,
+     "derated": [],
+     "maxSatS": 0.4240000000000003
+    },
+    {
+     "ok": true,
+     "standS": 3.86,
+     "why": "",
+     "progress": 0.9779216786190257,
+     "peakTauFrac": 0.999968620741824,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.4342833793291896,
+     "peakTempC": 34.074224637559134,
+     "derated": [],
+     "maxSatS": 0.3720000000000003
+    },
+    {
+     "ok": true,
+     "standS": 4.01,
+     "why": "",
+     "progress": 0.9928072873183675,
+     "peakTauFrac": 0.9999350300605502,
+     "worstJoint": "shoulder_pitch_l",
+     "peakSpeedFrac": 0.42295497337665006,
+     "peakTempC": 34.29633909694019,
+     "derated": [],
+     "maxSatS": 0.44000000000000034
+    },
+    {
+     "ok": true,
+     "standS": 3.85,
+     "why": "",
+     "progress": 0.974968461037759,
+     "peakTauFrac": 0.9999686276640385,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.4409163278604609,
+     "peakTempC": 34.068814942449684,
+     "derated": [],
+     "maxSatS": 0.3890000000000003
+    }
+   ],
+   "params": {
+    "pace": 1.132516359971907,
+    "cut": 0.8931385020954883,
+    "rise": 0.7182594503957817,
+    "waist": 0.19994633204040924,
+    "hip": -0.0003080866962513473,
+    "knee": 0.15019421122497228,
+    "ankle": -0.013550293768352564,
+    "arm": 0.0767942195753592
+   }
+  },
+  "face_down": {
+   "lie": "face_down",
+   "clip": "getup_face_down.140_02.0128",
+   "rollouts": 193,
+   "wallS": 131.708,
+   "baselineScore": 13.797380974344623,
+   "bestScore": 2.7,
+   "successes": 4,
+   "medianStandS": 2.74,
+   "bestStandS": 2.67,
+   "peakTauFrac": 0.9999616510789451,
+   "peakSpeedFrac": 0.5909196676867494,
+   "peakTempC": 38.729927154394694,
+   "worstJoints": [
+    "waist_pitch"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 2.73,
+     "why": "",
+     "progress": 0.9812601597458619,
+     "peakTauFrac": 0.9999616510789451,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5261562856945462,
+     "peakTempC": 35.622158939768696,
+     "derated": [],
+     "maxSatS": 0.8740000000000007
+    },
+    {
+     "ok": true,
+     "standS": 2.67,
+     "why": "",
+     "progress": 0.9895007827363757,
+     "peakTauFrac": 0.9999616510789451,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5261562856945411,
+     "peakTempC": 35.61308770737146,
+     "derated": [],
+     "maxSatS": 0.8870000000000007
+    },
+    {
+     "ok": true,
+     "standS": 2.77,
+     "why": "",
+     "progress": 0.9936738119851886,
+     "peakTauFrac": 0.9999616510789451,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5261562856945642,
+     "peakTempC": 35.771021260880715,
+     "derated": [],
+     "maxSatS": 0.9440000000000007
+    },
+    {
+     "ok": false,
+     "standS": null,
+     "why": "no stand",
+     "progress": 0.992454276537278,
+     "peakTauFrac": 0.9999616510789451,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5909196676867494,
+     "peakTempC": 38.729927154394694,
+     "derated": [],
+     "maxSatS": 2.977999999999783
+    },
+    {
+     "ok": true,
+     "standS": 2.74,
+     "why": "",
+     "progress": 0.9817829742699552,
+     "peakTauFrac": 0.9999616510789451,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5261562856945232,
+     "peakTempC": 35.631520314734715,
+     "derated": [],
+     "maxSatS": 0.8740000000000007
+    }
+   ],
+   "params": {
+    "pace": 1.2337849019073575,
+    "cut": 0.9152978915635318,
+    "rise": 1.0676455917996464,
+    "waist": 0.036782096420966776,
+    "hip": 0.008882230747804991,
+    "knee": 0.07867833630830776,
+    "ankle": 0.04848596168708878,
+    "arm": 0.26193526183586957
+   }
+  }
+ },
+ "PA": {
+  "back": {
+   "lie": "back",
+   "clip": "getup_back.140_08.0076",
+   "rollouts": 163,
+   "wallS": 133.745,
+   "baselineScore": 11.694274458428389,
+   "bestScore": 4.195,
+   "successes": 5,
+   "medianStandS": 4.36,
+   "bestStandS": 4.0600000000000005,
+   "peakTauFrac": 0.9999377286233344,
+   "peakSpeedFrac": 0.422664739393134,
+   "peakTempC": 34.44003090343312,
+   "worstJoints": [
+    "elbow_l"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 4.33,
+     "why": "",
+     "progress": 0.9983547576341399,
+     "peakTauFrac": 0.9999375536146563,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.42266473939312854,
+     "peakTempC": 34.42966789817057,
+     "derated": [],
+     "maxSatS": 0.4950000000000004
+    },
+    {
+     "ok": true,
+     "standS": 4.0600000000000005,
+     "why": "",
+     "progress": 0.9899755938740028,
+     "peakTauFrac": 0.9999373271226939,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.4226647393930439,
+     "peakTempC": 33.815601446110456,
+     "derated": [],
+     "maxSatS": 0.3730000000000003
+    },
+    {
+     "ok": true,
+     "standS": 4.37,
+     "why": "",
+     "progress": 0.9982989668875131,
+     "peakTauFrac": 0.9999375995699074,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.4226647393930428,
+     "peakTempC": 34.34507143142855,
+     "derated": [],
+     "maxSatS": 0.45100000000000035
+    },
+    {
+     "ok": true,
+     "standS": 4.51,
+     "why": "",
+     "progress": 0.9964208604889803,
+     "peakTauFrac": 0.9999377286233344,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.4226647393930444,
+     "peakTempC": 34.13269412653973,
+     "derated": [],
+     "maxSatS": 0.34300000000000025
+    },
+    {
+     "ok": true,
+     "standS": 4.36,
+     "why": "",
+     "progress": 0.9984206925016128,
+     "peakTauFrac": 0.9999375550998165,
+     "worstJoint": "elbow_l",
+     "peakSpeedFrac": 0.422664739393134,
+     "peakTempC": 34.44003090343312,
+     "derated": [],
+     "maxSatS": 0.4970000000000004
+    }
+   ],
+   "params": {
+    "pace": 1.035299925303717,
+    "cut": 0.8928313819694157,
+    "rise": 0.7364110995527647,
+    "waist": 0.18475349592470297,
+    "hip": -0.045846299663143276,
+    "knee": 0.1490850527809813,
+    "ankle": -0.04868052938191442,
+    "arm": 0.07589898167073653
+   }
+  },
+  "face_down": {
+   "lie": "face_down",
+   "clip": "getup_face_down.140_02.0128",
+   "rollouts": 199,
+   "wallS": 118.857,
+   "baselineScore": 14,
+   "bestScore": 2.69,
+   "successes": 5,
+   "medianStandS": 2.74,
+   "bestStandS": 2.65,
+   "peakTauFrac": 0.9999618371397934,
+   "peakSpeedFrac": 0.530157050059607,
+   "peakTempC": 35.873725009779605,
+   "worstJoints": [
+    "waist_pitch"
+   ],
+   "derated": [],
+   "trials": [
+    {
+     "ok": true,
+     "standS": 2.73,
+     "why": "",
+     "progress": 0.9881504691096024,
+     "peakTauFrac": 0.9999618371397934,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.530157050059607,
+     "peakTempC": 35.6144318215986,
+     "derated": [],
+     "maxSatS": 0.9100000000000007
+    },
+    {
+     "ok": true,
+     "standS": 2.65,
+     "why": "",
+     "progress": 0.9937968242029153,
+     "peakTauFrac": 0.9999618371397934,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5301570500595979,
+     "peakTempC": 35.62314863007941,
+     "derated": [],
+     "maxSatS": 0.9000000000000007
+    },
+    {
+     "ok": true,
+     "standS": 2.77,
+     "why": "",
+     "progress": 0.988824792894935,
+     "peakTauFrac": 0.9999618371397934,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5301570500596038,
+     "peakTempC": 35.76836279379537,
+     "derated": [],
+     "maxSatS": 0.9700000000000008
+    },
+    {
+     "ok": true,
+     "standS": 2.91,
+     "why": "",
+     "progress": 0.9841030668240793,
+     "peakTauFrac": 0.9999618371397934,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5301570500596022,
+     "peakTempC": 35.873725009779605,
+     "derated": [],
+     "maxSatS": 1.0179999999999987
+    },
+    {
+     "ok": true,
+     "standS": 2.74,
+     "why": "",
+     "progress": 0.9860359935472898,
+     "peakTauFrac": 0.9999618371397934,
+     "worstJoint": "waist_pitch",
+     "peakSpeedFrac": 0.5301570500596008,
+     "peakTempC": 35.59229483056739,
+     "derated": [],
+     "maxSatS": 0.8930000000000007
+    }
+   ],
+   "params": {
+    "pace": 1.229196276718706,
+    "cut": 0.941575829413991,
+    "rise": 0.9736644724072105,
+    "waist": 0.10630561758423297,
+    "hip": 0.03387320409129359,
+    "knee": 0.17366593762073648,
+    "ankle": 0.03996129983065434,
+    "arm": 0.26231191946799365
+   }
+  }
+ }
+}

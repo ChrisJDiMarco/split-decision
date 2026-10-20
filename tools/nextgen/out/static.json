@@ -1,0 +1,1199 @@
+{
+ "A": {
+  "label": "A",
+  "layout": "stock",
+  "drives": {
+   "hipPitch": "qdd.ake90x2",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90x2",
+   "knee": "qdd.ake90x2",
+   "ankle": "qdd.ake90x2",
+   "waistYaw": "qdd.rs04"
+  },
+  "mass": {
+   "totalMassKg": 82.93848,
+   "legMassKg": 21.49042,
+   "legDriveMassKg": 17.4,
+   "footMassKg": 6.30065,
+   "inertia": {
+    "hipPitch": 6.738089557170932,
+    "hipRoll": 6.696334320665413,
+    "hipYaw": 0.0921146694449214,
+    "knee": 1.5186571663959323
+   },
+   "armature": {
+    "hip_pitch_l": 0.049,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.049,
+    "knee_l": 0.049,
+    "ankle_pitch_l": 0.049
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.007812500058910599,
+    "thighErrDeg": 0.003906250029455299,
+    "kneeAxisErrDeg": 0.003906250029455299,
+    "q": {
+     "p": -1.5708645037188036,
+     "r": 0.00006817692390612102,
+     "y": -4.163336342344337e-17
+    },
+    "angles": {
+     "p": -90,
+     "r": 0,
+     "y": 0
+    },
+    "sigmaMin": 0.9999659109570419,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "side",
+    "errDeg": 93.84719073216091,
+    "thighErrDeg": 16.886219216928037,
+    "kneeAxisErrDeg": 76.9609715152329,
+    "q": {
+     "p": 0.6108652381980149,
+     "r": 1.2217304763960308,
+     "y": -0.7203573779910971
+    },
+    "angles": {
+     "p": 35,
+     "r": 70,
+     "y": -41.3
+    },
+    "sigmaMin": 0.24557560793794564,
+    "pathSigmaMin": 0.2455756079379453
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 122.96261440122824,
+    "thighErrDeg": 46.95805976011966,
+    "kneeAxisErrDeg": 76.00455464110858,
+    "q": {
+     "p": 0.6108652381980149,
+     "r": 1.2217304763960308,
+     "y": -0.7853981633974483
+    },
+    "angles": {
+     "p": 35,
+     "r": 70,
+     "y": -45
+    },
+    "sigmaMin": 0.24557560793794564,
+    "pathSigmaMin": 0.2455756079379453
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 20.00390625002945,
+    "thighErrDeg": 0.003906250029455299,
+    "kneeAxisErrDeg": 19.999999999999993,
+    "q": {
+     "p": -1.5708645037188036,
+     "r": 1.2217304763960308,
+     "y": 0.7853981633974482
+    },
+    "angles": {
+     "p": -90,
+     "r": 70,
+     "y": 45
+    },
+    "sigmaMin": 0.24557560793794564,
+    "pathSigmaMin": 0.2455756079379453
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 65,
+    "ankleHeightM": 1.620224930703067,
+    "errAtTopDeg": 9.999999999999975
+   },
+   "side": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   },
+   "roundhouse": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 20.000000888334906,
+     "angles": {
+      "p": -30,
+      "r": 0,
+      "y": 70
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 99.11078513883514,
+     "angles": {
+      "p": 35,
+      "r": 70,
+      "y": 70
+     },
+     "jointsUsed": "pitch+roll+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 20.000000622018835,
+     "angles": {
+      "p": -50,
+      "r": 0,
+      "y": 70
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 96.81465028843778,
+     "angles": {
+      "p": 35,
+      "r": 70,
+      "y": 70
+     },
+     "jointsUsed": "pitch+roll+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.24557560793794578
+  }
+ },
+ "R": {
+  "label": "R",
+  "layout": "stock",
+  "drives": {
+   "hipPitch": "qdd.ake90x2",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90x2",
+   "knee": "qdd.ake90x2",
+   "ankle": "qdd.ake90x2",
+   "waistYaw": "qdd.rs04"
+  },
+  "mass": {
+   "totalMassKg": 82.93848,
+   "legMassKg": 21.49042,
+   "legDriveMassKg": 17.4,
+   "footMassKg": 6.30065,
+   "inertia": {
+    "hipPitch": 6.738089557170932,
+    "hipRoll": 6.696334320665413,
+    "hipYaw": 0.0921146694449214,
+    "knee": 1.5186571663959323
+   },
+   "armature": {
+    "hip_pitch_l": 0.049,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.049,
+    "knee_l": 0.049,
+    "ankle_pitch_l": 0.049
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.007812500058910599,
+    "thighErrDeg": 0.003906250029455299,
+    "kneeAxisErrDeg": 0.003906250029455299,
+    "q": {
+     "p": -1.5707963267948977,
+     "r": 1.8041124150158794e-16,
+     "y": 0.00006817692390634307
+    },
+    "angles": {
+     "p": -90,
+     "r": 0,
+     "y": 0
+    },
+    "sigmaMin": 0.9999999999999999,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "side",
+    "errDeg": 41.333156469833646,
+    "thighErrDeg": 31.18735195821202,
+    "kneeAxisErrDeg": 10.145804511621622,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 0.030066023442558754,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 60,
+     "r": 1.7,
+     "y": -80
+    },
+    "sigmaMin": 0.9848545609016038,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 70.71138537614054,
+    "thighErrDeg": 60.66905743769628,
+    "kneeAxisErrDeg": 10.042327938444252,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 0.01615793096572894,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 60,
+     "r": 0.9,
+     "y": -80
+    },
+    "sigmaMin": 0.9918884877379702,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 0.003906250029455299,
+    "thighErrDeg": 0.003906250029455299,
+    "kneeAxisErrDeg": 0,
+    "q": {
+     "p": -2.425939483348212,
+     "r": 1.5707963267948972,
+     "y": 1.6406094968746707
+    },
+    "angles": {
+     "p": -139,
+     "r": 90,
+     "y": 94
+    },
+    "sigmaMin": 1.1102230246251565e-16,
+    "pathSigmaMin": 1.1102230246251565e-16
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 70,
+    "ankleHeightM": 1.6471548643365832,
+    "errAtTopDeg": 9.99999999999994
+   },
+   "side": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   },
+   "roundhouse": {
+    "elevDeg": 22.5,
+    "ankleHeightM": 1.1978424433105346,
+    "errAtTopDeg": 5.000264338047404
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": -30,
+      "r": 0,
+      "y": 90
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 0,
+     "angles": {
+      "p": -30,
+      "r": 0,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 0.005524271770745875,
+     "angles": {
+      "p": -50,
+      "r": 0,
+      "y": 90
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": -50,
+      "r": 0,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.9999999999999999
+  }
+ },
+ "M": {
+  "label": "M",
+  "layout": "stock",
+  "drives": {
+   "hipPitch": "qdd.ake90x2",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90x2",
+   "knee": "qdd.ake90x2",
+   "ankle": "qdd.ake90x2",
+   "waistYaw": "qdd.rs04"
+  },
+  "mass": {
+   "totalMassKg": 82.93848,
+   "legMassKg": 18.59042,
+   "legDriveMassKg": 17.4,
+   "footMassKg": 0.50065,
+   "inertia": {
+    "hipPitch": 3.4119362177921992,
+    "hipRoll": 3.4012460328133476,
+    "hipYaw": 0.021813557822910636,
+    "knee": 0.36402874019655485
+   },
+   "armature": {
+    "hip_pitch_l": 0.049,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.049,
+    "knee_l": 0.049,
+    "ankle_pitch_l": 0.049
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.007812500058910599,
+    "thighErrDeg": 0.003906250029455299,
+    "kneeAxisErrDeg": 0.003906250029455299,
+    "q": {
+     "p": -1.5707963267948977,
+     "r": 1.8041124150158794e-16,
+     "y": 0.00006817692390634307
+    },
+    "angles": {
+     "p": -90,
+     "r": 0,
+     "y": 0
+    },
+    "sigmaMin": 0.9999999999999999,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "side",
+    "errDeg": 41.333156469833646,
+    "thighErrDeg": 31.18735195821202,
+    "kneeAxisErrDeg": 10.145804511621622,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 0.030066023442558754,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 60,
+     "r": 1.7,
+     "y": -80
+    },
+    "sigmaMin": 0.9848545609016038,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 70.71138537614054,
+    "thighErrDeg": 60.66905743769628,
+    "kneeAxisErrDeg": 10.042327938444252,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 0.01615793096572894,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 60,
+     "r": 0.9,
+     "y": -80
+    },
+    "sigmaMin": 0.9918884877379702,
+    "pathSigmaMin": 0.9798013399732447
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 0.003906250029455299,
+    "thighErrDeg": 0.003906250029455299,
+    "kneeAxisErrDeg": 0,
+    "q": {
+     "p": -2.425939483348212,
+     "r": 1.5707963267948972,
+     "y": 1.6406094968746707
+    },
+    "angles": {
+     "p": -139,
+     "r": 90,
+     "y": 94
+    },
+    "sigmaMin": 1.1102230246251565e-16,
+    "pathSigmaMin": 1.1102230246251565e-16
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 70,
+    "ankleHeightM": 1.6471548643365832,
+    "errAtTopDeg": 9.99999999999994
+   },
+   "side": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   },
+   "roundhouse": {
+    "elevDeg": 22.5,
+    "ankleHeightM": 1.1978424433105346,
+    "errAtTopDeg": 5.000264338047404
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": -30,
+      "r": 0,
+      "y": 90
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 0,
+     "angles": {
+      "p": -30,
+      "r": 0,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 0.005524271770745875,
+     "angles": {
+      "p": -50,
+      "r": 0,
+      "y": 90
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": -50,
+      "r": 0,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.9999999999999999
+  }
+ },
+ "O": {
+  "label": "O",
+  "layout": "tilted",
+  "drives": {
+   "hipPitch": "qdd.ake90x2",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90x2",
+   "knee": "qdd.ake90x2",
+   "ankle": "qdd.ake90x2",
+   "waistYaw": "qdd.rs04"
+  },
+  "mass": {
+   "totalMassKg": 82.93848,
+   "legMassKg": 18.59042,
+   "legDriveMassKg": 17.4,
+   "footMassKg": 0.50065,
+   "inertia": {
+    "hipPitch": 3.1848413281547394,
+    "hipRoll": 3.4008562856893474,
+    "hipYaw": 0.013661752014910607,
+    "knee": 0.36402874019655485
+   },
+   "armature": {
+    "hip_pitch_l": 0.049,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.049,
+    "knee_l": 0.049,
+    "ankle_pitch_l": 0.049
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.003906250029455299,
+    "thighErrDeg": 0,
+    "kneeAxisErrDeg": 0.00390624984284936,
+    "q": {
+     "p": -1.5707963267948977,
+     "r": -0.2617993877991493,
+     "y": -0.2617312108752431
+    },
+    "angles": {
+     "p": -90,
+     "r": -15,
+     "y": -15
+    },
+    "sigmaMin": 1,
+    "pathSigmaMin": 0.8472399390479743
+   },
+   {
+    "kick": "side",
+    "errDeg": 4.927082267986979,
+    "thighErrDeg": 2.363036496473134,
+    "kneeAxisErrDeg": 2.5640457715138454,
+    "q": {
+     "p": 0.1581022865380795,
+     "r": 1.561387911295865,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 9.1,
+     "r": 89.5,
+     "y": -80
+    },
+    "sigmaMin": 0.1779940539801217,
+    "pathSigmaMin": 0.01543119148029045
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 16.78978020890478,
+    "thighErrDeg": 10.88265081779021,
+    "kneeAxisErrDeg": 5.907129391114467,
+    "q": {
+     "p": 0.11740066296618049,
+     "r": 1.9198621771937625,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 6.7,
+     "r": 110,
+     "y": -80
+    },
+    "sigmaMin": 0.42526221994318775,
+    "pathSigmaMin": 0.029829124180237834
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 19.31494109190425,
+    "thighErrDeg": 15.587857358624127,
+    "kneeAxisErrDeg": 3.727083733279732,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 1.9198621771937625,
+     "y": 0.9940877274738015
+    },
+    "angles": {
+     "p": 60,
+     "r": 110,
+     "y": 57
+    },
+    "sigmaMin": 0.42526221994318764,
+    "pathSigmaMin": 0.02982912418023915
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 70,
+    "ankleHeightM": 1.6471548643365832,
+    "errAtTopDeg": 9.150371336549453
+   },
+   "side": {
+    "elevDeg": 20,
+    "ankleHeightM": 1.165041331183492,
+    "errAtTopDeg": 9.382275904593005
+   },
+   "roundhouse": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": 0,
+      "r": 30,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 7.435473030171211,
+     "angles": {
+      "p": 29.1,
+      "r": -1.9,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 0.008051298976626991,
+     "angles": {
+      "p": 0,
+      "r": 50,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 11.435629874077177,
+     "angles": {
+      "p": 49,
+      "r": -5.2,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.5412406385536644
+  }
+ },
+ "P": {
+  "label": "P",
+  "layout": "tilted",
+  "drives": {
+   "hipPitch": "qdd.ake90x3",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90",
+   "knee": "qdd.ake90x3",
+   "ankle": "qdd.rs04",
+   "waistYaw": "qdd.ake90"
+  },
+  "mass": {
+   "totalMassKg": 79.99848,
+   "legMassKg": 15.63042,
+   "legDriveMassKg": 15.939999999999998,
+   "footMassKg": 0.50065,
+   "inertia": {
+    "hipPitch": 2.4448192577610683,
+    "hipRoll": 2.6077316497197467,
+    "hipYaw": 0.013465534497310607,
+    "knee": 0.25778051491895476
+   },
+   "armature": {
+    "hip_pitch_l": 0.064,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.034,
+    "knee_l": 0.064,
+    "ankle_pitch_l": 0.0342
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.003906250029455299,
+    "thighErrDeg": 0,
+    "kneeAxisErrDeg": 0.00390624984284936,
+    "q": {
+     "p": -1.5707963267948977,
+     "r": -0.2617993877991493,
+     "y": -0.2617312108752431
+    },
+    "angles": {
+     "p": -90,
+     "r": -15,
+     "y": -15
+    },
+    "sigmaMin": 1,
+    "pathSigmaMin": 0.8472399390479743
+   },
+   {
+    "kick": "side",
+    "errDeg": 4.927082267986979,
+    "thighErrDeg": 2.363036496473134,
+    "kneeAxisErrDeg": 2.5640457715138454,
+    "q": {
+     "p": 0.1581022865380795,
+     "r": 1.561387911295865,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 9.1,
+     "r": 89.5,
+     "y": -80
+    },
+    "sigmaMin": 0.1779940539801217,
+    "pathSigmaMin": 0.01543119148029045
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 16.78978020890478,
+    "thighErrDeg": 10.88265081779021,
+    "kneeAxisErrDeg": 5.907129391114467,
+    "q": {
+     "p": 0.11740066296618049,
+     "r": 1.9198621771937625,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 6.7,
+     "r": 110,
+     "y": -80
+    },
+    "sigmaMin": 0.42526221994318775,
+    "pathSigmaMin": 0.029829124180237834
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 19.31494109190425,
+    "thighErrDeg": 15.587857358624127,
+    "kneeAxisErrDeg": 3.727083733279732,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 1.9198621771937625,
+     "y": 0.9940877274738015
+    },
+    "angles": {
+     "p": 60,
+     "r": 110,
+     "y": 57
+    },
+    "sigmaMin": 0.42526221994318764,
+    "pathSigmaMin": 0.02982912418023915
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 70,
+    "ankleHeightM": 1.6471548643365832,
+    "errAtTopDeg": 9.150371336549453
+   },
+   "side": {
+    "elevDeg": 20,
+    "ankleHeightM": 1.165041331183492,
+    "errAtTopDeg": 9.382275904593005
+   },
+   "roundhouse": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": 0,
+      "r": 30,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 7.435473030171211,
+     "angles": {
+      "p": 29.1,
+      "r": -1.9,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 0.008051298976626991,
+     "angles": {
+      "p": 0,
+      "r": 50,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 11.435629874077177,
+     "angles": {
+      "p": 49,
+      "r": -5.2,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.5412406385536644
+  }
+ },
+ "P2": {
+  "label": "P′",
+  "layout": "tilted",
+  "drives": {
+   "hipPitch": "qdd.ake90x3",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90",
+   "knee": "qdd.ake90x3",
+   "ankle": "qdd.rs04",
+   "waistYaw": "qdd.ake90"
+  },
+  "mass": {
+   "totalMassKg": 79.99848,
+   "legMassKg": 15.63042,
+   "legDriveMassKg": 15.939999999999998,
+   "footMassKg": 0.50065,
+   "inertia": {
+    "hipPitch": 2.4448192577610683,
+    "hipRoll": 2.6077316497197467,
+    "hipYaw": 0.013465534497310607,
+    "knee": 0.25778051491895476
+   },
+   "armature": {
+    "hip_pitch_l": 0.2427,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.034,
+    "knee_l": 0.2427,
+    "ankle_pitch_l": 0.0342
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.003906250029455299,
+    "thighErrDeg": 0,
+    "kneeAxisErrDeg": 0.00390624984284936,
+    "q": {
+     "p": -1.5707963267948977,
+     "r": -0.2617993877991493,
+     "y": -0.2617312108752431
+    },
+    "angles": {
+     "p": -90,
+     "r": -15,
+     "y": -15
+    },
+    "sigmaMin": 1,
+    "pathSigmaMin": 0.8472399390479743
+   },
+   {
+    "kick": "side",
+    "errDeg": 4.927082267986979,
+    "thighErrDeg": 2.363036496473134,
+    "kneeAxisErrDeg": 2.5640457715138454,
+    "q": {
+     "p": 0.1581022865380795,
+     "r": 1.561387911295865,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 9.1,
+     "r": 89.5,
+     "y": -80
+    },
+    "sigmaMin": 0.1779940539801217,
+    "pathSigmaMin": 0.01543119148029045
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 16.78978020890478,
+    "thighErrDeg": 10.88265081779021,
+    "kneeAxisErrDeg": 5.907129391114467,
+    "q": {
+     "p": 0.11740066296618049,
+     "r": 1.9198621771937625,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 6.7,
+     "r": 110,
+     "y": -80
+    },
+    "sigmaMin": 0.42526221994318775,
+    "pathSigmaMin": 0.029829124180237834
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 19.31494109190425,
+    "thighErrDeg": 15.587857358624127,
+    "kneeAxisErrDeg": 3.727083733279732,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 1.9198621771937625,
+     "y": 0.9940877274738015
+    },
+    "angles": {
+     "p": 60,
+     "r": 110,
+     "y": 57
+    },
+    "sigmaMin": 0.42526221994318764,
+    "pathSigmaMin": 0.02982912418023915
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 70,
+    "ankleHeightM": 1.6471548643365832,
+    "errAtTopDeg": 9.150371336549453
+   },
+   "side": {
+    "elevDeg": 20,
+    "ankleHeightM": 1.165041331183492,
+    "errAtTopDeg": 9.382275904593005
+   },
+   "roundhouse": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": 0,
+      "r": 30,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 7.435473030171211,
+     "angles": {
+      "p": 29.1,
+      "r": -1.9,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 0.008051298976626991,
+     "angles": {
+      "p": 0,
+      "r": 50,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 11.435629874077177,
+     "angles": {
+      "p": 49,
+      "r": -5.2,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.5412406385536644
+  }
+ },
+ "PA": {
+  "label": "P+ak",
+  "layout": "tilted",
+  "drives": {
+   "hipPitch": "qdd.ake90x3",
+   "hipRoll": "qdd.ake90x2",
+   "hipYaw": "qdd.ake90",
+   "knee": "qdd.ake90x3",
+   "ankle": "qdd.ake90",
+   "waistYaw": "qdd.ake90"
+  },
+  "mass": {
+   "totalMassKg": 79.91848,
+   "legMassKg": 15.590420000000002,
+   "legDriveMassKg": 15.899999999999999,
+   "footMassKg": 0.50065,
+   "inertia": {
+    "hipPitch": 2.4318202570653327,
+    "hipRoll": 2.5937997499093473,
+    "hipYaw": 0.013460158674910606,
+    "knee": 0.2563420038565548
+   },
+   "armature": {
+    "hip_pitch_l": 0.064,
+    "hip_roll_l": 0.049,
+    "hip_yaw_l": 0.034,
+    "knee_l": 0.064,
+    "ankle_pitch_l": 0.034
+   }
+  },
+  "kicks": [
+   {
+    "kick": "front",
+    "errDeg": 0.003906250029455299,
+    "thighErrDeg": 0,
+    "kneeAxisErrDeg": 0.00390624984284936,
+    "q": {
+     "p": -1.5707963267948977,
+     "r": -0.2617993877991493,
+     "y": -0.2617312108752431
+    },
+    "angles": {
+     "p": -90,
+     "r": -15,
+     "y": -15
+    },
+    "sigmaMin": 1,
+    "pathSigmaMin": 0.8472399390479743
+   },
+   {
+    "kick": "side",
+    "errDeg": 4.927082267986979,
+    "thighErrDeg": 2.363036496473134,
+    "kneeAxisErrDeg": 2.5640457715138454,
+    "q": {
+     "p": 0.1581022865380795,
+     "r": 1.561387911295865,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 9.1,
+     "r": 89.5,
+     "y": -80
+    },
+    "sigmaMin": 0.1779940539801217,
+    "pathSigmaMin": 0.01543119148029045
+   },
+   {
+    "kick": "high_side",
+    "errDeg": 16.78978020890478,
+    "thighErrDeg": 10.88265081779021,
+    "kneeAxisErrDeg": 5.907129391114467,
+    "q": {
+     "p": 0.11740066296618049,
+     "r": 1.9198621771937625,
+     "y": -1.3962634015954636
+    },
+    "angles": {
+     "p": 6.7,
+     "r": 110,
+     "y": -80
+    },
+    "sigmaMin": 0.42526221994318775,
+    "pathSigmaMin": 0.029829124180237834
+   },
+   {
+    "kick": "roundhouse",
+    "errDeg": 19.31494109190425,
+    "thighErrDeg": 15.587857358624127,
+    "kneeAxisErrDeg": 3.727083733279732,
+    "q": {
+     "p": 1.047197551196597,
+     "r": 1.9198621771937625,
+     "y": 0.9940877274738015
+    },
+    "angles": {
+     "p": 60,
+     "r": 110,
+     "y": 57
+    },
+    "sigmaMin": 0.42526221994318764,
+    "pathSigmaMin": 0.02982912418023915
+   }
+  ],
+  "reach": {
+   "front": {
+    "elevDeg": 70,
+    "ankleHeightM": 1.6471548643365832,
+    "errAtTopDeg": 9.150371336549453
+   },
+   "side": {
+    "elevDeg": 20,
+    "ankleHeightM": 1.165041331183492,
+    "errAtTopDeg": 9.382275904593005
+   },
+   "roundhouse": {
+    "elevDeg": -90,
+    "ankleHeightM": null,
+    "errAtTopDeg": null
+   }
+  },
+  "pivots": {
+   "rows": [
+    {
+     "flexDeg": 30,
+     "turnDeg": 90,
+     "errDeg": 0.003906250029455299,
+     "angles": {
+      "p": 0,
+      "r": 30,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 30,
+     "turnDeg": 180,
+     "errDeg": 7.435473030171211,
+     "angles": {
+      "p": 29.1,
+      "r": -1.9,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 90,
+     "errDeg": 0.008051298976626991,
+     "angles": {
+      "p": 0,
+      "r": 50,
+      "y": 90
+     },
+     "jointsUsed": "roll+yaw"
+    },
+    {
+     "flexDeg": 50,
+     "turnDeg": 180,
+     "errDeg": 11.435629874077177,
+     "angles": {
+      "p": 49,
+      "r": -5.2,
+      "y": 180
+     },
+     "jointsUsed": "pitch+yaw"
+    }
+   ],
+   "pathSigmaMin": 0.5412406385536644
+  }
+ }
+}

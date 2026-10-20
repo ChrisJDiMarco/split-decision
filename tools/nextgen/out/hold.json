@@ -1,0 +1,5413 @@
+{
+ "A": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06098156712060115,
+    "maxLeanDeg": 4.685067233754554,
+    "poseErrDeg": 36.88904874286843,
+    "worldErrDeg": 2.5726423126046556,
+    "kickAnkleZ": 0.8153754111374883,
+    "plannedWorldErrDeg": 0.013570027229417752,
+    "plannedLeanDeg": 4.608177882633191,
+    "hipTauFrac": 0.772451283544997,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.628,
+     "hip_roll_l": 0.224,
+     "hip_yaw_l": 0.168
+    },
+    "supportTauFrac": 0.772451283544997,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.772,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.728,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.38,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.354,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.504,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.285,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.0168850914945367
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.053675322057971875,
+    "maxLeanDeg": 5.045637391473925,
+    "poseErrDeg": 35.086754143635574,
+    "worldErrDeg": 3.311210103032468,
+    "kickAnkleZ": 0.8161096918006898,
+    "plannedWorldErrDeg": 0.013570027229417752,
+    "plannedLeanDeg": 4.608177882633191,
+    "hipTauFrac": 0.747064429006859,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.61,
+     "hip_roll_l": 0.206,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.747064429006859,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.747,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.706,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.381,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.297,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.489,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.23,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.0168850914945367
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.058258477602964515,
+    "maxLeanDeg": 4.119075010613646,
+    "poseErrDeg": 37.08446291446037,
+    "worldErrDeg": 3.651236448482495,
+    "kickAnkleZ": 0.8017597524052799,
+    "plannedWorldErrDeg": 0.013570027229417752,
+    "plannedLeanDeg": 4.608177882633191,
+    "hipTauFrac": 0.73867962438633,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.592,
+     "hip_roll_l": 0.174,
+     "hip_yaw_l": 0.145
+    },
+    "supportTauFrac": 0.73867962438633,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.739,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.669,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.402,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.31,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.452,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.202,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.0168850914945367
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.0597928189239299,
+    "maxLeanDeg": 3.929394905221518,
+    "poseErrDeg": 35.4120651835327,
+    "worldErrDeg": 3.127172771305849,
+    "kickAnkleZ": 0.8119691927704706,
+    "plannedWorldErrDeg": 0.013570027229417752,
+    "plannedLeanDeg": 4.608177882633191,
+    "hipTauFrac": 0.7476218009536026,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.607,
+     "hip_roll_l": 0.213,
+     "hip_yaw_l": 0.149
+    },
+    "supportTauFrac": 0.7476218009536026,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.748,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.704,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.391,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.307,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.482,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.223,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.0168850914945367
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05593379005279872,
+    "maxLeanDeg": 5.297079908788035,
+    "poseErrDeg": 36.11745445830702,
+    "worldErrDeg": 4.197590362355336,
+    "kickAnkleZ": 0.8050214713448584,
+    "plannedWorldErrDeg": 0.013570027229417752,
+    "plannedLeanDeg": 4.608177882633191,
+    "hipTauFrac": 0.7578534726093984,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.603,
+     "hip_roll_l": 0.177,
+     "hip_yaw_l": 0.135
+    },
+    "supportTauFrac": 0.7578534726093984,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.758,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.683,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.385,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.276,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.488,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.231,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.0168850914945367
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 2.96,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 2.061772462930053,
+    "plannedLeanDeg": 43.053555257671796,
+    "hipTauFrac": 0.9920625448821543,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.72,
+     "hip_roll_l": 0.497,
+     "hip_yaw_l": 0.573
+    },
+    "supportTauFrac": 0.999943991537969,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.737,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.992,
+      "satS": 0.102
+     },
+     "hip_yaw_r": {
+      "tau": 0.983,
+      "satS": 0.14
+     },
+     "knee_r": {
+      "tau": 0.403,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.002
+     },
+     "ankle_roll_r": {
+      "tau": 0.667,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.927732332223678
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.15,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 2.061772462930053,
+    "plannedLeanDeg": 43.053555257671796,
+    "hipTauFrac": 0.9910868931711504,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.727,
+     "hip_roll_l": 0.496,
+     "hip_yaw_l": 0.58
+    },
+    "supportTauFrac": 0.9910868931711504,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.656,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.983,
+      "satS": 0.098
+     },
+     "hip_yaw_r": {
+      "tau": 0.991,
+      "satS": 0.172
+     },
+     "knee_r": {
+      "tau": 0.373,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.869,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.664,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.927732332223678
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.176,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 2.061772462930053,
+    "plannedLeanDeg": 43.053555257671796,
+    "hipTauFrac": 0.9999364231314645,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.772,
+     "hip_roll_l": 0.525,
+     "hip_yaw_l": 0.583
+    },
+    "supportTauFrac": 0.9999364231314645,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.632,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.999,
+      "satS": 0.115
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.197
+     },
+     "knee_r": {
+      "tau": 0.435,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.974,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.62,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.927732332223678
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.0500000000000003,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 2.061772462930053,
+    "plannedLeanDeg": 43.053555257671796,
+    "hipTauFrac": 0.9999426968089911,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.76,
+     "hip_roll_l": 0.472,
+     "hip_yaw_l": 0.572
+    },
+    "supportTauFrac": 0.9999426968089911,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.74,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.117
+     },
+     "hip_yaw_r": {
+      "tau": 0.991,
+      "satS": 0.14
+     },
+     "knee_r": {
+      "tau": 0.614,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.756,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.926,
+      "satS": 0.004
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.927732332223678
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.173,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 2.061772462930053,
+    "plannedLeanDeg": 43.053555257671796,
+    "hipTauFrac": 0.9961479799141695,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.763,
+     "hip_roll_l": 0.517,
+     "hip_yaw_l": 0.582
+    },
+    "supportTauFrac": 0.9961479799141695,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.644,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.986,
+      "satS": 0.1
+     },
+     "hip_yaw_r": {
+      "tau": 0.996,
+      "satS": 0.18
+     },
+     "knee_r": {
+      "tau": 0.375,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.906,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.654,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.927732332223678
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": false,
+    "why": "support foot rolled over (kick)",
+    "failAtS": 2.715,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 3.8069159899486356,
+    "plannedLeanDeg": 62.36460774206857,
+    "hipTauFrac": 0.9872275713938299,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.498,
+     "hip_roll_l": 0.551,
+     "hip_yaw_l": 0.242
+    },
+    "supportTauFrac": 0.9872275713938299,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.54,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.987,
+      "satS": 0.069
+     },
+     "hip_yaw_r": {
+      "tau": 0.664,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.446,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.396,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.348,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.542918896912905
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.081,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 3.8069159899486356,
+    "plannedLeanDeg": 62.36460774206857,
+    "hipTauFrac": 0.9946342246967337,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.533,
+     "hip_roll_l": 0.558,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.9946342246967337,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.621,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.995,
+      "satS": 0.066
+     },
+     "hip_yaw_r": {
+      "tau": 0.638,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.62,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.355,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.407,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.542918896912905
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.108,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 3.8069159899486356,
+    "plannedLeanDeg": 62.36460774206857,
+    "hipTauFrac": 0.9999800454869338,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.52,
+     "hip_roll_l": 0.543,
+     "hip_yaw_l": 0.233
+    },
+    "supportTauFrac": 0.9999800454869338,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.715,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.069
+     },
+     "hip_yaw_r": {
+      "tau": 0.607,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.558,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.363,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.358,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.542918896912905
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": false,
+    "why": "support foot rolled over (kick)",
+    "failAtS": 2.845,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 3.8069159899486356,
+    "plannedLeanDeg": 62.36460774206857,
+    "hipTauFrac": 0.9933843333038703,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.491,
+     "hip_roll_l": 0.55,
+     "hip_yaw_l": 0.227
+    },
+    "supportTauFrac": 0.9933843333038703,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.533,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.993,
+      "satS": 0.076
+     },
+     "hip_yaw_r": {
+      "tau": 0.632,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.413,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.411,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.283,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.542918896912905
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": false,
+    "why": "torso past 60° (kick)",
+    "failAtS": 3.104,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 3.8069159899486356,
+    "plannedLeanDeg": 62.36460774206857,
+    "hipTauFrac": 0.9963016568753706,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.532,
+     "hip_roll_l": 0.545,
+     "hip_yaw_l": 0.243
+    },
+    "supportTauFrac": 0.9963016568753706,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.613,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.996,
+      "satS": 0.063
+     },
+     "hip_yaw_r": {
+      "tau": 0.635,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.553,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.354,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.419,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.542918896912905
+   }
+  ]
+ },
+ "R": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06108681533883377,
+    "maxLeanDeg": 10.590686607110934,
+    "poseErrDeg": 33.08645831259791,
+    "worldErrDeg": 3.004797120082299,
+    "kickAnkleZ": 0.7681471973183217,
+    "plannedWorldErrDeg": 0.021070091807840863,
+    "plannedLeanDeg": 8.032207831684225,
+    "hipTauFrac": 0.5376529318424224,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.335,
+     "hip_roll_l": 0.108,
+     "hip_yaw_l": 0.101
+    },
+    "supportTauFrac": 0.5376529318424224,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.538,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.456,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.168,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.225,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.431,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.196,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06746749230994116
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.058945784050400546,
+    "maxLeanDeg": 10.399551532499133,
+    "poseErrDeg": 31.043716939380406,
+    "worldErrDeg": 3.32058369830126,
+    "kickAnkleZ": 0.7694453011003732,
+    "plannedWorldErrDeg": 0.021070091807840863,
+    "plannedLeanDeg": 8.032207831684225,
+    "hipTauFrac": 0.4945957748133643,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.338,
+     "hip_roll_l": 0.186,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.4945957748133643,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.495,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.384,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.156,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.219,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.41,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.18,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06746749230994116
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06078036159842004,
+    "maxLeanDeg": 10.96291654397492,
+    "poseErrDeg": 33.209326767637236,
+    "worldErrDeg": 4.010680410387851,
+    "kickAnkleZ": 0.7539227122637264,
+    "plannedWorldErrDeg": 0.021070091807840863,
+    "plannedLeanDeg": 8.032207831684225,
+    "hipTauFrac": 0.4603814397079512,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.347,
+     "hip_roll_l": 0.174,
+     "hip_yaw_l": 0.145
+    },
+    "supportTauFrac": 0.4603814397079512,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.46,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.402,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.163,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.21,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.369,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.187,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06746749230994116
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.062021812663704635,
+    "maxLeanDeg": 9.896765666616588,
+    "poseErrDeg": 31.43515206665303,
+    "worldErrDeg": 3.6355012794341723,
+    "kickAnkleZ": 0.7642789956311937,
+    "plannedWorldErrDeg": 0.021070091807840863,
+    "plannedLeanDeg": 8.032207831684225,
+    "hipTauFrac": 0.4927330786665378,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.341,
+     "hip_roll_l": 0.173,
+     "hip_yaw_l": 0.125
+    },
+    "supportTauFrac": 0.4927330786665378,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.493,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.425,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.161,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.19,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.411,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.176,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06746749230994116
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06022670894626888,
+    "maxLeanDeg": 11.616975318881652,
+    "poseErrDeg": 32.227951824647754,
+    "worldErrDeg": 4.0508127763465485,
+    "kickAnkleZ": 0.7589937785669412,
+    "plannedWorldErrDeg": 0.021070091807840863,
+    "plannedLeanDeg": 8.032207831684225,
+    "hipTauFrac": 0.4910021687253912,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.34,
+     "hip_roll_l": 0.123,
+     "hip_yaw_l": 0.134
+    },
+    "supportTauFrac": 0.4910021687253912,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.491,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.392,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.201,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.213,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.413,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.175,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06746749230994116
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.011507064051443673,
+    "maxLeanDeg": 28.64388797046259,
+    "poseErrDeg": 43.6331015282571,
+    "worldErrDeg": 5.450097061038326,
+    "kickAnkleZ": 0.8513225171891973,
+    "plannedWorldErrDeg": 3.0147391228796026,
+    "plannedLeanDeg": 27.020245362681777,
+    "hipTauFrac": 0.9841342649233061,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.505,
+     "hip_roll_l": 0.316,
+     "hip_yaw_l": 0.185
+    },
+    "supportTauFrac": 0.9841342649233061,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.667,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.984,
+      "satS": 0.01
+     },
+     "hip_yaw_r": {
+      "tau": 0.32,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.423,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.563,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.315,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.09335063235442745
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.83,
+    "minMarginM": -0.07506112662220102,
+    "maxLeanDeg": 33.29242448817219,
+    "poseErrDeg": 42.52396140960311,
+    "worldErrDeg": 1.836959816675229,
+    "kickAnkleZ": 0.9304847324088414,
+    "plannedWorldErrDeg": 3.0147391228796026,
+    "plannedLeanDeg": 27.020245362681777,
+    "hipTauFrac": 0.8792283402979215,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.464,
+     "hip_roll_l": 0.288,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.8792283402979215,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.625,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.879,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.28,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.398,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.541,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.325,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.09335063235442745
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.88,
+    "minMarginM": -0.07440267300926495,
+    "maxLeanDeg": 32.505550474720565,
+    "poseErrDeg": 44.01612798883572,
+    "worldErrDeg": 1.608618502232275,
+    "kickAnkleZ": 0.9165063582721245,
+    "plannedWorldErrDeg": 3.0147391228796026,
+    "plannedLeanDeg": 27.020245362681777,
+    "hipTauFrac": 0.8226715314657145,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.44,
+     "hip_roll_l": 0.254,
+     "hip_yaw_l": 0.145
+    },
+    "supportTauFrac": 0.8226715314657145,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.576,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.823,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.196,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.421,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.533,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.278,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.09335063235442745
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.016404634445982134,
+    "maxLeanDeg": 28.674648838293987,
+    "poseErrDeg": 43.383261264466164,
+    "worldErrDeg": 4.420417280731828,
+    "kickAnkleZ": 0.8699583456498335,
+    "plannedWorldErrDeg": 3.0147391228796026,
+    "plannedLeanDeg": 27.020245362681777,
+    "hipTauFrac": 0.9489175047887806,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.482,
+     "hip_roll_l": 0.264,
+     "hip_yaw_l": 0.154
+    },
+    "supportTauFrac": 0.9489175047887806,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.617,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.949,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.226,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.405,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.547,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.288,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.09335063235442745
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.92,
+    "minMarginM": -0.07366257147829863,
+    "maxLeanDeg": 33.37182673756504,
+    "poseErrDeg": 42.710666824236135,
+    "worldErrDeg": 3.260155651085548,
+    "kickAnkleZ": 0.9295102853314328,
+    "plannedWorldErrDeg": 3.0147391228796026,
+    "plannedLeanDeg": 27.020245362681777,
+    "hipTauFrac": 0.8513213040997938,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.458,
+     "hip_roll_l": 0.272,
+     "hip_yaw_l": 0.145
+    },
+    "supportTauFrac": 0.8513213040997938,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.621,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.851,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.275,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.427,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.544,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.319,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.09335063235442745
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": false,
+    "why": "support foot rolled over (kick)",
+    "failAtS": 2.855,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 17.556594325951917,
+    "plannedLeanDeg": 45.36009165220336,
+    "hipTauFrac": 0.9999755415859484,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.717,
+     "hip_roll_l": 0.244,
+     "hip_yaw_l": 0.116
+    },
+    "supportTauFrac": 0.9999755415859484,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.394,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.191
+     },
+     "hip_yaw_r": {
+      "tau": 0.348,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.208,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.396,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.73,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.7475987411748384
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": -0.07803912854059297,
+    "maxLeanDeg": 52.393787064127764,
+    "poseErrDeg": 72.24163185285002,
+    "worldErrDeg": 16.56545449282422,
+    "kickAnkleZ": 1.2092272956472154,
+    "plannedWorldErrDeg": 17.556594325951917,
+    "plannedLeanDeg": 45.36009165220336,
+    "hipTauFrac": 0.9999751232564702,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.687,
+     "hip_roll_l": 0.216,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.9999751232564702,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.377,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.159
+     },
+     "hip_yaw_r": {
+      "tau": 0.345,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.219,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.316,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.267,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.7475987411748384
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 4.295,
+    "minMarginM": -0.08730853932150479,
+    "maxLeanDeg": 52.24962553777699,
+    "poseErrDeg": 73.46477046126606,
+    "worldErrDeg": 17.054726896001036,
+    "kickAnkleZ": 1.203980503779577,
+    "plannedWorldErrDeg": 17.556594325951917,
+    "plannedLeanDeg": 45.36009165220336,
+    "hipTauFrac": 0.989530145392865,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.597,
+     "hip_roll_l": 0.213,
+     "hip_yaw_l": 0.145
+    },
+    "supportTauFrac": 0.989530145392865,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.347,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.99,
+      "satS": 0.102
+     },
+     "hip_yaw_r": {
+      "tau": 0.338,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.21,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.363,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.268,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.7475987411748384
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": false,
+    "why": "support foot rolled over (kick)",
+    "failAtS": 2.98,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 17.556594325951917,
+    "plannedLeanDeg": 45.36009165220336,
+    "hipTauFrac": 0.9999754465348124,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.691,
+     "hip_roll_l": 0.224,
+     "hip_yaw_l": 0.125
+    },
+    "supportTauFrac": 0.9999754465348124,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.378,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.164
+     },
+     "hip_yaw_r": {
+      "tau": 0.337,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.198,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.411,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.466,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.7475987411748384
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": -0.05308453219653325,
+    "maxLeanDeg": 51.791216297635145,
+    "poseErrDeg": 72.45489278699856,
+    "worldErrDeg": 18.02133772881436,
+    "kickAnkleZ": 1.2043623531170036,
+    "plannedWorldErrDeg": 17.556594325951917,
+    "plannedLeanDeg": 45.36009165220336,
+    "hipTauFrac": 0.997512191525634,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.629,
+     "hip_roll_l": 0.215,
+     "hip_yaw_l": 0.134
+    },
+    "supportTauFrac": 0.997512191525634,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.393,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.998,
+      "satS": 0.132
+     },
+     "hip_yaw_r": {
+      "tau": 0.35,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.213,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.354,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.269,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 2.7475987411748384
+   }
+  ]
+ },
+ "M": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06205944229066258,
+    "maxLeanDeg": 16.19479123173622,
+    "poseErrDeg": 31.901370498221414,
+    "worldErrDeg": 1.87438326516752,
+    "kickAnkleZ": 0.7933900409929208,
+    "plannedWorldErrDeg": 0.018939412411464435,
+    "plannedLeanDeg": 14.545650466648684,
+    "hipTauFrac": 0.5950257356967955,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.348,
+     "hip_roll_l": 0.168,
+     "hip_yaw_l": 0.161
+    },
+    "supportTauFrac": 0.5950257356967955,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.547,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.595,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.157,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.398,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.38,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.207,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.10090253683850034
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05705262518500012,
+    "maxLeanDeg": 16.253804739646824,
+    "poseErrDeg": 30.35848655231092,
+    "worldErrDeg": 2.908509970184462,
+    "kickAnkleZ": 0.7931194741293355,
+    "plannedWorldErrDeg": 0.018939412411464435,
+    "plannedLeanDeg": 14.545650466648684,
+    "hipTauFrac": 0.5739124256200082,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.348,
+     "hip_roll_l": 0.19,
+     "hip_yaw_l": 0.267
+    },
+    "supportTauFrac": 0.5739124256200082,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.534,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.574,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.133,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.396,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.304,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.197,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.10090253683850034
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05898194998889956,
+    "maxLeanDeg": 16.22532955551544,
+    "poseErrDeg": 32.16229531134498,
+    "worldErrDeg": 2.749615195364678,
+    "kickAnkleZ": 0.7810662947384545,
+    "plannedWorldErrDeg": 0.018939412411464435,
+    "plannedLeanDeg": 14.545650466648684,
+    "hipTauFrac": 0.5485548820665545,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.34,
+     "hip_roll_l": 0.167,
+     "hip_yaw_l": 0.134
+    },
+    "supportTauFrac": 0.5485548820665545,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.533,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.549,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.165,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.378,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.349,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.189,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.10090253683850034
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.062380838243251836,
+    "maxLeanDeg": 15.175250762406082,
+    "poseErrDeg": 30.63928168484169,
+    "worldErrDeg": 2.237461829495896,
+    "kickAnkleZ": 0.791696471682192,
+    "plannedWorldErrDeg": 0.018939412411464435,
+    "plannedLeanDeg": 14.545650466648684,
+    "hipTauFrac": 0.5816923540467348,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.345,
+     "hip_roll_l": 0.165,
+     "hip_yaw_l": 0.15
+    },
+    "supportTauFrac": 0.5816923540467348,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.533,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.582,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.156,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.396,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.414,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.201,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.10090253683850034
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.058698791361595136,
+    "maxLeanDeg": 17.27262238544601,
+    "poseErrDeg": 31.210099393176595,
+    "worldErrDeg": 3.7553760180420226,
+    "kickAnkleZ": 0.7825206074041154,
+    "plannedWorldErrDeg": 0.018939412411464435,
+    "plannedLeanDeg": 14.545650466648684,
+    "hipTauFrac": 0.5630497036181078,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.347,
+     "hip_roll_l": 0.155,
+     "hip_yaw_l": 0.149
+    },
+    "supportTauFrac": 0.5630497036181078,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.548,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.563,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.203,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.37,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.387,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.198,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.10090253683850034
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.058426286057415566,
+    "maxLeanDeg": 25.046620681016076,
+    "poseErrDeg": 46.57326531671654,
+    "worldErrDeg": 6.9293729615408415,
+    "kickAnkleZ": 0.7954986794311687,
+    "plannedWorldErrDeg": 4.882304639508341,
+    "plannedLeanDeg": 24.706580592638883,
+    "hipTauFrac": 0.6936691050516155,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.418,
+     "hip_roll_l": 0.184,
+     "hip_yaw_l": 0.112
+    },
+    "supportTauFrac": 0.6936691050516155,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.694,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.591,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.23,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.543,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.554,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.239,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.5976460604044028
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05265287608654631,
+    "maxLeanDeg": 25.520033655198738,
+    "poseErrDeg": 45.04159016903775,
+    "worldErrDeg": 6.9200415841406135,
+    "kickAnkleZ": 0.8024127871866278,
+    "plannedWorldErrDeg": 4.882304639508341,
+    "plannedLeanDeg": 24.706580592638883,
+    "hipTauFrac": 0.6581960172732145,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.408,
+     "hip_roll_l": 0.19,
+     "hip_yaw_l": 0.267
+    },
+    "supportTauFrac": 0.6581960172732145,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.658,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.587,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.218,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.509,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.507,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.246,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.5976460604044028
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05925146780912323,
+    "maxLeanDeg": 24.20258182817297,
+    "poseErrDeg": 46.97111540188305,
+    "worldErrDeg": 7.432139783470695,
+    "kickAnkleZ": 0.7880081082669036,
+    "plannedWorldErrDeg": 4.882304639508341,
+    "plannedLeanDeg": 24.706580592638883,
+    "hipTauFrac": 0.6299427279220251,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.399,
+     "hip_roll_l": 0.167,
+     "hip_yaw_l": 0.093
+    },
+    "supportTauFrac": 0.6299427279220251,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.63,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.58,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.2,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.523,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.496,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.237,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.5976460604044028
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06019892585413062,
+    "maxLeanDeg": 24.301329030537435,
+    "poseErrDeg": 46.29300609633236,
+    "worldErrDeg": 7.770528460259685,
+    "kickAnkleZ": 0.7846379715945057,
+    "plannedWorldErrDeg": 4.882304639508341,
+    "plannedLeanDeg": 24.706580592638883,
+    "hipTauFrac": 0.6564434172581188,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.412,
+     "hip_roll_l": 0.165,
+     "hip_yaw_l": 0.128
+    },
+    "supportTauFrac": 0.6564434172581188,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.656,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.597,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.214,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.555,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.505,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.249,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.5976460604044028
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.057380244284139736,
+    "maxLeanDeg": 25.280929870409395,
+    "poseErrDeg": 45.61858470169242,
+    "worldErrDeg": 7.6252945064242095,
+    "kickAnkleZ": 0.8029170561946319,
+    "plannedWorldErrDeg": 4.882304639508341,
+    "plannedLeanDeg": 24.706580592638883,
+    "hipTauFrac": 0.6645928928686484,
+    "hipWorst": "hip_pitch_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.404,
+     "hip_roll_l": 0.16,
+     "hip_yaw_l": 0.129
+    },
+    "supportTauFrac": 0.6645928928686484,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.665,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.581,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.208,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.552,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.518,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.252,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.5976460604044028
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.030603836266126817,
+    "maxLeanDeg": 51.19314062078173,
+    "poseErrDeg": 73.35583549002436,
+    "worldErrDeg": 15.859493196920562,
+    "kickAnkleZ": 1.1609861477462982,
+    "plannedWorldErrDeg": 15.26739002683577,
+    "plannedLeanDeg": 48.26241337128381,
+    "hipTauFrac": 0.999979275130701,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.711,
+     "hip_roll_l": 0.34,
+     "hip_yaw_l": 0.227
+    },
+    "supportTauFrac": 0.999979275130701,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.477,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.129
+     },
+     "hip_yaw_r": {
+      "tau": 0.444,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.657,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.614,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.33,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 3.2219947180328377
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 4.1850000000000005,
+    "minMarginM": -0.08334410898312114,
+    "maxLeanDeg": 55.97054138850844,
+    "poseErrDeg": 72.65619173454294,
+    "worldErrDeg": 12.268975320569105,
+    "kickAnkleZ": 1.229355727610584,
+    "plannedWorldErrDeg": 15.26739002683577,
+    "plannedLeanDeg": 48.26241337128381,
+    "hipTauFrac": 0.999979449366986,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.696,
+     "hip_roll_l": 0.32,
+     "hip_yaw_l": 0.267
+    },
+    "supportTauFrac": 0.999979449366986,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.437,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.119
+     },
+     "hip_yaw_r": {
+      "tau": 0.399,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.372,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.576,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.339,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 3.2219947180328377
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.027166716001065717,
+    "maxLeanDeg": 50.749380571588915,
+    "poseErrDeg": 73.80596503000008,
+    "worldErrDeg": 16.807969211693347,
+    "kickAnkleZ": 1.1536142187273495,
+    "plannedWorldErrDeg": 15.26739002683577,
+    "plannedLeanDeg": 48.26241337128381,
+    "hipTauFrac": 0.9999799009962769,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.685,
+     "hip_roll_l": 0.301,
+     "hip_yaw_l": 0.217
+    },
+    "supportTauFrac": 0.9999799009962769,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.429,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.099
+     },
+     "hip_yaw_r": {
+      "tau": 0.374,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.435,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.551,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.371,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 3.2219947180328377
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.028985993842118488,
+    "maxLeanDeg": 50.40730152572596,
+    "poseErrDeg": 73.50883410797007,
+    "worldErrDeg": 16.815810077924592,
+    "kickAnkleZ": 1.1520871643961028,
+    "plannedWorldErrDeg": 15.26739002683577,
+    "plannedLeanDeg": 48.26241337128381,
+    "hipTauFrac": 0.9999794562894209,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.689,
+     "hip_roll_l": 0.319,
+     "hip_yaw_l": 0.222
+    },
+    "supportTauFrac": 0.9999794562894209,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.44,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.123
+     },
+     "hip_yaw_r": {
+      "tau": 0.358,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.356,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.573,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.327,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 3.2219947180328377
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": -0.02024921552312696,
+    "maxLeanDeg": 53.642792810649055,
+    "poseErrDeg": 72.65105689179815,
+    "worldErrDeg": 14.632401165895171,
+    "kickAnkleZ": 1.2092399145820079,
+    "plannedWorldErrDeg": 15.26739002683577,
+    "plannedLeanDeg": 48.26241337128381,
+    "hipTauFrac": 0.9999799378755715,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.699,
+     "hip_roll_l": 0.316,
+     "hip_yaw_l": 0.226
+    },
+    "supportTauFrac": 0.9999799378755715,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.45,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.109
+     },
+     "hip_yaw_r": {
+      "tau": 0.378,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.326,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.576,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.338,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 3.2219947180328377
+   }
+  ]
+ },
+ "O": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06160444087345011,
+    "maxLeanDeg": 9.814016821382555,
+    "poseErrDeg": 12.36563503745628,
+    "worldErrDeg": 1.9245677922365707,
+    "kickAnkleZ": 0.8054960236476558,
+    "plannedWorldErrDeg": 0.017457055852767776,
+    "plannedLeanDeg": 7.93088508705291,
+    "hipTauFrac": 0.6941082651805296,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.3,
+     "hip_roll_l": 0.217,
+     "hip_yaw_l": 0.035
+    },
+    "supportTauFrac": 0.6941082651805296,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.455,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.694,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.203,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.337,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.42,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.247,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.08621260837185027
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05935283044488685,
+    "maxLeanDeg": 9.54561769843965,
+    "poseErrDeg": 12.605168737131741,
+    "worldErrDeg": 1.769251723604881,
+    "kickAnkleZ": 0.8083604787629239,
+    "plannedWorldErrDeg": 0.017457055852767776,
+    "plannedLeanDeg": 7.93088508705291,
+    "hipTauFrac": 0.6383068961091497,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.29,
+     "hip_roll_l": 0.2,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.6383068961091497,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.426,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.638,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.188,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.323,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.339,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.228,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.08621260837185027
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06015284915330382,
+    "maxLeanDeg": 10.184621128414426,
+    "poseErrDeg": 12.460638848560425,
+    "worldErrDeg": 3.242005039588023,
+    "kickAnkleZ": 0.7934455614761913,
+    "plannedWorldErrDeg": 0.017457055852767776,
+    "plannedLeanDeg": 7.93088508705291,
+    "hipTauFrac": 0.600863939524936,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.287,
+     "hip_roll_l": 0.178,
+     "hip_yaw_l": 0.087
+    },
+    "supportTauFrac": 0.600863939524936,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.396,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.601,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.171,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.333,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.344,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.191,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.08621260837185027
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06239436936717047,
+    "maxLeanDeg": 8.90428129866993,
+    "poseErrDeg": 11.77924083186054,
+    "worldErrDeg": 1.4076811434710275,
+    "kickAnkleZ": 0.8053436642029612,
+    "plannedWorldErrDeg": 0.017457055852767776,
+    "plannedLeanDeg": 7.93088508705291,
+    "hipTauFrac": 0.6448378767951096,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.294,
+     "hip_roll_l": 0.2,
+     "hip_yaw_l": 0.125
+    },
+    "supportTauFrac": 0.6448378767951096,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.422,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.645,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.186,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.329,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.41,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.232,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.08621260837185027
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06066148753755762,
+    "maxLeanDeg": 10.892535177931851,
+    "poseErrDeg": 12.548295721082534,
+    "worldErrDeg": 2.9033384333743752,
+    "kickAnkleZ": 0.7964092474871483,
+    "plannedWorldErrDeg": 0.017457055852767776,
+    "plannedLeanDeg": 7.93088508705291,
+    "hipTauFrac": 0.6296553090305591,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.289,
+     "hip_roll_l": 0.193,
+     "hip_yaw_l": 0.121
+    },
+    "supportTauFrac": 0.6296553090305591,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.423,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.63,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.201,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.296,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.344,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.195,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.08621260837185027
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.058897255597399445,
+    "maxLeanDeg": 10.756153971987528,
+    "poseErrDeg": 14.286974481948679,
+    "worldErrDeg": 2.6453211943577206,
+    "kickAnkleZ": 0.8282894848941885,
+    "plannedWorldErrDeg": 0.01877073558357588,
+    "plannedLeanDeg": 11.603258432294183,
+    "hipTauFrac": 0.6188655337180194,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.101,
+     "hip_roll_l": 0.33,
+     "hip_yaw_l": 0.056
+    },
+    "supportTauFrac": 0.6188655337180194,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.353,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.619,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.267,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.492,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.379,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.17,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.024114208874159118
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05988282777123778,
+    "maxLeanDeg": 11.114375613118105,
+    "poseErrDeg": 13.74656435063697,
+    "worldErrDeg": 2.5545502960609885,
+    "kickAnkleZ": 0.8230590522914943,
+    "plannedWorldErrDeg": 0.01877073558357588,
+    "plannedLeanDeg": 11.603258432294183,
+    "hipTauFrac": 0.6027282731687479,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.08,
+     "hip_roll_l": 0.324,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.6027282731687479,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.342,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.603,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.257,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.486,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.335,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.163,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.024114208874159118
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06137247852389114,
+    "maxLeanDeg": 10.508358089491061,
+    "poseErrDeg": 14.790140355906514,
+    "worldErrDeg": 2.9616729000535944,
+    "kickAnkleZ": 0.822006999146632,
+    "plannedWorldErrDeg": 0.01877073558357588,
+    "plannedLeanDeg": 11.603258432294183,
+    "hipTauFrac": 0.5993492604529204,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.093,
+     "hip_roll_l": 0.312,
+     "hip_yaw_l": 0.087
+    },
+    "supportTauFrac": 0.5993492604529204,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.327,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.599,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.237,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.467,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.344,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.168,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.024114208874159118
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.06065056842719148,
+    "maxLeanDeg": 10.2787380626459,
+    "poseErrDeg": 14.63972351207251,
+    "worldErrDeg": 3.3477024765303796,
+    "kickAnkleZ": 0.8141323633842169,
+    "plannedWorldErrDeg": 0.01877073558357588,
+    "plannedLeanDeg": 11.603258432294183,
+    "hipTauFrac": 0.6129827484383776,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.102,
+     "hip_roll_l": 0.321,
+     "hip_yaw_l": 0.125
+    },
+    "supportTauFrac": 0.6129827484383776,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.337,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.613,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.258,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.49,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.41,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.164,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.024114208874159118
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.061597464074271885,
+    "maxLeanDeg": 11.39461444008741,
+    "poseErrDeg": 13.76479296086352,
+    "worldErrDeg": 2.485619043102584,
+    "kickAnkleZ": 0.8332470431499888,
+    "plannedWorldErrDeg": 0.01877073558357588,
+    "plannedLeanDeg": 11.603258432294183,
+    "hipTauFrac": 0.6036101243501631,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.089,
+     "hip_roll_l": 0.32,
+     "hip_yaw_l": 0.121
+    },
+    "supportTauFrac": 0.6036101243501631,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.346,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.604,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.243,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.458,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.352,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.162,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.024114208874159118
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.03609678013457934,
+    "maxLeanDeg": 18.05689795697412,
+    "poseErrDeg": 25.95294198700487,
+    "worldErrDeg": 2.185828345711137,
+    "kickAnkleZ": 1.2705357255943357,
+    "plannedWorldErrDeg": 0.02413036751806242,
+    "plannedLeanDeg": 17.102987919041475,
+    "hipTauFrac": 0.44109932692871107,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.101,
+     "hip_roll_l": 0.301,
+     "hip_yaw_l": 0.071
+    },
+    "supportTauFrac": 0.47947149926016625,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.277,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.441,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.323,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.479,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.379,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.198,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.05337523604304234
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.03145392468896003,
+    "maxLeanDeg": 18.34893497385488,
+    "poseErrDeg": 25.40871338544432,
+    "worldErrDeg": 2.4240361378611883,
+    "kickAnkleZ": 1.2660819693298335,
+    "plannedWorldErrDeg": 0.02413036751806242,
+    "plannedLeanDeg": 17.102987919041475,
+    "hipTauFrac": 0.4019775948698115,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.08,
+     "hip_roll_l": 0.276,
+     "hip_yaw_l": 0.264
+    },
+    "supportTauFrac": 0.4518809576340232,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.263,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.402,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.296,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.452,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.307,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.191,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.05337523604304234
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05737072065259044,
+    "maxLeanDeg": 16.399496282227503,
+    "poseErrDeg": 26.377245001059293,
+    "worldErrDeg": 2.8279416327689466,
+    "kickAnkleZ": 1.2604588793126377,
+    "plannedWorldErrDeg": 0.02413036751806242,
+    "plannedLeanDeg": 17.102987919041475,
+    "hipTauFrac": 0.3830072432932357,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.093,
+     "hip_roll_l": 0.261,
+     "hip_yaw_l": 0.087
+    },
+    "supportTauFrac": 0.4233090403793754,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.245,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.383,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.257,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.423,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.344,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.186,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.05337523604304234
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05156540710611171,
+    "maxLeanDeg": 17.19008827691966,
+    "poseErrDeg": 26.05815601561023,
+    "worldErrDeg": 3.3667440052699122,
+    "kickAnkleZ": 1.2549494825984453,
+    "plannedWorldErrDeg": 0.02413036751806242,
+    "plannedLeanDeg": 17.102987919041475,
+    "hipTauFrac": 0.40634784248891853,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.102,
+     "hip_roll_l": 0.275,
+     "hip_yaw_l": 0.125
+    },
+    "supportTauFrac": 0.4595980447968071,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.258,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.406,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.294,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.46,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.41,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.192,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.05337523604304234
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04402664312881234,
+    "maxLeanDeg": 17.912007768896622,
+    "poseErrDeg": 25.514041860891073,
+    "worldErrDeg": 2.064026764107688,
+    "kickAnkleZ": 1.2714933920167477,
+    "plannedWorldErrDeg": 0.02413036751806242,
+    "plannedLeanDeg": 17.102987919041475,
+    "hipTauFrac": 0.3977731004685955,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.089,
+     "hip_roll_l": 0.273,
+     "hip_yaw_l": 0.121
+    },
+    "supportTauFrac": 0.4223838605654369,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.267,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.398,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.281,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.422,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.308,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.19,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.05337523604304234
+   }
+  ]
+ },
+ "P": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.03138075639619203,
+    "maxLeanDeg": 12.145221051475918,
+    "poseErrDeg": 14.965345754704773,
+    "worldErrDeg": 2.5492598913425386,
+    "kickAnkleZ": 0.8047934117282068,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999796102153602,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.277,
+     "hip_roll_l": 0.399,
+     "hip_yaw_l": 0.154
+    },
+    "supportTauFrac": 0.9999874482416546,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.425,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.042
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.003
+     },
+     "knee_r": {
+      "tau": 0.883,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.113
+     },
+     "ankle_roll_r": {
+      "tau": 0.918,
+      "satS": 0.009
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 5.58,
+    "minMarginM": -0.07203829087485827,
+    "maxLeanDeg": 12.962675378704583,
+    "poseErrDeg": 16.162934263400523,
+    "worldErrDeg": 5.787900462044127,
+    "kickAnkleZ": 0.8201782297643648,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999743066977618,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.252,
+     "hip_roll_l": 0.373,
+     "hip_yaw_l": 0.256
+    },
+    "supportTauFrac": 0.9999880998632472,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.392,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.044
+     },
+     "hip_yaw_r": {
+      "tau": 0.97,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.826,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.137
+     },
+     "ankle_roll_r": {
+      "tau": 0.932,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05203340624694688,
+    "maxLeanDeg": 12.511338447669317,
+    "poseErrDeg": 15.277702328687049,
+    "worldErrDeg": 3.1299438385935763,
+    "kickAnkleZ": 0.7943532863407246,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999746978371844,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.233,
+     "hip_roll_l": 0.336,
+     "hip_yaw_l": 0.13
+    },
+    "supportTauFrac": 0.9999869108091517,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.352,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.013
+     },
+     "hip_yaw_r": {
+      "tau": 0.814,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.784,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.116
+     },
+     "ankle_roll_r": {
+      "tau": 0.95,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04092666153878353,
+    "maxLeanDeg": 11.380642835285817,
+    "poseErrDeg": 15.487352067269203,
+    "worldErrDeg": 2.239056479872859,
+    "kickAnkleZ": 0.804559000900051,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999798129859907,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.249,
+     "hip_roll_l": 0.37,
+     "hip_yaw_l": 0.144
+    },
+    "supportTauFrac": 0.9999867863580895,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.391,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.034
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.001
+     },
+     "knee_r": {
+      "tau": 0.827,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.113
+     },
+     "ankle_roll_r": {
+      "tau": 0.925,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 5.345,
+    "minMarginM": -0.0737519285435807,
+    "maxLeanDeg": 14.368078802063192,
+    "poseErrDeg": 15.508975648072559,
+    "worldErrDeg": 7.184927117778062,
+    "kickAnkleZ": 0.8089133539840657,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999748966605105,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.243,
+     "hip_roll_l": 0.367,
+     "hip_yaw_l": 0.14
+    },
+    "supportTauFrac": 0.9999893137317376,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.397,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.059
+     },
+     "hip_yaw_r": {
+      "tau": 0.912,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.808,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.193
+     },
+     "ankle_roll_r": {
+      "tau": 0.924,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.056828125768451775,
+    "maxLeanDeg": 8.867524790583294,
+    "poseErrDeg": 16.302681564925113,
+    "worldErrDeg": 1.8710398403313553,
+    "kickAnkleZ": 0.8180417213394124,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5462564048576576,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.057,
+     "hip_roll_l": 0.24,
+     "hip_yaw_l": 0.066
+    },
+    "supportTauFrac": 0.5628482687473091,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.169,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.546,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.264,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.159,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.563,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.451,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05267288369129258,
+    "maxLeanDeg": 9.072708787460057,
+    "poseErrDeg": 15.695700222865593,
+    "worldErrDeg": 3.131881160349261,
+    "kickAnkleZ": 0.8129504139139785,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5257457367751959,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.047,
+     "hip_roll_l": 0.234,
+     "hip_yaw_l": 0.256
+    },
+    "supportTauFrac": 0.6090310207396603,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.164,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.526,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.244,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.182,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.609,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.403,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.055445570711667315,
+    "maxLeanDeg": 8.71031114355093,
+    "poseErrDeg": 16.810013692711586,
+    "worldErrDeg": 2.222527174864138,
+    "kickAnkleZ": 0.8123397739807845,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5139283580684555,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.046,
+     "hip_roll_l": 0.226,
+     "hip_yaw_l": 0.095
+    },
+    "supportTauFrac": 0.5846273262453294,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.169,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.514,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.236,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.18,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.585,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.41,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.058032936390120984,
+    "maxLeanDeg": 8.115696494063032,
+    "poseErrDeg": 16.64197430172393,
+    "worldErrDeg": 3.774253800433813,
+    "kickAnkleZ": 0.8042290268343862,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5325414714745421,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.135,
+     "hip_roll_l": 0.232,
+     "hip_yaw_l": 0.117
+    },
+    "supportTauFrac": 0.5325414714745421,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.16,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.533,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.254,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.189,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.531,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.441,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05487804550141302,
+    "maxLeanDeg": 9.767315995997206,
+    "poseErrDeg": 15.748416310854084,
+    "worldErrDeg": 2.627054343008292,
+    "kickAnkleZ": 0.8232254220143466,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5224883382408161,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.056,
+     "hip_roll_l": 0.232,
+     "hip_yaw_l": 0.118
+    },
+    "supportTauFrac": 0.8118599219396212,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.181,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.522,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.231,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.181,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.812,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.389,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05010722194155302,
+    "maxLeanDeg": 17.946120118872443,
+    "poseErrDeg": 23.898443184248936,
+    "worldErrDeg": 1.0943603041865393,
+    "kickAnkleZ": 1.259685999230759,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.9648845717346786,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.057,
+     "hip_roll_l": 0.406,
+     "hip_yaw_l": 0.139
+    },
+    "supportTauFrac": 0.9648845717346786,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.321,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.965,
+      "satS": 0.036
+     },
+     "hip_yaw_r": {
+      "tau": 0.672,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.21,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.617,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.684,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.041746254524362474,
+    "maxLeanDeg": 18.136421525185074,
+    "poseErrDeg": 23.313102472880445,
+    "worldErrDeg": 2.6116496395402873,
+    "kickAnkleZ": 1.2534086017806398,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.927531327194922,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.05,
+     "hip_roll_l": 0.382,
+     "hip_yaw_l": 0.256
+    },
+    "supportTauFrac": 0.927531327194922,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.319,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.928,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.637,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.202,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.645,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.649,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.044184265333689784,
+    "maxLeanDeg": 18.097789101674017,
+    "poseErrDeg": 24.336766070534697,
+    "worldErrDeg": 1.9393745982704773,
+    "kickAnkleZ": 1.2510624665788046,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.8636672721568542,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.046,
+     "hip_roll_l": 0.344,
+     "hip_yaw_l": 0.118
+    },
+    "supportTauFrac": 0.8636672721568542,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.319,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.864,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.603,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.192,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.613,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.619,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04756795351499671,
+    "maxLeanDeg": 17.123759853876543,
+    "poseErrDeg": 23.99245229226733,
+    "worldErrDeg": 3.0216134918464688,
+    "kickAnkleZ": 1.2465174125805127,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.929698047234102,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.135,
+     "hip_roll_l": 0.375,
+     "hip_yaw_l": 0.128
+    },
+    "supportTauFrac": 0.929698047234102,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.32,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.93,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.624,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.2,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.624,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.659,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04385684425833304,
+    "maxLeanDeg": 19.221333393148555,
+    "poseErrDeg": 23.436820156803602,
+    "worldErrDeg": 2.2729210691301067,
+    "kickAnkleZ": 1.2618478955866057,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.90553861867324,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.056,
+     "hip_roll_l": 0.373,
+     "hip_yaw_l": 0.125
+    },
+    "supportTauFrac": 0.90553861867324,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.32,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.906,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.623,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.184,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.812,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.637,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   }
+  ]
+ },
+ "P2": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.02761508641590963,
+    "maxLeanDeg": 12.140059495722346,
+    "poseErrDeg": 14.97073864181989,
+    "worldErrDeg": 2.5767229699123626,
+    "kickAnkleZ": 0.8046486235367526,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999799644718026,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.276,
+     "hip_roll_l": 0.4,
+     "hip_yaw_l": 0.154
+    },
+    "supportTauFrac": 0.9999878889315372,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.432,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.042
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.003
+     },
+     "knee_r": {
+      "tau": 0.842,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.116
+     },
+     "ankle_roll_r": {
+      "tau": 0.914,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 5.11,
+    "minMarginM": -0.07736481965674621,
+    "maxLeanDeg": 13.27802707056312,
+    "poseErrDeg": 16.159649522124408,
+    "worldErrDeg": 6.89618859994341,
+    "kickAnkleZ": 0.820971064114725,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999745569439741,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.251,
+     "hip_roll_l": 0.373,
+     "hip_yaw_l": 0.262
+    },
+    "supportTauFrac": 0.9999885395409396,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.401,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.044
+     },
+     "hip_yaw_r": {
+      "tau": 0.967,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.805,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.138
+     },
+     "ankle_roll_r": {
+      "tau": 0.926,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05221328697455715,
+    "maxLeanDeg": 12.498774474984792,
+    "poseErrDeg": 15.27803686227749,
+    "worldErrDeg": 3.118916650966052,
+    "kickAnkleZ": 0.7944295406015816,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999750845917623,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.231,
+     "hip_roll_l": 0.336,
+     "hip_yaw_l": 0.13
+    },
+    "supportTauFrac": 0.9999873099667513,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.359,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.018
+     },
+     "hip_yaw_r": {
+      "tau": 0.807,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.738,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.116
+     },
+     "ankle_roll_r": {
+      "tau": 0.933,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04144530725043273,
+    "maxLeanDeg": 11.367566376696194,
+    "poseErrDeg": 15.48731629190428,
+    "worldErrDeg": 2.2114152352321206,
+    "kickAnkleZ": 0.80450743280523,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999745147126365,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.248,
+     "hip_roll_l": 0.37,
+     "hip_yaw_l": 0.144
+    },
+    "supportTauFrac": 0.9999874249261584,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.4,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.029
+     },
+     "hip_yaw_r": {
+      "tau": 0.987,
+      "satS": 0.001
+     },
+     "knee_r": {
+      "tau": 0.784,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.115
+     },
+     "ankle_roll_r": {
+      "tau": 0.921,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 5.115,
+    "minMarginM": -0.07626393847551172,
+    "maxLeanDeg": 14.535781961539406,
+    "poseErrDeg": 15.507017442728237,
+    "worldErrDeg": 7.868079591759797,
+    "kickAnkleZ": 0.8086696398897044,
+    "plannedWorldErrDeg": 0.01630505740687374,
+    "plannedLeanDeg": 9.925065759893586,
+    "hipTauFrac": 0.9999753904976793,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.241,
+     "hip_roll_l": 0.368,
+     "hip_yaw_l": 0.141
+    },
+    "supportTauFrac": 0.9999897403484392,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.405,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.056
+     },
+     "hip_yaw_r": {
+      "tau": 0.879,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.778,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.193
+     },
+     "ankle_roll_r": {
+      "tau": 0.928,
+      "satS": 0.006
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.06409234238539542
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05685819358368237,
+    "maxLeanDeg": 8.862565212534472,
+    "poseErrDeg": 16.302861804626925,
+    "worldErrDeg": 1.8717200179715268,
+    "kickAnkleZ": 0.8186684919517515,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5456260879239013,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.059,
+     "hip_roll_l": 0.239,
+     "hip_yaw_l": 0.067
+    },
+    "supportTauFrac": 0.6255688974538098,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.172,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.546,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.265,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.16,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.626,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.451,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05278474407984163,
+    "maxLeanDeg": 9.066921451255727,
+    "poseErrDeg": 15.695866002284285,
+    "worldErrDeg": 3.1330340305515136,
+    "kickAnkleZ": 0.8136658315062499,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5250432144187375,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.046,
+     "hip_roll_l": 0.233,
+     "hip_yaw_l": 0.262
+    },
+    "supportTauFrac": 0.6121417254829234,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.168,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.525,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.245,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.183,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.612,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.403,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.055531614152363476,
+    "maxLeanDeg": 8.706151977845167,
+    "poseErrDeg": 16.810649176990196,
+    "worldErrDeg": 2.222701022169905,
+    "kickAnkleZ": 0.8123514813203876,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5131823112054771,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.045,
+     "hip_roll_l": 0.225,
+     "hip_yaw_l": 0.089
+    },
+    "supportTauFrac": 0.5966326118601956,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.172,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.513,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.238,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.18,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.597,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.41,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.0581111660484348,
+    "maxLeanDeg": 8.111455129474255,
+    "poseErrDeg": 16.642228248346473,
+    "worldErrDeg": 3.7778147828584587,
+    "kickAnkleZ": 0.8045394193418334,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5336577188845328,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.129,
+     "hip_roll_l": 0.231,
+     "hip_yaw_l": 0.123
+    },
+    "supportTauFrac": 0.6345759750646621,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.16,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.534,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.256,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.193,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.635,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.442,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05498992879948045,
+    "maxLeanDeg": 9.761474998704394,
+    "poseErrDeg": 15.748562535981442,
+    "worldErrDeg": 2.6281674256726717,
+    "kickAnkleZ": 0.8243916474796534,
+    "plannedWorldErrDeg": 0.0367594838574262,
+    "plannedLeanDeg": 8.962986704259087,
+    "hipTauFrac": 0.5217615893459709,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.062,
+     "hip_roll_l": 0.232,
+     "hip_yaw_l": 0.122
+    },
+    "supportTauFrac": 0.8142575969669802,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.182,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.522,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.232,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.182,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.814,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.388,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.010497514359397475
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.050269453642248774,
+    "maxLeanDeg": 17.947125933752915,
+    "poseErrDeg": 23.898561742227308,
+    "worldErrDeg": 1.0974510002952997,
+    "kickAnkleZ": 1.2601619891457834,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.9648734433591327,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.059,
+     "hip_roll_l": 0.407,
+     "hip_yaw_l": 0.14
+    },
+    "supportTauFrac": 0.9648734433591327,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.322,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.965,
+      "satS": 0.037
+     },
+     "hip_yaw_r": {
+      "tau": 0.691,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.208,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.627,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.685,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04191288341140501,
+    "maxLeanDeg": 18.133277005317566,
+    "poseErrDeg": 23.313195198476997,
+    "worldErrDeg": 2.621087510288058,
+    "kickAnkleZ": 1.2539336408823698,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.9274644339718415,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.049,
+     "hip_roll_l": 0.381,
+     "hip_yaw_l": 0.262
+    },
+    "supportTauFrac": 0.9274644339718415,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.321,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.927,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.654,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.2,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.654,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.649,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.04433990892671491,
+    "maxLeanDeg": 18.095649490569198,
+    "poseErrDeg": 24.33713255828733,
+    "worldErrDeg": 1.9436071861931583,
+    "kickAnkleZ": 1.2510027553114624,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.8637153053001865,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.045,
+     "hip_roll_l": 0.343,
+     "hip_yaw_l": 0.118
+    },
+    "supportTauFrac": 0.8637153053001865,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.32,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.864,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.611,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.19,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.621,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.621,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.047815142961801914,
+    "maxLeanDeg": 17.104236607949712,
+    "poseErrDeg": 23.992178006722334,
+    "worldErrDeg": 2.9907742426827792,
+    "kickAnkleZ": 1.2472284448058506,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.9308149083364042,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.129,
+     "hip_roll_l": 0.374,
+     "hip_yaw_l": 0.128
+    },
+    "supportTauFrac": 0.9308149083364042,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.324,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.931,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.637,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.197,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.641,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.662,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.0440346180887691,
+    "maxLeanDeg": 19.21806245369983,
+    "poseErrDeg": 23.436823566156367,
+    "worldErrDeg": 2.2791081920738803,
+    "kickAnkleZ": 1.2627640606360069,
+    "plannedWorldErrDeg": 0.0422519208823323,
+    "plannedLeanDeg": 16.41673538978682,
+    "hipTauFrac": 0.9052876121904415,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.062,
+     "hip_roll_l": 0.373,
+     "hip_yaw_l": 0.126
+    },
+    "supportTauFrac": 0.9052876121904415,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.324,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.905,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.638,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.182,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.815,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.637,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.11279477923632107
+   }
+  ]
+ },
+ "PA": {
+  "front": [
+   {
+    "kick": "front",
+    "seed": 1,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.555,
+    "minMarginM": -0.0749085054776035,
+    "maxLeanDeg": 10.12635659045848,
+    "poseErrDeg": 19.475694979009223,
+    "worldErrDeg": 6.580496956717371,
+    "kickAnkleZ": 0.8319590477926117,
+    "plannedWorldErrDeg": 0.023431087759074452,
+    "plannedLeanDeg": 7.339386315145991,
+    "hipTauFrac": 0.9999798686333086,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.385,
+     "hip_roll_l": 0.389,
+     "hip_yaw_l": 0.121
+    },
+    "supportTauFrac": 0.9999798686333086,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.433,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.026
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.01
+     },
+     "knee_r": {
+      "tau": 1,
+      "satS": 0.006
+     },
+     "ankle_pitch_r": {
+      "tau": 0.993,
+      "satS": 0.006
+     },
+     "ankle_roll_r": {
+      "tau": 0.863,
+      "satS": 0.009
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.022041334478342202
+   },
+   {
+    "kick": "front",
+    "seed": 2,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.745,
+    "minMarginM": -0.08156327359669194,
+    "maxLeanDeg": 10.65786708555946,
+    "poseErrDeg": 17.897663739189348,
+    "worldErrDeg": 8.139586538446139,
+    "kickAnkleZ": 0.836614534265773,
+    "plannedWorldErrDeg": 0.023431087759074452,
+    "plannedLeanDeg": 7.339386315145991,
+    "hipTauFrac": 0.9999801882396832,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.391,
+     "hip_roll_l": 0.37,
+     "hip_yaw_l": 0.259
+    },
+    "supportTauFrac": 0.9999801882396832,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.44,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.024
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.009
+     },
+     "knee_r": {
+      "tau": 1,
+      "satS": 0.005
+     },
+     "ankle_pitch_r": {
+      "tau": 0.99,
+      "satS": 0.005
+     },
+     "ankle_roll_r": {
+      "tau": 0.881,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.022041334478342202
+   },
+   {
+    "kick": "front",
+    "seed": 3,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 5.545,
+    "minMarginM": -0.0719754743364969,
+    "maxLeanDeg": 9.434961327895625,
+    "poseErrDeg": 19.25387319719285,
+    "worldErrDeg": 5.059882060334081,
+    "kickAnkleZ": 0.8174822090595757,
+    "plannedWorldErrDeg": 0.023431087759074452,
+    "plannedLeanDeg": 7.339386315145991,
+    "hipTauFrac": 0.9999788265218081,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.381,
+     "hip_roll_l": 0.342,
+     "hip_yaw_l": 0.108
+    },
+    "supportTauFrac": 0.9999788265218081,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.434,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.021
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.005
+     },
+     "knee_r": {
+      "tau": 1,
+      "satS": 0.001
+     },
+     "ankle_pitch_r": {
+      "tau": 0.956,
+      "satS": 0.002
+     },
+     "ankle_roll_r": {
+      "tau": 0.889,
+      "satS": 0.006
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.022041334478342202
+   },
+   {
+    "kick": "front",
+    "seed": 4,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.915,
+    "minMarginM": -0.07371879935665207,
+    "maxLeanDeg": 10.164576081536879,
+    "poseErrDeg": 18.59844642493415,
+    "worldErrDeg": 5.485380853863912,
+    "kickAnkleZ": 0.8313542995868061,
+    "plannedWorldErrDeg": 0.023431087759074452,
+    "plannedLeanDeg": 7.339386315145991,
+    "hipTauFrac": 0.999979890716779,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.388,
+     "hip_roll_l": 0.373,
+     "hip_yaw_l": 0.119
+    },
+    "supportTauFrac": 0.999979890716779,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.437,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.024
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.009
+     },
+     "knee_r": {
+      "tau": 1,
+      "satS": 0.004
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.006
+     },
+     "ankle_roll_r": {
+      "tau": 0.88,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.022041334478342202
+   },
+   {
+    "kick": "front",
+    "seed": 5,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 4.965,
+    "minMarginM": -0.07916299520711903,
+    "maxLeanDeg": 10.160135873917339,
+    "poseErrDeg": 18.772200837063732,
+    "worldErrDeg": 8.509689603351687,
+    "kickAnkleZ": 0.8236250771064366,
+    "plannedWorldErrDeg": 0.023431087759074452,
+    "plannedLeanDeg": 7.339386315145991,
+    "hipTauFrac": 0.999978295043743,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.387,
+     "hip_roll_l": 0.377,
+     "hip_yaw_l": 0.12
+    },
+    "supportTauFrac": 0.999978295043743,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.436,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 1,
+      "satS": 0.027
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.008
+     },
+     "knee_r": {
+      "tau": 1,
+      "satS": 0.004
+     },
+     "ankle_pitch_r": {
+      "tau": 1,
+      "satS": 0.006
+     },
+     "ankle_roll_r": {
+      "tau": 0.886,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.022041334478342202
+   }
+  ],
+  "side": [
+   {
+    "kick": "side",
+    "seed": 1,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05797567385133494,
+    "maxLeanDeg": 8.037954286209505,
+    "poseErrDeg": 16.279425904512948,
+    "worldErrDeg": 2.0758980395105504,
+    "kickAnkleZ": 0.8170409407794037,
+    "plannedWorldErrDeg": 0.0239710589816184,
+    "plannedLeanDeg": 8.67201777701145,
+    "hipTauFrac": 0.43452137496679594,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.068,
+     "hip_roll_l": 0.19,
+     "hip_yaw_l": 0.066
+    },
+    "supportTauFrac": 0.43452137496679594,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.185,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.435,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.316,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.157,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.385,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.318,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.014376697907186094
+   },
+   {
+    "kick": "side",
+    "seed": 2,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05766360589679321,
+    "maxLeanDeg": 8.319151057735485,
+    "poseErrDeg": 15.665673123056882,
+    "worldErrDeg": 3.0416230355648812,
+    "kickAnkleZ": 0.8121359327966124,
+    "plannedWorldErrDeg": 0.0239710589816184,
+    "plannedLeanDeg": 8.67201777701145,
+    "hipTauFrac": 0.42711758038606057,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.048,
+     "hip_roll_l": 0.189,
+     "hip_yaw_l": 0.259
+    },
+    "supportTauFrac": 0.42711758038606057,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.18,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.427,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.31,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.186,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.42,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.284,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.014376697907186094
+   },
+   {
+    "kick": "side",
+    "seed": 3,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.059581077673983324,
+    "maxLeanDeg": 7.901229574474424,
+    "poseErrDeg": 16.781896778855902,
+    "worldErrDeg": 2.313864359318175,
+    "kickAnkleZ": 0.8119361916343543,
+    "plannedWorldErrDeg": 0.0239710589816184,
+    "plannedLeanDeg": 8.67201777701145,
+    "hipTauFrac": 0.43105005877506597,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.051,
+     "hip_roll_l": 0.188,
+     "hip_yaw_l": 0.093
+    },
+    "supportTauFrac": 0.43105005877506597,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.188,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.431,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.289,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.183,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.418,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.284,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.014376697907186094
+   },
+   {
+    "kick": "side",
+    "seed": 4,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05981664420032938,
+    "maxLeanDeg": 7.407522128736627,
+    "poseErrDeg": 16.608713056887705,
+    "worldErrDeg": 3.767190713040851,
+    "kickAnkleZ": 0.803457522694509,
+    "plannedWorldErrDeg": 0.0239710589816184,
+    "plannedLeanDeg": 8.67201777701145,
+    "hipTauFrac": 0.435162778268718,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.138,
+     "hip_roll_l": 0.188,
+     "hip_yaw_l": 0.119
+    },
+    "supportTauFrac": 0.435162778268718,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.179,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.435,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.304,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.198,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.381,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.298,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.014376697907186094
+   },
+   {
+    "kick": "side",
+    "seed": 5,
+    "ok": true,
+    "why": "",
+    "failAtS": null,
+    "minMarginM": 0.05950759687678042,
+    "maxLeanDeg": 8.886422219039988,
+    "poseErrDeg": 15.72416276346227,
+    "worldErrDeg": 2.466582888554655,
+    "kickAnkleZ": 0.8224231933361804,
+    "plannedWorldErrDeg": 0.0239710589816184,
+    "plannedLeanDeg": 8.67201777701145,
+    "hipTauFrac": 0.43119923162925194,
+    "hipWorst": "hip_roll_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.053,
+     "hip_roll_l": 0.189,
+     "hip_yaw_l": 0.12
+    },
+    "supportTauFrac": 0.5301986679620901,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.196,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.431,
+      "satS": 0
+     },
+     "hip_yaw_r": {
+      "tau": 0.297,
+      "satS": 0
+     },
+     "knee_r": {
+      "tau": 0.182,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.53,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.275,
+      "satS": 0
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.014376697907186094
+   }
+  ],
+  "high_side": [
+   {
+    "kick": "high_side",
+    "seed": 1,
+    "ok": false,
+    "why": "support foot rolled over (hold)",
+    "failAtS": 3.59,
+    "minMarginM": -0.08007594831391304,
+    "maxLeanDeg": 21.534164751495044,
+    "poseErrDeg": 24.705458703869255,
+    "worldErrDeg": 5.017873996955383,
+    "kickAnkleZ": 1.328635868928482,
+    "plannedWorldErrDeg": 0.03982898656979548,
+    "plannedLeanDeg": 16.374834033244003,
+    "hipTauFrac": 0.9999689468487584,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.107,
+     "hip_roll_l": 0.461,
+     "hip_yaw_l": 0.141
+    },
+    "supportTauFrac": 0.9999689468487584,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.334,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.989,
+      "satS": 0.122
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.014
+     },
+     "knee_r": {
+      "tau": 0.635,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.887,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.865,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.12482977217573654
+   },
+   {
+    "kick": "high_side",
+    "seed": 2,
+    "ok": false,
+    "why": "support foot rolled over (settle)",
+    "failAtS": 3.4450000000000003,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 0.03982898656979548,
+    "plannedLeanDeg": 16.374834033244003,
+    "hipTauFrac": 0.9999695594442973,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.092,
+     "hip_roll_l": 0.44,
+     "hip_yaw_l": 0.259
+    },
+    "supportTauFrac": 0.9999695594442973,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.317,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.984,
+      "satS": 0.121
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.014
+     },
+     "knee_r": {
+      "tau": 0.645,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.886,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.888,
+      "satS": 0.008
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.12482977217573654
+   },
+   {
+    "kick": "high_side",
+    "seed": 3,
+    "ok": false,
+    "why": "support foot rolled over (settle)",
+    "failAtS": 4.76,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 0.03982898656979548,
+    "plannedLeanDeg": 16.374834033244003,
+    "hipTauFrac": 0.999970540296493,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.068,
+     "hip_roll_l": 0.405,
+     "hip_yaw_l": 0.131
+    },
+    "supportTauFrac": 0.999970540296493,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.342,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.977,
+      "satS": 0.105
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.014
+     },
+     "knee_r": {
+      "tau": 0.628,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.853,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.874,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.12482977217573654
+   },
+   {
+    "kick": "high_side",
+    "seed": 4,
+    "ok": false,
+    "why": "support foot rolled over (settle)",
+    "failAtS": 3.465,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 0.03982898656979548,
+    "plannedLeanDeg": 16.374834033244003,
+    "hipTauFrac": 0.9999694725991726,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.138,
+     "hip_roll_l": 0.432,
+     "hip_yaw_l": 0.135
+    },
+    "supportTauFrac": 0.9999694725991726,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.34,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.984,
+      "satS": 0.122
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.014
+     },
+     "knee_r": {
+      "tau": 0.64,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.887,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.875,
+      "satS": 0.007
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.12482977217573654
+   },
+   {
+    "kick": "high_side",
+    "seed": 5,
+    "ok": false,
+    "why": "support foot rolled over (settle)",
+    "failAtS": 4.57,
+    "minMarginM": null,
+    "maxLeanDeg": 0,
+    "poseErrDeg": null,
+    "worldErrDeg": null,
+    "kickAnkleZ": null,
+    "plannedWorldErrDeg": 0.03982898656979548,
+    "plannedLeanDeg": 16.374834033244003,
+    "hipTauFrac": 0.999969846118899,
+    "hipWorst": "hip_yaw_r",
+    "kickHipTauFrac": {
+     "hip_pitch_l": 0.083,
+     "hip_roll_l": 0.429,
+     "hip_yaw_l": 0.135
+    },
+    "supportTauFrac": 0.999969846118899,
+    "ankleStopS": 0,
+    "supportPeaks": {
+     "hip_pitch_r": {
+      "tau": 0.335,
+      "satS": 0
+     },
+     "hip_roll_r": {
+      "tau": 0.982,
+      "satS": 0.12
+     },
+     "hip_yaw_r": {
+      "tau": 1,
+      "satS": 0.014
+     },
+     "knee_r": {
+      "tau": 0.671,
+      "satS": 0
+     },
+     "ankle_pitch_r": {
+      "tau": 0.912,
+      "satS": 0
+     },
+     "ankle_roll_r": {
+      "tau": 0.9,
+      "satS": 0.009
+     }
+    },
+    "derated": [],
+    "planComErrMm": 0.12482977217573654
+   }
+  ]
+ }
+}

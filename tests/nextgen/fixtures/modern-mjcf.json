@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "writtenAt": "2026-10-20T18:15:53.977Z",
+    "gitHead": "92a0259",
+    "source": {
+      "sha256": "4dddc86892d4b68fa39d699229d43ad42c475a7675f4b0e0e43b8158020f448f",
+      "files": 133
+    }
+  },
+  "designs": {
+    "firecracker/0": {
+      "sha256": "98266bad2c99321c03234c3af0afbcd440c56a045f4494e5150f190d45d1330a",
+      "length": 12342,
+      "totalMassKg": 37.95555759402934,
+      "runtimeSha256": "2cab067eff26ab8666f07b7b38db636b57f883de3813a85b42b4e5b02c7f2935"
+    },
+    "firecracker/1": {
+      "sha256": "9efacebaec969db3d5f0d7a5a42f13891a547e0a22c0767ec327db46c005acc5",
+      "length": 12341,
+      "totalMassKg": 37.95555759402934,
+      "runtimeSha256": "2cab067eff26ab8666f07b7b38db636b57f883de3813a85b42b4e5b02c7f2935"
+    },
+    "savate/0": {
+      "sha256": "32a46cc9d3a8fbfca78e8a8992c71c6df4b95ed32ce1386b08d20abc5793c523",
+      "length": 12450,
+      "totalMassKg": 82.93849524855389,
+      "runtimeSha256": "d115af9d448179ebfb1a3a0c43cb39223489bfa0cf83a169b55ed28d7c81b048"
+    },
+    "savate/1": {
+      "sha256": "df04bb5ec51b39f08d76eb3d671b6c793351de1b91eae17be3956da72f01957b",
+      "length": 12449,
+      "totalMassKg": 82.93849524855389,
+      "runtimeSha256": "d115af9d448179ebfb1a3a0c43cb39223489bfa0cf83a169b55ed28d7c81b048"
+    },
+    "haymaker/0": {
+      "sha256": "6886891d5123a732073f9a7e276dbd365be7512d80d1a86c70867cd44fd2121f",
+      "length": 12466,
+      "totalMassKg": 105.37732672112149,
+      "runtimeSha256": "bcf99fdf0bd30e82378035a5fde66bb27ed1402ec8bbb753ea6e871f1d556377"
+    },
+    "haymaker/1": {
+      "sha256": "147fc35fcebe9ab30251a07036a2f4634f2565ca749fbad4cb72987e8b322887",
+      "length": 12465,
+      "totalMassKg": 105.37732672112149,
+      "runtimeSha256": "bcf99fdf0bd30e82378035a5fde66bb27ed1402ec8bbb753ea6e871f1d556377"
+    },
+    "pylon/0": {
+      "sha256": "da7c6a1e369331b9d5af8fa6bfdc9229c1bc2542b04ebfffc02de3ba0ba26fcb",
+      "length": 12405,
+      "totalMassKg": 79.56211052902492,
+      "runtimeSha256": "1602794e7f5a83845eb9a58e32429207fce55eb1c95765a8fa270c3cbb1dafef"
+    },
+    "pylon/1": {
+      "sha256": "3505471365574b81cf58dc5f0fbc6a0606b2cc525102898fada60017f4b5f79a",
+      "length": 12404,
+      "totalMassKg": 79.56211052902492,
+      "runtimeSha256": "1602794e7f5a83845eb9a58e32429207fce55eb1c95765a8fa270c3cbb1dafef"
+    }
+  }
+}

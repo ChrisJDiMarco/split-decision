@@ -381,3 +381,210 @@ Gate:
 7. **Ankles.** Stay inside real robots (±39° pitch, −20…+17° roll, much narrower than the modern four), or keep them wider as a labelled departure if Phase 0 shows they saturate?
 8. **Option 2 acceptable?** If Phase 0 shows the new hip order doesn't pay off in physics, are you happy with NEXT GEN on today's joint order (wide ranges, lighter legs, graded drives, new looks), or is the T800-style hip the whole point for you?
 9. **Get-up bar.** The pass line is now URKL's 3 s, with EngineAI's ~1.6 s as the real reference we don't try to beat. OK?
+
+## 9. Phase 0 results (2026-10-20)
+
+Ran on 2026-10-20 (Chris: no need to wait for overnight), during the balance engine's P3 build, so it does **not** test on the new balance: every variant gets the same simple scripted controller instead (below). Hip decision unchanged (Option 1, decided). This section is the baseline, the tuning advice and the regression lock.
+
+### 9.1 What was built
+
+- **Regression lock** (`tests/nextgen/`), written from a clean export of HEAD `92a0259`:
+  - `fixtures/modern-mjcf.json`: sha256 of the compiled MJCF for the modern four, both corners, at the iron-age fixture's placement, plus a hash of the runtime fields outside the MJCF (stance, root height, gyro, abilities). The iron three keep `tests/roster/fixtures/iron-age-baseline.json`.
+  - `fixtures/behaviour-golden.json`: all seven, a fixed-seed 10.1 s trace on the real systems (gantry drop, stand, a side shove, a jab at a standing BRUISER, recovery), robot 0's qpos hashed every 50 ms. Deterministic run to run and across `tsx` / `vitest`.
+  - Check: `npx vitest run tests/nextgen/lock.test.ts` (~10 s). Regenerate, only for a deliberate change to the existing seven: `npx tsx tests/nextgen/regenerate.ts --check | --mjcf | --behaviour` (the header shows how to lock HEAD while other builds have edits in `src/`).
+  - **State today:** the working tree fails 14 of 15 checks, by design. The balance build's uncommitted strike-pass actuator swaps (elbows `rs06x2`, shoulder pitch `ake90`, waist yaw `ake90x2`, HAYMAKER hips `ake90x3`) and its control edits change the modern four's MJCF and all behaviour traces but GOLIATH's. These are Chris-approved changes, not NEXT GEN damage. Regenerate the fixtures when that build commits, before NEXT GEN Phase 1 starts.
+- **Variant builder** (`tools/nextgen/variants.ts`): in memory only, no file in `src/` changed. It starts from SAVATE frozen at `92a0259` (`savate-base.ts`; the strike-pass swaps touch only the arms and waist yaw, not the legs). Variants: **A** stock, **R** + §3 ranges, **M** + drive mass moved (hip drums at the pelvis and hip centre, knee drive at the knee, ankle drives 0.45-0.63 of the shin above the ankle, by T800 placement), **O** + T800 hip (pitch about (0, cos 15°, ∓sin 15°) → roll → thigh yaw on two link bodies, drums apart, axes meeting at one hip centre, §4.1), **P** + PINWHEEL drives (§2), **P′** + Q300HL armature 0.2427 kg·m² on hip pitch and knee. **P+ak** is a probe added after the first holds: P with AKE90-8 ankles (170 N·m, 1.40 kg) in place of RS04 (120 N·m, 1.42 kg).
+  - Relocated mass: massless clones of the catalog motors (same torque, speed and heat model) plus a small dense sphere carrying each motor's catalog mass at its drum. M and O carry equal mass at equal sites.
+  - `tools/nextgen/check.ts` proves several things. Variant A compiles to the locked SAVATE MJCF. The hip FK in the tools matches MuJoCo to 1e-5° for both layouts. The tilted right leg mirrors the left exactly.
+  - **§4.2 closed-form IK confirmed:** pre-multiply by Rx(±15°), decompose YXZ, subtract ±15° from roll. It round-trips at 3e-8 rad on random poses, both sides (`hipik.ts ikHip`). That is the Phase 1 gate check, done early.
+- **Measurements** (`tools/nextgen/`):
+  - `static.ts`: mass, swing inertia, IK fits, reach, pivot fits, gimbal margin.
+  - `run.ts gantry | knee | hold | pivot | getup`.
+  - `report.ts`: these tables.
+  - `ranges-sweep.ts`: range sensitivity.
+  - `probe-ankle.ts`, `probe-yaw.ts`.
+  - `getup-replay.ts`: replays the recorded get-up winners on the same seeds and logs ankle-stop time (added in verification).
+  - Raw results are in `tools/nextgen/out/`.
+- **The controller every variant shares (honest limits):**
+  - No gyro and no production controller.
+  - Motor model on: torque-speed line, heat, battery sag, thermal derate.
+  - Holds and pivots use a kinematic whole-body planner plus one COM law. The law corrects ankle pitch/roll first, then hip pitch/roll, through the COM Jacobian; `balance.ts`.
+  - Get-ups play SAVATE's best mocap get-up clip through each variant's own hip and ranges, with 8 playback numbers cross-entropy searched on the same budget.
+  - Differences of ±1 seed in 5 are within this controller's noise. The balance engine will move every absolute number.
+
+### 9.2 The tables
+
+**Body.** Mass and leg swing inertia about each joint axis (leg straight; MuJoCo body inertias plus parallel axis), with each drive's armature.
+
+| Variant | Total kg | Leg kg (drives) | Foot kg | I hip pitch | I hip roll | I knee | Armature pitch / knee |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 82.9 | 21.5 (17.4) | 6.30 | 6.74 | 6.70 | 1.52 | 0.049 / 0.049 |
+| R | 82.9 | 21.5 (17.4) | 6.30 | 6.74 | 6.70 | 1.52 | 0.049 / 0.049 |
+| M | 82.9 | 18.6 (17.4) | 0.50 | 3.41 | 3.40 | 0.36 | 0.049 / 0.049 |
+| O | 82.9 | 18.6 (17.4) | 0.50 | 3.18 | 3.40 | 0.36 | 0.049 / 0.049 |
+| P | 80.0 | 15.6 (15.9) | 0.50 | 2.44 | 2.61 | 0.26 | 0.064 / 0.064 |
+| P′ | 80.0 | 15.6 (15.9) | 0.50 | 2.44 | 2.61 | 0.26 | 0.243 / 0.243 |
+| P+ak | 79.9 | 15.6 (15.9) | 0.50 | 2.43 | 2.59 | 0.26 | 0.064 / 0.064 |
+
+**Kick poses by IK** (thigh-direction error + knee-axis error at the variant's own ranges, pelvis upright), the hip's smallest Jacobian singular value along a straight joint path from the stance (1 = clean, 0 = gimbal lock), and the highest thigh elevation that still fits within 10° (ankle height with a straight leg).
+
+| Variant | Front | Side | High side | Roundhouse | σmin side path | Front reach | Side reach | Roundhouse reach |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 0.0° | 93.8° | 123.0° | 20.0° | 0.25 | 65° · 1.62 m | none | none |
+| R | 0.0° | 41.3° | 70.7° | 0.0° | 0.98 | 70° · 1.65 m | none | 22.5° · 1.20 m |
+| M | 0.0° | 41.3° | 70.7° | 0.0° | 0.98 | 70° · 1.65 m | none | 22.5° · 1.20 m |
+| O | 0.0° | 4.9° | 16.8° | 19.3° | 0.02 | 70° · 1.65 m | 20° · 1.17 m | none |
+| P | 0.0° | 4.9° | 16.8° | 19.3° | 0.02 | 70° · 1.65 m | 20° · 1.17 m | none |
+| P′ | 0.0° | 4.9° | 16.8° | 19.3° | 0.02 | 70° · 1.65 m | 20° · 1.17 m | none |
+| P+ak | 0.0° | 4.9° | 16.8° | 19.3° | 0.02 | 70° · 1.65 m | 20° · 1.17 m | none |
+
+**Gantry reach** (pelvis on the gantry, the left leg stepped from stance to the IK fit; servo and motor model as in the game). t90 = time to cover 90% of the thigh's swing; error = final pose vs the target (includes the IK miss).
+
+| Variant | Front t90 / err | Side t90 / err | High side t90 / err | Roundhouse t90 / err | Peak ω/ω₀ |
+| --- | --- | --- | --- | --- | --- |
+| A | 277 ms / 1.2° | 235 ms / 94.1° | 238 ms / 123.1° | 165 ms / 20.6° | 0.72 |
+| R | 277 ms / 1.2° | 261 ms / 42.3° | 265 ms / 71.7° | 279 ms / 0.6° | 0.96 |
+| M | 201 ms / 0.8° | 205 ms / 41.9° | 207 ms / 71.3° | 237 ms / 0.6° | 0.98 |
+| O | 200 ms / 0.8° | 213 ms / 5.0° | 239 ms / 17.4° | 227 ms / 19.3° | 0.94 |
+| P | 160 ms / 0.5° | 193 ms / 5.0° | 216 ms / 17.2° | 220 ms / 19.3° | 0.90 |
+| P′ | 163 ms / 0.5° | 193 ms / 5.0° | 216 ms / 17.3° | 220 ms / 19.3° | 0.90 |
+| P+ak | 160 ms / 0.5° | 193 ms / 5.0° | 215 ms / 17.2° | 219 ms / 19.3° | 0.90 |
+
+**Knee snap** (gantry, thigh level forward, knee stepped from 90° to straight): where reflected armature shows, because the shin alone is light.
+
+| Variant | t90 | Peak knee speed | No-load |
+| --- | --- | --- | --- |
+| A | 165 ms | 14.5 rad/s | 22.0 rad/s |
+| R | 165 ms | 14.5 rad/s | 22.0 rad/s |
+| M | 129 ms | 17.6 rad/s | 22.0 rad/s |
+| O | 129 ms | 17.6 rad/s | 22.0 rad/s |
+| P | 121 ms | 19.8 rad/s | 22.0 rad/s |
+| P′ | 126 ms | 19.1 rad/s | 22.0 rad/s |
+| P+ak | 121 ms | 19.8 rad/s | 22.0 rad/s |
+
+**One-leg hold, 1 s, 5 seeds** (free on the canvas; same planner and COM balance law for every variant; the planner may lean the torso, at a price). Held = no fall, no touch-down, no support-foot roll, no thermal derate. Lean and world error are medians over the seeds that held (the planned value when none held). Support τ = peak |τ|/stall on the support leg.
+
+| Variant | Front: held · lean · err | Side: held · lean · err | High side: held · lean · err · ankle z | Peak support τ/stall |
+| --- | --- | --- | --- | --- |
+| A | 5/5 · 5° · 3.3° | 0/5 · 43° (plan) · 2.1° | 0/5 · 62° (plan) · 3.8° | 1.00 |
+| R | 5/5 · 11° · 3.6° | 2/5 · 29° · 5.5° | 2/5 · 52° · 18.0° · 1.21 m | 1.00 |
+| M | 5/5 · 16° · 2.7° | 5/5 · 25° · 7.4° | 4/5 · 51° · 16.8° · 1.16 m | 1.00 |
+| O | 5/5 · 10° · 1.9° | 5/5 · 11° · 2.6° | 5/5 · 18° · 2.4° · 1.27 m | 0.69 |
+| P | 3/5 · 12° · 2.5° | 5/5 · 9° · 2.6° | 5/5 · 18° · 2.3° · 1.25 m | 1.00 |
+| P′ | 3/5 · 12° · 2.6° | 5/5 · 9° · 2.6° | 5/5 · 18° · 2.3° · 1.25 m | 1.00 |
+| P+ak | 0/5 · 7° (plan) · 0.0° | 5/5 · 8° · 2.5° | 0/5 · 16° (plan) · 0.0° | 1.00 |
+
+**Crouched 180° pivot** over the left foot, welded where it sits at qpos0, 1.5 s, whole-body plan. Hip IK = the hip alone with the pelvis level; final = measured pelvis orientation error after the turn.
+
+**Read this table as kinematics, not as a physical pivot.** The weld holds the foot 8 mm *above* the canvas, so it carries the robot's whole weight and every tipping moment. The verifier added a centre-of-pressure probe (`tests-pivot.ts` `CopProbe`: the total ground wrench the robot needs, from MuJoCo's `cfrc_ext` / `cfrc_int`, validated on a free stand where the CoP stays inside the feet). "CoP off sole" is how long (of the 2.0 s logged) and how far the CoP the turn needs lies outside the sole box. There, a real, unwelded foot would roll. "pull" means the weld had to pull the foot down. **Every variant needs an off-sole CoP for 0.3-0.5 s**, so no variant's pivot is physically achievable as scripted. The plan-level numbers (hip IK error, final error, hip travel) stand. The torque and saturation columns are weld-assisted and say nothing about drive ratings.
+
+| Variant | 30° crouch: hip IK · final · turn | 50° crouch: hip IK · final · turn | Hip travel (P / R / Y) at 50° | Peak τ/stall (worst), weld-assisted | CoP off sole 30° / 50° |
+| --- | --- | --- | --- | --- | --- |
+| A | 99.1° · 79.5° · 133° | 110.0° · 87.5° · 104° | 59° / 28° / 70° | 1.00 (ankle_roll_l) | 1.26 s · pull / 1.32 s · pull |
+| R | 0.0° · 1.4° · 180° | 0.0° · 1.5° · 180° | 45° / 27° / 180° | 0.81 (hip_roll_l) | 0.42 s · 48 cm / 0.40 s · 26 cm |
+| M | 0.0° · 1.4° · 180° | 0.0° · 1.4° · 180° | 41° / 25° / 180° | 0.74 (knee_l) | 0.37 s · 12 cm / 0.38 s · 13 cm |
+| O | 7.4° · 3.5° · 178° | 11.4° · 3.5° · 178° | 86° / 30° / 182° | 0.87 (knee_l) | 0.41 s · 14 cm / 0.54 s · 58 cm |
+| P | 7.4° · 3.6° · 177° | 11.4° · 3.9° · 178° | 89° / 31° / 181° | 1.00 (ankle_roll_l) | 0.30 s · 7 cm / 0.47 s · 60 cm |
+| P′ | 7.4° · 3.6° · 177° | 11.4° · 3.9° · 178° | 89° / 31° / 181° | 1.00 (ankle_roll_l) | 0.30 s · 7 cm / 0.47 s · 59 cm |
+| P+ak | 7.4° · 3.8° · 177° | 11.4° · 3.9° · 177° | 88° / 30° / 181° | 0.78 (ankle_roll_l) | 0.33 s · 5 cm / 0.52 s · 32 cm |
+
+**Get-ups, 5 seeds** (SAVATE's best mocap get-up clip through each variant's hip and ranges, eight playback numbers searched with the same budget, then the winner dropped 5 times). Time is from the first movement to the stand gate. Ankle on a stop = median seconds the most-pinned ankle joint spends within 1° of a range stop. The verifier logged it with `getup-replay.ts`, which replays the recorded winners and reproduces every time in this table exactly.
+
+| Variant | Back: up · median · best | Face down: up · median · best | Ankle on a stop, back / face down | Peak τ/stall | Peak ω/ω₀ | Peak temp | Derate |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 5/5 · 3.14 s · 3.06 s | 5/5 · 2.50 s · 2.42 s | 0.72 s / 0.02 s | 1.00 | 0.61 | 34.5 °C | none |
+| R | 4/5 · 3.52 s · 3.41 s | 3/5 · 3.35 s · 3.27 s | 2.15 s / 0.40 s | 1.00 | 1.02 | 39.8 °C | none |
+| M | 5/5 · 4.64 s · 4.50 s | 5/5 · 2.85 s · 2.73 s | 3.01 s / 0.50 s | 1.00 | 0.54 | 35.1 °C | none |
+| O | 5/5 · 4.53 s · 4.40 s | 4/5 · 2.56 s · 2.51 s | 2.92 s / 0.31 s | 1.00 | 0.69 | 37.2 °C | none |
+| P | 5/5 · 4.30 s · 4.17 s | 5/5 · 2.57 s · 2.50 s | 2.48 s / 0.46 s | 1.00 | 0.53 | 35.9 °C | none |
+| P′ | 5/5 · 3.85 s · 3.74 s | 4/5 · 2.74 s · 2.67 s | 2.20 s / 0.38 s | 1.00 | 0.59 | 38.7 °C | none |
+| P+ak | 5/5 · 4.36 s · 4.06 s | 5/5 · 2.74 s · 2.65 s | 2.49 s / 0.37 s | 1.00 | 0.53 | 35.9 °C | none |
+
+**Range sensitivity of the tilted hip** (static IK fit, `ranges-sweep.ts`):
+
+| Ranges | Side | High side | Roundhouse turnover |
+|---|---|---|---|
+| §3 proposal (roll −30…110, yaw −80…180) | 4.9° | 16.8° | 19.3° |
+| yaw −90…180 | 0.0° | 10.0° | 19.3° |
+| roll −30…118, yaw −90…180 | 0.0° | **2.0°** | 19.0° |
+| roll −30…125, yaw −100…180 | 0.0° | 0.0° | 10.8° |
+| pitch extension +90 | 4.9° | 16.8° | 13.0° |
+
+### 9.3 What each upgrade buys
+
+- **Ranges (A → R): pivots, and nothing else on their own.**
+  - The crouched 180° pivot goes from impossible (80-88° error; A's COM drifts up to 33 cm off the foot and the weld has to pull the foot down) to 1.4°. That is the kinematic result. Physically, the scripted 1.5 s turn needs an off-sole CoP on every variant (pivot table).
+  - The side kick improves on paper (94° → 41°), but R still can't hold it: 2/5, with 29° of lean.
+  - The front kick and gantry speed don't change.
+  - **The §3 ankles cost the get-up from the back.** The stock clip asks for more ankle than ±39° / −20…+17° allow, so the ankles sit on a stop 2.2 s per get-up (A: 0.7 s), and the back get-up slows from 3.14 to 3.52 s (4/5).
+- **Mass placement (R → M): the speed win.** It belongs in all three designs.
+  - Leg swing inertia drops 49% about hip pitch (6.74 → 3.41 kg·m²) and 76% about the knee (1.52 → 0.36). The foot goes from 6.3 kg to 0.5 kg.
+  - The gantry front kick reaches 90% in 201 ms instead of 277 (−27%), the side swing in 205 ms instead of 261. The knee snap takes 129 ms instead of 165, with peak knee speed 17.6 rad/s instead of 14.5.
+  - It also lets the stock hip *fake* side kicks: 5/5 side holds at 25° of lean and 7° world error. It still misses the high side kick by 17° at 51° of lean.
+  - Cost: from the back, the mocap get-up got slower (3.5 → 4.6 s), and its ankles sit on a stop for 3.0 s instead of 2.2 s. INFERRED, not isolated: the heavy feet were a counterweight that clip relies on, and the narrow ankles pin harder without it. Expect get-ups to need re-tuning, not to come free.
+- **Hip order (M → O): real side kicks, at a price elsewhere.** It confirms Chris's call in physics.
+  - Side kick: holds 5/5 at 11° lean and 2.6° world error (M: 25° and 7.4°). Hip-relative fit 4.9° (M 41°), gantry 5.0° (M 41.9°).
+  - High side kick: 5/5 at 18° lean, 2.4° error, ankle at 1.27 m (M: 4/5, 51°, 17°).
+  - The support leg works less: peak 0.69 of stall, against 1.00 on M.
+  - §6's pass line literally reads "M misses by more than 30° or falls". M misses by 42° on the gantry but doesn't fall in the hold; it fakes the kick with lean. The meaningful metric is lean and world error, and on those O wins clearly.
+  - **Roundhouse turnover is worse:** a 19° fit against 0° (the stock solution sits exactly on its gimbal lock).
+  - **The crouched pivot costs hip travel:** the hip alone is 7-11° short. The whole-body plan makes it up, ending 3.5° off with hip pitch travelling 86° (M 41°). This is a kinematic result: the welded run needs an off-sole CoP on M and O alike.
+  - **Gimbal lock is real:** a straight joint-space path from the stance to the side kick crosses roll 75° (σmin 0.02).
+  - Gantry speed is unchanged.
+  - Get-ups with the stock-retargeted clip: about the same from the back (4.5 s, M 4.6 s), better face down (2.56 s, M 2.85 s).
+- **PINWHEEL drives (O → P): faster, 2.9 kg lighter, ankles marginal.**
+  - Gantry front kick 160 ms (O 200), side 193 ms (O 213), knee snap 121 ms at 19.8 of 22 rad/s.
+  - Side and high-side holds 5/5, as O. The front-kick hold drops to 3/5.
+  - The RS04 ankle roll hits stall in the welded pivot, but only in the 50° crouch, where the turn needs a CoP up to 60 cm off the sole. A real foot would roll first, so this says nothing about the ankle drive.
+  - The probes say the front-kick misses are this controller's margin, not a drive rating: AKE90 ankles (with either gain) and a twin-AKE90 hip yaw don't fix them. The AKE90-ankle probe (P+ak) was **worse** in the holds: front 0/5 and high side 0/5, against P's 3/5 and 5/5 (both fail as "support foot rolled over").
+  - Get-ups: back 4.3 s, face down 2.57 s, all 5/5.
+  - The saturating joints in get-ups are mostly the arms and the waist pitch (SAVATE's RS03 elbows and RS04 waist: up to 1.0 s at the clamp per get-up). P's new leg drives touch the clamp for at most 0.06 s from the back; face down, the left ankle pitch does for 0.33 s. (The verifier's per-joint count; the recorder's single "worst joint" breaks ties by joint order, so it under-reports legs.)
+- **Armature (P → P′): small.**
+  - Knee snap 126 ms against 121 (peak 19.1 against 19.8 rad/s). Gantry kicks +2%. Holds identical.
+  - The get-up from the back came out faster (3.85 s), within the search's noise.
+  - CubeMars' published AKE90 rotor inertia is in the catalog (3377 g·cm² × 8² = 0.0216 kg·m² per module, 0.065 for the triple stack). Our 0.02 + 0.01 × mass formula gives 0.064, so **P already carries real-hardware reflected armature for its stacks**. P′ is EngineAI's Q300HL class, about 4× more, and it doesn't change any decision.
+- **Honesty audit.**
+  - No result above stall torque: the motor model clamps every actuator to stall × speed × heat × battery every step. "1.00" means saturated at that clamp. Every gantry step saturates by design; holds and pivots name the joints that touch it.
+  - No run reached a thermal derate band. The hottest winding was 39.8 °C against derate at 100 °C.
+  - Peak speed stayed at or under no-load, except one R face-down drop at 1.02. Above no-load the motor model gives no driving torque, so the joint was being back-driven by the body, not driven.
+  - The NEXT GEN ankles (±39° / −20…+17°) never sat on their stops in a hold (0.00 s within 1° of a stop). **They do in get-ups:** 2.2-3.0 s of every back get-up and 0.3-0.5 s face down, against 0.7 s / 0.02 s on stock A's ±60° / ±40°. Open question 7 is therefore **not** answered. Holds don't need wider ankles, but the stock clip's get-up does. Decide after a layout-specific get-up exists (Phase 2), not before.
+  - **The pivot is weld-assisted.** Its foot hangs 8 mm above the canvas on the weld, and every variant needs an off-sole CoP for 0.3-0.5 s. Its torque peaks are not drive evidence; its kinematic numbers stand.
+  - No get-up beat 2.4 s, so none needed the EngineAI-reference audit.
+  - The 3 s URKL bar (≥ 4/5 seeds): **from the back, no variant passes.** Stock A is closest at a 3.14 s median, and the NEXT GEN variants take 3.5-4.6 s with a stock-retargeted clip. Face down, every variant passes (2.5-2.9 s) except R (3/5, 3.35 s). A get-up designed for the layout (Phase 2's `getup-search`) is still to come.
+
+### 9.4 Recommendations for PINWHEEL, JACKKNIFE and CAPSTAN
+
+- **Ranges.** Take §3 with two changes, both inside real robots:
+  - **Hip yaw −90…+180** (internal limit −80 → −90; PM01 is −90, G1 and H2 about ±160). The side kick then fits exactly.
+  - **Hip roll −30…+118** (the T800 base value). The high side kick fit goes from 16.8° to 2.0°.
+  - Keep the §3 knee and waist. Keep the §3 ankles for now, as the honest default. They are fine for holds but pinned for 2-3 s in every back get-up with the stock clip, so open question 7 is decided after Phase 2's layout-specific get-up, not by Phase 0.
+  - The Phase 2 shell sweep still sets the final clamps. Roll 118° sits past the 75° lock, so the kick skill must route around it (below).
+- **Mass placement.** Adopt it on all three, exactly as built here: pitch drum in the pelvis, roll drum in front of the hip centre, yaw drum ~7 cm down the thigh, knee drive at the knee, ankle drives high on the shin. It is the largest single gain in leg speed, and it is free in torque.
+- **Drives.** Use the PINWHEEL ladder as proposed for the hip and knee; nothing in Phase 0 asks for more.
+  - Ankles: **keep the RS04 pair for now; Phase 0 does not support a swap.** AKE90-8 is the same mass (1.40 vs 1.42 kg), with 170 vs 120 N·m and 22 vs 20.9 rad/s, so it remains a candidate. But the only evidence for it was the RS04 roll saturating in the pivot, and that pivot is weld-assisted: the CoP leaves the sole by up to 60 cm. In the free holds, P+ak was worse than P (front 0/5 vs 3/5, high side 0/5 vs 5/5). Re-test the swap on the balance engine in Phase 1 with an unwelded pivot.
+  - JACKKNIFE's AK10 ankles (53 N·m) were not tested and need the same pivot check in Phase 3.
+  - CAPSTAN's twin-AKE90 yaw stays as its signature; the probe found no hold or pivot that needs it on PINWHEEL.
+  - Waist pitch: P's RS04 waist pitch and SAVATE-class arms are what saturate in get-ups. Give NEXT GEN an AKE90 waist pitch, matching the waist yaw.
+- **Armature.** Keep the formula: it already matches CubeMars' published rotor inertia for the AKE90 stacks. Don't import EngineAI's 0.243.
+- **JACKKNIFE and CAPSTAN** were not built here. Everything above is measured on a SAVATE-sized body (83 kg, 1.73 m). The order and mass results are geometric and will carry over. The drive and get-up numbers must be re-measured on each design in Phase 3.
+
+### 9.5 What should change in the plan
+
+1. **§6's side-kick pass line** should judge torso lean and world-frame pose error, not falls. With mass moved, the stock hip holds a 25°-lean fake.
+2. **The kick skill must avoid the roll-75° lock.** A straight joint path from the stance to the side kick passes σmin 0.02. Phase 1 needs either damped IK or a planned path (raise in flexion first, then roll out). Add a "σmin along each kick path > 0.2" test next to the IK round-trip test.
+3. **Turned-over roundhouses are PINWHEEL's style, but the tilted hip fits the turnover 19° worse** than the old order. Plan for waist yaw and a pivot of the support foot to carry the turnover. Hip yaw −100 halves the fit error, if the shell allows it.
+4. **Get-ups need layout-specific references.** Stock-retargeted clips through the tilted hip are slower from the back (3.9-4.6 s). Phase 2 should run `getup-search` on a T800-style tuck reference (10 §6.1) before judging the 3 s bar.
+5. **Regenerate the regression lock** when the balance build commits its strike pass, and make `tests/nextgen/lock.test.ts` part of the Phase 1 gate.
+6. **Re-run this Phase 0 on the balance engine** once `CONTROL.balance` is 'dcm'. The tools only need the controller swapped in for `balance.ts`. That gives the absolute hold and get-up numbers; the relative ones above should stand.
+7. **Rebuild the pivot test before using it for drives.** Put the foot on the canvas, hold yaw only (or slow the turn until the CoP stays inside the sole), and treat any run whose `CopProbe` reports an off-sole CoP the way §6 treats torque above stall: reject it.
+8. **Log ankle-stop time in get-ups** (now done: `tests-getup.ts` `ankleStopS`, `getup-replay.ts`). That is where the §3 ankles bind, not in holds.
+
+### 9.6 Independent verification (2026-10-20)
+
+An adversarial re-check of this section, with the same tools and no reuse of the build's outputs:
+- **Production untouched.** `git diff` on `src/robots` and `src/physics` shows only the balance build's strike-pass work (catalog, designs, humanoid per-joint motor slots, control) and the move polish's untracked files; nothing references NEXT GEN.
+- **Lock.** Run in a clean `git archive` of HEAD `03a2148` (which touched only `src/brain`), `tests/nextgen/lock.test.ts` passes 15/15. On the working tree it fails 14/15 as stated: the modern four's MJCF, and BRUISER at 6.85 s and STRIKER at 7.55 s of the trace. GOLIATH matches.
+- **One change per step.** A field-by-field diff of consecutive variant designs: A→R changes only ranges; R→M only motor ids (massless clones) and drum geoms; M→O only the hip link bodies, axes, drum hosts and the re-solved stance hips; O→P only drives, gains, armature and the drum masses that follow the motors; P→P′ only hip-pitch and knee armature.
+- **Hip.** The axes, order and ranges match §3, §4.1 and 10 §3.1: pitch axis (0, 0.966, −0.259) on the left, mirrored (0, 0.966, +0.259) on the right; roll x, then yaw along the thigh. The URDF's axis offsets are deliberately collapsed to one hip centre, per §4.1. FK matches MuJoCo, and the closed-form IK round-trip is now a check in `check.ts`.
+- **Reproduced bit for bit:** static fits, mass and inertia, gantry, knee snap, holds (M, O, P, all three kicks, 5 seeds), the pivot, and the recorded get-up winners (all 14 rows).
+- **Corrected here:** the pivot's weld (it hangs the foot 8 mm up and needs an off-sole CoP on every variant); the ankle-stop claim (true for holds, false for get-ups); the 3 s bar (A's 3.14 s does not pass, and R's face-down misses); the AKE90-ankle recommendation (withdrawn pending Phase 1).

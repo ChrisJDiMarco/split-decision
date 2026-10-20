@@ -1,0 +1,450 @@
+{
+ "A": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 99.11078513883514,
+   "planEndErrDeg": 60.68589959577772,
+   "turnDeg": 132.82672467824273,
+   "finalErrDeg": 79.54510881255459,
+   "maxComOffsetM": 0.3269966969540025,
+   "hipTravelDeg": {
+    "pitch": 105.80417364038561,
+    "roll": 81.79317627133777,
+    "yaw": 70.67497457031541
+   },
+   "peakTauFrac": 0.9999680079410977,
+   "worstJoint": "knee_l",
+   "peakSpeedFrac": 0.4082678620761155,
+   "peakTempC": 32.06021375552878,
+   "maxSatS": 0.8910000000000007,
+   "perJoint": {
+    "hip_pitch_l": 1,
+    "hip_roll_l": 1,
+    "hip_yaw_l": 0.824,
+    "knee_l": 1,
+    "ankle_pitch_l": 1,
+    "ankle_roll_l": 1
+   },
+   "derated": [],
+   "copOutsideSoleS": 1.259999999999972,
+   "worstCopOutsideSoleM": null,
+   "minNormalN": -245.00749410401932
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 109.99999996008022,
+   "planEndErrDeg": 86.4467928773828,
+   "turnDeg": 104.07188613133286,
+   "finalErrDeg": 87.48022237030752,
+   "maxComOffsetM": 0.08037331433251435,
+   "hipTravelDeg": {
+    "pitch": 59.256450982129365,
+    "roll": 28.45971614785989,
+    "yaw": 70.03435553138523
+   },
+   "peakTauFrac": 0.9999658596937016,
+   "worstJoint": "ankle_roll_l",
+   "peakSpeedFrac": 0.32146099423860885,
+   "peakTempC": 31.803021809976542,
+   "maxSatS": 0.1400000000000001,
+   "perJoint": {
+    "hip_pitch_l": 1,
+    "hip_roll_l": 0.885,
+    "hip_yaw_l": 0.724,
+    "knee_l": 1,
+    "ankle_pitch_l": 1,
+    "ankle_roll_l": 1
+   },
+   "derated": [],
+   "copOutsideSoleS": 1.3199999999999654,
+   "worstCopOutsideSoleM": null,
+   "minNormalN": -1000.3074223764493
+  }
+ ],
+ "R": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 0,
+   "planEndErrDeg": 0.2823356930348329,
+   "turnDeg": 179.90153397320069,
+   "finalErrDeg": 1.3530563547816752,
+   "maxComOffsetM": 0.01994965239238155,
+   "hipTravelDeg": {
+    "pitch": 21.430082630672214,
+    "roll": 23.398887673447877,
+    "yaw": 179.71784204147176
+   },
+   "peakTauFrac": 0.8114019715146971,
+   "worstJoint": "hip_roll_l",
+   "peakSpeedFrac": 0.18004175887053467,
+   "peakTempC": 30.90030285874209,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.453,
+    "hip_roll_l": 0.811,
+    "hip_yaw_l": 0.221,
+    "knee_l": 0.731,
+    "ankle_pitch_l": 0.3,
+    "ankle_roll_l": 0.604
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.4160000000000003,
+   "worstCopOutsideSoleM": 0.4762043583203044,
+   "minNormalN": 335.4426442614645
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 0.003906250029455299,
+   "planEndErrDeg": 0.2892809839476745,
+   "turnDeg": 179.92976465940887,
+   "finalErrDeg": 1.451659214779078,
+   "maxComOffsetM": 0.017121648759148775,
+   "hipTravelDeg": {
+    "pitch": 45.22053086109349,
+    "roll": 26.63491880531547,
+    "yaw": 179.70631644147406
+   },
+   "peakTauFrac": 0.6957216577100144,
+   "worstJoint": "hip_roll_l",
+   "peakSpeedFrac": 0.17645499456333805,
+   "peakTempC": 31.31694816719283,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.407,
+    "hip_roll_l": 0.696,
+    "hip_yaw_l": 0.164,
+    "knee_l": 0.678,
+    "ankle_pitch_l": 0.351,
+    "ankle_roll_l": 0.517
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.3970000000000003,
+   "worstCopOutsideSoleM": 0.26346326379335405,
+   "minNormalN": 448.2952012243019
+  }
+ ],
+ "M": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 0,
+   "planEndErrDeg": 0.2827200889163044,
+   "turnDeg": 179.90419805977126,
+   "finalErrDeg": 1.3745780741842648,
+   "maxComOffsetM": 0.020474075140515795,
+   "hipTravelDeg": {
+    "pitch": 19.257429570671384,
+    "roll": 22.073370346204637,
+    "yaw": 179.73333625269106
+   },
+   "peakTauFrac": 0.7361781384245097,
+   "worstJoint": "hip_roll_l",
+   "peakSpeedFrac": 0.1795315397924384,
+   "peakTempC": 31.019438551164605,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.428,
+    "hip_roll_l": 0.736,
+    "hip_yaw_l": 0.17,
+    "knee_l": 0.706,
+    "ankle_pitch_l": 0.252,
+    "ankle_roll_l": 0.387
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.3730000000000003,
+   "worstCopOutsideSoleM": 0.12346274659910639,
+   "minNormalN": 445.21139040049076
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 0.003906250029455299,
+   "planEndErrDeg": 0.28985933876716596,
+   "turnDeg": 179.91375657967978,
+   "finalErrDeg": 1.4126515950107639,
+   "maxComOffsetM": 0.019534647210368714,
+   "hipTravelDeg": {
+    "pitch": 40.867612419198295,
+    "roll": 25.0289836069258,
+    "yaw": 179.75194776811801
+   },
+   "peakTauFrac": 0.7385957493080992,
+   "worstJoint": "knee_l",
+   "peakSpeedFrac": 0.17806081666094162,
+   "peakTempC": 31.421172656148617,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.464,
+    "hip_roll_l": 0.666,
+    "hip_yaw_l": 0.164,
+    "knee_l": 0.739,
+    "ankle_pitch_l": 0.286,
+    "ankle_roll_l": 0.388
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.3800000000000003,
+   "worstCopOutsideSoleM": 0.1349462874333806,
+   "minNormalN": 492.41673129431854
+  }
+ ],
+ "O": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 7.435474441146674,
+   "planEndErrDeg": 2.7073806772189,
+   "turnDeg": 178.07338020590623,
+   "finalErrDeg": 3.504640781047427,
+   "maxComOffsetM": 0.0259150305484549,
+   "hipTravelDeg": {
+    "pitch": 65.93551361575607,
+    "roll": 26.2457524210832,
+    "yaw": 182.10464297934985
+   },
+   "peakTauFrac": 0.8650702673095074,
+   "worstJoint": "knee_l",
+   "peakSpeedFrac": 0.2115226490515064,
+   "peakTempC": 31.077513351547214,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.448,
+    "hip_roll_l": 0.481,
+    "hip_yaw_l": 0.216,
+    "knee_l": 0.865,
+    "ankle_pitch_l": 0.351,
+    "ankle_roll_l": 0.4
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.4100000000000003,
+   "worstCopOutsideSoleM": 0.1417329663318633,
+   "minNormalN": 470.5353773377283
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 11.435631855623377,
+   "planEndErrDeg": 2.8086974388442085,
+   "turnDeg": 177.96395390083921,
+   "finalErrDeg": 3.510487881272601,
+   "maxComOffsetM": 0.028660813936522873,
+   "hipTravelDeg": {
+    "pitch": 85.52750372179032,
+    "roll": 30.03302016757128,
+    "yaw": 181.68087656656223
+   },
+   "peakTauFrac": 0.7960899626557104,
+   "worstJoint": "knee_l",
+   "peakSpeedFrac": 0.2217843300705877,
+   "peakTempC": 31.357712653599716,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.554,
+    "hip_roll_l": 0.539,
+    "hip_yaw_l": 0.424,
+    "knee_l": 0.796,
+    "ankle_pitch_l": 0.435,
+    "ankle_roll_l": 0.668
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.5400000000000004,
+   "worstCopOutsideSoleM": 0.5788456252343652,
+   "minNormalN": 307.1942700379114
+  }
+ ],
+ "P": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 7.435474441146674,
+   "planEndErrDeg": 2.756420620594179,
+   "turnDeg": 177.4513736550748,
+   "finalErrDeg": 3.5817865417010855,
+   "maxComOffsetM": 0.025879539519009703,
+   "hipTravelDeg": {
+    "pitch": 65.59910994311365,
+    "roll": 26.497492153753136,
+    "yaw": 181.6274991821441
+   },
+   "peakTauFrac": 0.6754920455438802,
+   "worstJoint": "ankle_pitch_l",
+   "peakSpeedFrac": 0.2124721451754119,
+   "peakTempC": 31.014254215705584,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.287,
+    "hip_roll_l": 0.41,
+    "hip_yaw_l": 0.334,
+    "knee_l": 0.516,
+    "ankle_pitch_l": 0.675,
+    "ankle_roll_l": 0.642
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.2980000000000002,
+   "worstCopOutsideSoleM": 0.07288286163591468,
+   "minNormalN": 461.1847667319122
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 11.435631855623377,
+   "planEndErrDeg": 2.910858242074812,
+   "turnDeg": 177.55896767214892,
+   "finalErrDeg": 3.9236686438302546,
+   "maxComOffsetM": 0.03841814336368966,
+   "hipTravelDeg": {
+    "pitch": 89.32938505209621,
+    "roll": 30.747937342345814,
+    "yaw": 180.7455819436358
+   },
+   "peakTauFrac": 0.9999597075297111,
+   "worstJoint": "ankle_roll_l",
+   "peakSpeedFrac": 0.22130002663211912,
+   "peakTempC": 30.714453501162758,
+   "maxSatS": 0.07300000000000005,
+   "perJoint": {
+    "hip_pitch_l": 0.375,
+    "hip_roll_l": 0.409,
+    "hip_yaw_l": 0.744,
+    "knee_l": 0.502,
+    "ankle_pitch_l": 0.502,
+    "ankle_roll_l": 1
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.47200000000000036,
+   "worstCopOutsideSoleM": 0.6011440561374612,
+   "minNormalN": 198.39490342229598
+  }
+ ],
+ "P2": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 7.435474441146674,
+   "planEndErrDeg": 2.756420620594179,
+   "turnDeg": 177.45070991368448,
+   "finalErrDeg": 3.584022141389803,
+   "maxComOffsetM": 0.025890973068220323,
+   "hipTravelDeg": {
+    "pitch": 65.60936024218896,
+    "roll": 26.49615407633808,
+    "yaw": 181.62873582575017
+   },
+   "peakTauFrac": 0.6767455321923355,
+   "worstJoint": "ankle_pitch_l",
+   "peakSpeedFrac": 0.21235068559319534,
+   "peakTempC": 31.013341276095982,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.29,
+    "hip_roll_l": 0.41,
+    "hip_yaw_l": 0.336,
+    "knee_l": 0.521,
+    "ankle_pitch_l": 0.677,
+    "ankle_roll_l": 0.642
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.2960000000000002,
+   "worstCopOutsideSoleM": 0.07106924071209392,
+   "minNormalN": 465.6521350080306
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 11.435631855623377,
+   "planEndErrDeg": 2.910858242074812,
+   "turnDeg": 177.5575361417101,
+   "finalErrDeg": 3.9283999549558213,
+   "maxComOffsetM": 0.03850558441788898,
+   "hipTravelDeg": {
+    "pitch": 89.32403540125556,
+    "roll": 30.75018413573461,
+    "yaw": 180.7432369867472
+   },
+   "peakTauFrac": 0.999959800580824,
+   "worstJoint": "ankle_roll_l",
+   "peakSpeedFrac": 0.22121849651405975,
+   "peakTempC": 30.715686146835782,
+   "maxSatS": 0.07600000000000005,
+   "perJoint": {
+    "hip_pitch_l": 0.377,
+    "hip_roll_l": 0.412,
+    "hip_yaw_l": 0.751,
+    "knee_l": 0.504,
+    "ankle_pitch_l": 0.501,
+    "ankle_roll_l": 1
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.47200000000000036,
+   "worstCopOutsideSoleM": 0.5918586755916647,
+   "minNormalN": 201.01412728314565
+  }
+ ],
+ "PA": [
+  {
+   "flexDeg": 30,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 7.435474441146674,
+   "planEndErrDeg": 2.7522337395929988,
+   "turnDeg": 177.44249693926417,
+   "finalErrDeg": 3.7768640539885907,
+   "maxComOffsetM": 0.02349719947400708,
+   "hipTravelDeg": {
+    "pitch": 65.38321079570132,
+    "roll": 26.4863647401757,
+    "yaw": 181.71281746467906
+   },
+   "peakTauFrac": 0.6235363823420224,
+   "worstJoint": "ankle_pitch_l",
+   "peakSpeedFrac": 0.20720129900424736,
+   "peakTempC": 30.4295214839289,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.241,
+    "hip_roll_l": 0.455,
+    "hip_yaw_l": 0.304,
+    "knee_l": 0.519,
+    "ankle_pitch_l": 0.624,
+    "ankle_roll_l": 0.439
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.33000000000000024,
+   "worstCopOutsideSoleM": 0.048151886782040645,
+   "minNormalN": 478.18554518951385
+  },
+  {
+   "flexDeg": 50,
+   "durationS": 1.5,
+   "hipIkEndErrDeg": 11.435631855623377,
+   "planEndErrDeg": 2.930764681183805,
+   "turnDeg": 177.42498710591758,
+   "finalErrDeg": 3.8796131903464515,
+   "maxComOffsetM": 0.029272733281672708,
+   "hipTravelDeg": {
+    "pitch": 87.8408950490202,
+    "roll": 29.84760125955517,
+    "yaw": 180.8289728868486
+   },
+   "peakTauFrac": 0.7750071097638119,
+   "worstJoint": "ankle_roll_l",
+   "peakSpeedFrac": 0.21579547640084434,
+   "peakTempC": 30.567243383883547,
+   "maxSatS": 0,
+   "perJoint": {
+    "hip_pitch_l": 0.372,
+    "hip_roll_l": 0.425,
+    "hip_yaw_l": 0.647,
+    "knee_l": 0.486,
+    "ankle_pitch_l": 0.395,
+    "ankle_roll_l": 0.775
+   },
+   "derated": [],
+   "copOutsideSoleS": 0.5150000000000003,
+   "worstCopOutsideSoleM": 0.3186710048835152,
+   "minNormalN": 372.38900727758187
+  }
+ ]
+}
