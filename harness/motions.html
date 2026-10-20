@@ -26,11 +26,19 @@
       #moves div:hover { color: var(--ink); background: rgba(255,255,255,0.05); }
       #moves div.sel { color: #07080a; background: var(--accent); }
       #moves .grp { color: var(--ink); font-weight: 600; cursor: default; background: rgba(255,255,255,0.04); }
-      #info { position: fixed; right: 16px; top: 14px; width: 330px; font: 12px/1.45 'JetBrains Mono', monospace; color: var(--dim); white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); padding: 10px 12px; }
+      #info { position: fixed; right: 16px; top: 14px; width: 380px; font: 12px/1.45 'JetBrains Mono', monospace; color: var(--dim); white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); padding: 10px 12px; }
       #info b { color: var(--ink); font-weight: 600; }
       #timeline { position: fixed; left: 16px; right: 16px; bottom: 12px; height: 118px; background: var(--panel); border: 1px solid var(--line); cursor: pointer; }
       #timeline canvas { width: 100%; height: 100%; display: block; }
       #status { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); font: 12px 'JetBrains Mono', monospace; color: var(--dim); }
+      /* Polish A/B (mode=compare): measured numbers per playback, the best of each row highlighted. */
+      #info table.metrics { border-collapse: collapse; margin: 6px 0 8px; width: 100%; }
+      #info table.metrics td { padding: 1px 4px; white-space: nowrap; }
+      #info table.metrics td:not(:first-child) { text-align: right; color: var(--ink); }
+      #info table.metrics tr:first-child td { border-bottom: 1px solid var(--line); }
+      #info table.metrics td.best { color: #4fe08a; font-weight: 600; }
+      #info .warn { color: #ff6a5c; }
+      @media (max-width: 900px) { #info { width: auto; left: 16px; top: auto; bottom: 140px; max-height: 40vh; overflow: auto; } #ui { width: auto; right: 16px; } }
     </style>
   </head>
   <body>

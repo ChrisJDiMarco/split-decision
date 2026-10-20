@@ -444,3 +444,138 @@ Re-runs cost the same as first runs. That is SAMCON's known brittleness (09-bala
 - **Out-of-distribution play.** Chained combos, blocked strikes, clinches and big hits above about 40 N·s leave the tube and abort to the engine. Polish helps most on clean, unobstructed moves.
 - **Southpaw mirroring assumes symmetric MJCF.** The mirrored acceptance replay checks it. An asymmetric design needs double storage and double compute.
 - **Late-fight heat.** A move polished for 40-80 °C starts can still reach the derate band late in a long fight. The heat term reduces this but can't remove it.
+
+## 12. Proof-of-concept results (2026-10-20)
+
+Built and run the same day Chris said "lets just get on with it", on the robots as they stood at 15:05 (designs file of 14:59; the balance build's motor swaps for P3 were already in it). Every number below comes from rollouts through the real compiled robot, `motorSystem.pre` and `GyroCore` at 1 ms, with nothing else touching the body (checked every control tick by the honesty assertions).
+
+### 12.1 What exists now
+
+| Path | What |
+|---|---|
+| `src/robots/motions/polish/player.ts` | `PolishedPlayer`: clock at the stored per-frame rate, q = clip + Δq (C2 B-spline), velocity feed-forward, the feedback law, gyro feed-forward; mirror-aware; no allocation per tick |
+| `src/robots/motions/polish/format.ts`, `spline.ts`, `hash.ts`, `load.ts` | stored format (int16 base64 via `codec.ts`), the spline, the compat hash, `loadPolish(design, moveId)` (refuses failed or stale entries) |
+| `src/robots/motions/data/polished/<design>/` | one JSON per move (20-41 KB for a strike, 68-83 KB for a get-up), `index.json` (hash, source hashes, status, validation), `traces/<move>.json` for the A/B view |
+| `tools/polish/*.ts` | rollout world, snapshots, sep-CMA-ES, cost, warm starts, worker pool (nice 10, load-capped), resumable runner, measurement, acceptance |
+| `tests/polish/polish.test.ts` | option block and canvas match `world.ts`; bit-identical restore and replay; honesty assertions; zero-Δq `PolishedPlayer` = `MotionPlayer` + the tracker's velocity feed-forward, bit for bit; mirror; codec round trips; stored polishes replay from their file and are fresh |
+| `harness/motions.html?mode=compare` | "Polish A/B": mocap, raw physics, (raw + feedback), polished physics side by side, looping, real time or lined up by clip time, the measured numbers in the panel; `motions.compareSheet(name)` exports a labelled contact sheet |
+
+Run it: `nice -n 10 npx tsx tools/polish/run.ts --queue poc --workers 5 --run <name>` (resumes from its checkpoints under `tools/polish/.out/<name>/`; PIDs in `pids.txt`; it measures each move as soon as it is polished, on the same physics). Then `npx tsx tools/polish/accept.ts` for the full-world reproduction check. View: `http://localhost:5297/harness/motions.html?mode=compare&design=haymaker&move=hook.14_03.1228&rawfb=1`.
+
+### 12.2 Where the build departs from §1-§8, and why
+
+1. **The feedback law runs in the nominal too.** §5.2 had it act only on deviations from the simulated nominal, behind dead bands, so the nominal is open loop. On these robots the retargeted stances cannot stand open loop: SAVATE's cross starts with the lead sole 7-13° off flat and the rear foot on its toe edge at 33-76°, and the COM 1.5 cm from the edge of that support. Held still, open loop, it topples in about 1 s, further than a 0.3-0.4 s lookahead can see, so windowed CMA committed early windows that doomed later ones (pilots 1-3). The law now runs whenever the clip stands on its feet alone, against a **stored reference track**: the clip's mass-aware COM moved 2 cm inside the soles it stands on, and the clip's torso attitude. It is part of every rollout the optimiser scores, and the runtime plays the same code on the same stored data, so reproduction is unchanged (bit-identical in the tests). Off its feet (lying, kneeling, airborne) the law is off.
+2. **The law is written in physical units.** The rotation form of §5.2 asked the ankles for about ten times more torque than a sole can transmit (132 N·m for a 3 cm COM error on SAVATE, a 32 cm COP shift), which rolled the feet onto their edges; tuning picked zero gains. Now: COP shift Δp = kD·e + kV·ė/ω0 (capped at 8 cm), sent as ankle torque F·(ẑ × Δp)·axis through Δq = τ/kp; the gyro adds the same CMP shift as a couple; the stance hips turn the torso back to the reference tilt. kL (angular momentum against the nominal) is kept at 0 (see 12.6).
+3. **Kinematic warm starts instead of the `mj_rne` shift.** Before any rollout: every planted sole is turned flat with its own ankle (the leg above keeps the clip pose), then the COM is moved 4.5 cm inside the support by the legs and waist with the planted soles held (damped least squares on MuJoCo's Jacobians). Per window, a cost-checked iterative-learning step tunes every joint's Δq to the clip before CMA, and again on the joints CMA does not sample after the commit (the deterministic arm offset of §1).
+4. **Windows** commit two new control points per joint (the previous point is not re-opened), with a 0.4 s lookahead. Merges and IPOP restarts are in; the speed ratchet, the gain-scale knots, the trust tube and the mirrored acceptance replay are not built yet.
+5. **The nominal is stored at 250 Hz** (all 18 channels), so a strike file is 20-41 KB and a get-up 68-83 KB, not 4 KB.
+6. **Contact gaps of 5 frames or less are bridged** in the cost: the clip's 9 mm boxer's bounce otherwise reads as a flight phase, and the contact term rewarded the robot for hopping.
+7. **Snapshots carry MuJoCo's derived arrays** (actuator force, body and geom poses, `cvel`, ...). `mj_setState` restores only the integration state, while the motor model's heat and the sensing read the previous forward pass; without them a restore was not bit-identical.
+
+### 12.3 What "raw" is
+
+Raw is the retargeted clip played plainly on the servos at today's pace: `MotionPlayer`'s rate table at the tracker's wanted speed (punch 1.8×, kick 1.6× with the 0.6 limit scale, get-up 1.15×), with the tracker's velocity feed-forward. A test holds `PolishedPlayer` with zero Δq and no feedback to it bit for bit. It is the fair baseline for "can the clip itself be played physically": the in-game tracker changes the move (posture offsets, aim warps, the gait), so joint and path errors against the clip would not compare like for like. Raw + feedback adds the polished move's own feedback law to the plain clip, to show what the law alone buys. Each playback starts from the clip's first frame placed on the canvas and held 0.4 s.
+
+### 12.4 Results, round 1 (the PoC run, `poc3`)
+
+Falls: 20 seeds each of a 0.3-0.6 m/s torso push (0.1 s, random direction and moment of the move) and of one random joint at 40-60% health with 0.02-0.05 rad of backlash. "Nominal" is the unperturbed playback; a standing move falls when the torso passes 60°, a get-up fails when it does not end upright at standing height. Tracking numbers are against the clip at the clip time each playback reached, and stop at the fall for a playback that falls (a body on the canvas still "tracks" its joint targets). Torso shake is the torso rate's deviation from the clip's own trunk rotation, above about 3 Hz.
+
+| Move | Playback | Nominal | Push falls | Damaged-joint falls | Joint RMS, all / legs (°) | Pelvis / COM path (cm) | Worst slip (cm) | Torso shake (rad/s) | Pelvis jerk (m/s³) | Striker at impact | Leg servo ≥ 85% | Move time, × human |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SAVATE cross | raw | falls at 0.50 s | 20/20 | 20/20 | 2.6 / 1.4 | 6.3 / 7.1 | 3.5 | 1.77 | 915 | 32 cm, 7.1 m/s (1.05× clip) | 0.46 | 0.62 s, ×1.26 |
+| | raw + fb | falls at 0.87 s | 19/20 | 20/20 | 2.6 / 1.6 | 15.1 / 13.1 | 1.7 | 1.51 | 976 | 29 cm, 7.2 m/s | 0.49 | 0.62 s, ×1.26 |
+| | **polished** | **stands** | **8/20** | **3/20** | 4.9 / 6.2 | 7.6 / 6.3 | **1.5** | **1.27** | **553** | **3.6 cm**, 4.0 m/s (0.59×) | **0.25** | 1.01 s, ×0.78 |
+| HAYMAKER hook | raw | falls at 0.56 s | 20/20 | 20/20 | 7.0 / 3.1 | 10.9 / 11.0 | 6.0 | 2.19 | 789 | 42 cm, 8.9 m/s (1.02×) | 0.46 | 0.73 s, ×1.46 |
+| | raw + fb | falls at 0.65 s | 20/20 | 20/20 | 7.1 / 4.4 | 11.3 / 10.7 | 6.7 | 2.21 | 951 | 36 cm, 8.9 m/s | 0.40 | 0.73 s, ×1.46 |
+| | **polished** | **stands** | **4/20** | **0/20** | **4.5** / 5.5 | **6.8 / 6.5** | **1.7** | **1.59** | 840 | **2.1 cm, 8.7 m/s (1.00×)** | 0.70 | 0.94 s, **×1.14** |
+| SAVATE head kick | raw | falls at 0.69 s | 20/20 | 20/20 | 1.6 / 1.9 | 10.5 / 9.0 | 16.5 | 1.09 | 961 | 31 cm, 4.1 m/s (0.43×) | 0.20 | 1.72 s, ×0.93 |
+| | raw + fb | stands | 6/20 | 4/20 | 2.4 / 2.1 | 9.3 / 7.0 | 3.8 | 1.04 | 520 | 19 cm, 3.2 m/s (0.34×) | 0.30 | 1.72 s, ×0.93 |
+| | **polished** | **stands** | 9/20 | **0/20** | 3.6 / 4.5 | **7.4 / 6.8** | **3.2** | **0.86** | **360** | **3.5 cm**, 2.6 m/s (0.28×) | **0.12** | 2.52 s, ×0.64 |
+| FIRECRACKER back get-up (140_09) | raw | stays down | 20/20 | 20/20 | 1.7 / 1.6 | 37.1 / 39.6 | 10.8 | 0.95 | 602 | – | 0.24 | 3.83 s, ×1.15 |
+| | raw + fb | stays down | 20/20 | 20/20 | 1.8 / 1.8 | 40.4 / 42.4 | 10.8 | 0.98 | 596 | – | 0.24 | 3.83 s, ×1.15 |
+| | **polished** | **up** | 12/20 | 12/20 | 4.9 / 5.9 | **7.5 / 9.4** | **8.6** | 0.99 | **497** | – | 0.31 | 4.77 s, ×0.92 |
+| FIRECRACKER tornado kick | raw | falls at 0.65 s | 20/20 | 20/20 | 2.7 / 3.7 | 22.0 / 19.3 | 7.0 | 3.12 | 1046 | 4.2 cm, 3.7 m/s (0.58×) | 0.42 | 1.50 s, ×1.02 |
+| | raw + fb | falls at 1.26 s | 18/20 | 20/20 | 6.6 / 8.2 | 30.0 / 25.8 | 10.3 | 3.23 | 511 | 20 cm, 3.5 m/s | 0.74 | 1.50 s, ×1.02 |
+| | **polished** | **stands** | **12/20** | **1/20** | 4.4 / 5.1 | **13.3 / 11.9** | **2.2** | 2.95 | **413** | **2.8 cm**, 2.7 m/s (0.42×) | 0.65 | 1.69 s, ×0.91 |
+
+Other numbers: every playback touches its stall torque somewhere (peak τ/τ_stall 1.00, as the clips are fast), winding heat rises 1-4.5 °C per move, peak gyro |h|/H is 0.4-0.8 on the polished moves. CPU per move: cross 8 min, hook 10, head kick 21, tornado 18, get-up 54 (worker-CPU; 112 min for the five, 27 min wall at 2-5 workers while the other builds held the load at 13-34).
+
+The get-up row is as re-measured at the end (kL set to 0, nominal re-recorded, and the success test of §12.7); the run itself logged 14/20 and 13/20.
+
+**Reproduction (§6).** Replaying each stored file in the full `compileWorld()` scene (cage, both robots, opponent parked on his gantry) against the one-robot rollout it was optimised in: cross 0.000°, hook 0.000° (max 0.001°), tornado 0.0001° (max 0.003°), get-up 0.000°, head kick 0.24° RMS (max 4.4°, the landing). All under the 0.5° gate. The replay from the stored file in the same world is bit-identical (tests).
+
+### 12.5 What round 1 says
+
+- **Every polished move stands where the raw clip falls.** Played plainly on the servos, all five fall (the get-up never leaves the canvas); with the feedback law alone, four of five still fall. Polished, all five complete, with the striker 2-4 cm from where the clip lands it (raw: 31-42 cm off).
+- **The hook is the clean win**: on target at the clip's full peak fist speed (8.7 m/s), 14% faster than the actor, 4/20 push falls and 0/20 damaged-joint falls against 20/20 and 20/20, slip 1.7 cm against 6.0.
+- **The rest trade tempo and power for balance.** The cross plays at ×0.78 of the human pace with 0.59× the clip's fist speed, the head kick at ×0.64 with 0.28×, the tornado at ×0.91 with 0.42×. The optimiser slowed down because round 1's impact term scored speed against the clip's peak *at the played rate*, so a slow, soft strike scored as on speed, and slowing was only lightly penalised.
+- **The tornado turns −135° of the clip's −496°.** It lands the kick and stands, but it is not a tornado yet: the root term's cap made giving up on the spin cheap.
+- **The cross ends in a forward lunge** (torso 35-48° forward, 11 cm ahead of the clip's end spot), which is visible in the A/B view: it stands, but it is not graceful. Nothing in round 1's cost watched the torso's lean directly.
+- **The get-up rises but is fragile**: 12/20 pushed and 12/20 damaged attempts fail, against 20/20 for raw.
+
+Against the §9.3 KILL criteria: the hook beats raw on smoothness (torso shake 1.59 vs 2.19), fidelity (joint RMS 4.5° vs 7.0°, slip 1.7 vs 6.0 cm) and survival. The cross beats it on smoothness, slip and survival but **not on joint RMS** (4.9° vs 2.6°, raw measured only until it falls at 0.5 s; the polished move bends its legs and waist off the clip to keep the COM over its feet). Reproduction passes. The method is not killed; the cross is the case to fix. Gates from §9.2 not met yet: survival (≥ 95% punches, ≥ 85% kicks, ≥ 75% get-ups) is 40-80% on the strikes and 40% on the get-up; joint RMS ≤ 8° all and ≤ 6° legs is met except the cross's legs (6.2°); striker speed ≥ 0.9 × clip is met only by the hook; tornado heading within 30° is not met.
+
+### 12.6 Round 2: a sharper cost (run `round2`)
+
+Round 2 re-ran the four strikes with: torso tilt against the clip's (weight 10), pelvis heading against the clip's (weight 6, for the spin), the end position in the terminal term, impact speed scored against the actor's own peak instead of peak × played rate, slowing penalised twice as hard, root weight 8, and kL kept at 0 (so the law never reads the nominal it is recording). Then Chris's priority, the back get-ups (below).
+
+| Move | Round | Nominal | Push / damaged-joint falls | Joint RMS all / legs (°) | Pelvis path (cm) | Worst slip (cm) | Striker at impact | Turn (° / clip) | Move time, × human | Kept |
+|---|---|---|---|---|---|---|---|---|---|---|
+| SAVATE cross | 1 | stands | 8/20, 3/20 | 4.9 / 6.2 | 7.6 | 1.5 | 3.6 cm, 4.0 m/s (0.59×) | 51 / 39 | 1.01 s, ×0.78 | |
+| | 2 | stands | **5/20**, 3/20 | **3.9 / 4.7** | **5.5** | 3.2 | **2.4 cm, 5.2 m/s (0.78×)** | 43 / 39 | **0.87 s, ×0.90** | **round 2** |
+| HAYMAKER hook | 1 | stands | **4/20, 0/20** | 4.5 / 5.5 | **6.8** | **1.7** | **2.1 cm**, 8.7 m/s (1.00×) | 32 / 30 | 0.94 s, ×1.14 | **round 1** |
+| | 2 | stands | 12/20, 1/20 | 4.5 / 5.2 | 8.4 | 2.1 | 5.9 cm, 8.8 m/s (1.01×) | 11 / 30 | 0.91 s, ×1.17 | |
+| SAVATE head kick | 1 | stands | 9/20, 0/20 | 3.6 / 4.5 | 7.4 | 3.2 | 3.5 cm, 2.6 m/s (0.28×) | 121 / 126 | 2.52 s, ×0.64 | |
+| | 2 | stands | **6/20**, 0/20 | 4.3 / 5.5 | 8.5 | 3.6 | 4.2 cm, **3.3 m/s (0.35×)** | 120 / 126 | 2.52 s, ×0.64 | **round 2** |
+| FIRECRACKER tornado | 1 | stands | 12/20, 1/20 | 4.4 / 5.1 | 13.3 | 2.2 | 2.8 cm, 2.7 m/s (0.42×) | −135 / −496 | 1.69 s, ×0.91 | |
+| | 2 | stands | 9/20, 0/20 | 4.2 / 5.1 | 13.9 | 6.8 | 6.3 cm, 2.9 m/s (0.45×) | −138 / −496 | 1.51 s, ×1.02 | round 2, **status failed** |
+
+What round 2 says:
+
+- **The cross is now the clearest picture of what the method does**: it stands where raw falls, follows the clip more closely than round 1 (joint RMS 3.9°, pelvis 5.5 cm), throws harder (0.78× the clip's fist speed, raw 1.05× before it falls), and survives 15 of 20 pushes and 17 of 20 damaged joints, at ×0.90 of the actor's pace. Its slip got worse (3.2 cm) and its planted-leg servos sit at ≥ 85% of available torque 45% of the time (round 1: 25%).
+- **The hook got worse** (4 → 12 push falls), so round 1's hook is kept. Its round-1 kL was set to 0 and its nominal re-recorded (`tools/polish/renominal.ts`); it still completes, and its numbers are re-measured in 12.8.
+- **The head kick is robust but slow**: it stands, 0/20 falls on a damaged joint, but at ×0.64 of the actor's pace with the foot at 0.35× the clip's speed. A slower, softer kick is what this robot can hold with this cost; a speed ratchet (§3.6) is the next step for it.
+- **The tornado cannot be made a tornado this way.** It lands a kick on target and stands, but it turns −138° of the clip's −496° in both rounds, with or without the heading term. The windowed search, with 0.4 s of lookahead, never finds the pivot that builds the spin before take-off (the gyro has no yaw axis and the canvas's torsional friction is 0.005, §9). Per §9.3 the move is marked **failed** for FIRECRACKER: `loadPolish` refuses it and the game plays it raw. The kick-and-land result is kept on disk for the record.
+
+### 12.7 The back get-ups (Chris's priority)
+
+`getup_back.140_08` (the one the game tries first on every modern design, `GETUP_PLAN`) and `140_09`, at a third of the strikes' search budget (`--profile lite`), measured the same way. A get-up is "up" when it ends with the pelvis at 80% of standing height or more and the torso at least as upright as the clip's own last frame less 0.15: the CMU actor ends these get-ups bent about 40° forward, and a robot that ends like the actor is up.
+
+| Design, clip | Raw: up? | Polished: up? | Push failures raw → polished | Damaged-joint failures raw → polished | Joint RMS all / legs (°) | Pelvis path raw → polished (cm) | Worst slip raw → polished (cm) | Move time, × human |
+|---|---|---|---|---|---|---|---|---|
+| FIRECRACKER 140_08 | no | **yes** | 20 → **3** | 20 → 8 | 2.8 / 3.2 | 31.9 → **2.7** | 11.6 → 2.3 | 5.66 s, ×0.77 |
+| FIRECRACKER 140_09 (round 1) | no | **yes** | 20 → 12 | 20 → 12 | 4.9 / 5.9 | 37.1 → 7.5 | 10.8 → 8.6 | 4.77 s, ×0.92 |
+| SAVATE 140_08 | no | **yes** | 20 → 10 | 20 → 10 | 2.8 / 3.2 | 40.7 → **3.7** | 25.1 → 2.8 | 5.26 s, ×0.83 |
+| SAVATE 140_09 | no | **yes** | 20 → 9 | 20 → 6 | 2.7 / 3.0 | 53.3 → 5.4 | 19.0 → 2.6 | 4.66 s, ×0.94 |
+| HAYMAKER 140_08 | no | **yes** | 20 → 11 | 20 → 6 | 2.7 / 3.3 | 14.8 → 4.3 | 28.1 → 2.7 | 5.05 s, ×0.86 |
+| HAYMAKER 140_09 | no | **yes** | 20 → **5** | 20 → **4** | 3.2 / 3.7 | 58.5 → 9.6 | 15.7 → 2.4 | 4.59 s, ×0.96 |
+| PYLON 140_08 | no | **yes** | 20 → **5** | 20 → 7 | 2.6 / 2.9 | 43.7 → **3.1** | 31.2 → 3.5 | 5.20 s, ×0.84 |
+| PYLON 140_09 | no | **yes** | 20 → 10 | 20 → 7 | 2.7 / 3.0 | 51.8 → 5.0 | 24.0 → 2.5 | 4.29 s, ×1.03 |
+
+Played plainly, none of the eight gets up (the closest, HAYMAKER 140_08, stands at 4.1 s and tips back over in the settle). Polished, all eight get up and finish in the actor's pose, following the clip's pelvis path to 3-10 cm with soles slipping 2-4 cm (raw: 12-31 cm). They are slower than the actor (×0.77-1.03; the optimiser slows the push-up and the crouch-to-stand) and still fail 15-60% of pushed attempts. Each took 22-26 min of worker CPU. Joint RMS is 2.6-4.9° against raw's 1.1-2.1°, the way a body that really carries its weight differs from one that slides on its back while its joints follow the clip.
+
+### 12.8 What is on disk and what plays
+
+| Design | Move | Status | File |
+|---|---|---|---|
+| SAVATE | cross.13_17.1024 (round 2), head_kick.135_07.0016 (round 2), getup_back 140_08 and 140_09 | polished | 20-79 KB each |
+| HAYMAKER | hook.14_03.1228 (round 1, kL set to 0 and nominal re-recorded), getup_back 140_08 and 140_09 | polished | 21-76 KB |
+| PYLON | getup_back 140_08 and 140_09 | polished | 68-78 KB |
+| FIRECRACKER | getup_back 140_08 (round 2) and 140_09 (round 1, kL set to 0 and nominal re-recorded) | polished | 73-83 KB |
+| FIRECRACKER | tornado_kick.135_07.0179 | **failed**: turns −138° of −496° | 29 KB |
+
+Every shipped file replays bit-identically from its stored data (tests) and in the full game scene to 0.14° joint RMS or better (max 2.4°, a get-up's contacts); all were made on the robots of 15:05 (designs file 14:59), and `index.json` holds the compat hash and the source hashes of `motors.ts`, `gyro.ts`, the player, the spline and the sampler. The balance build is swapping motors (P3): as soon as one of these designs' motors or `motors.ts` changes, the runtime refuses the stale files and plays the moves raw, and `tests/polish` fails until they are re-run (`tools/polish/run.ts`, same queue names). The nominal is stored at 250 Hz, which is most of a get-up file. The comparison traces add 44-176 KB per move under `traces/`, outside the runtime loader's glob (2.3 MB for the whole folder).
+
+**Nothing in the game plays them yet.** `loadPolish` and `PolishedPlayer` are ready; the hook-up is the balance engine's (§5.4 requests 1-4, unchanged). One change to request 2: the polished move's feedback law already runs inside the player, so while a polished move plays the engine must not add its own stance-ankle or gyro balance on top (the same stand-down, now for the whole move rather than "inside the tube").
+
+### 12.9 Cost, and what next
+
+CPU, worker time: the five PoC moves 112 min (round 1, including 54 min for FIRECRACKER's 140_09 get-up at the full budget); the four strike re-runs 55 min; the seven round-2 back get-ups 2.8 h at the lite budget; about 5.6 CPU-hours in all, run with 2-5 workers at nice 10 while the Mac's 1-minute load sat between 10 and 34 from the other builds (the pool drops to 2 workers above a load of 18). The cross and hook take 7-10 min of CPU, a kick or flashy move 18-21, a get-up 22-54.
+
+Next, in order of what it buys:
+
+1. **Speed (the "hyper super human" part).** Only the hook is faster than the actor with full power (×1.14, 1.00× the clip's fist speed). Everything else plays at ×0.64-1.03 and kicks land at 0.35-0.45× the clip's foot speed. The speed ratchet of §3.6 is not built; round 2's impact-speed term moved the cross from 0.59× to 0.78× and the head kick from 0.28× to 0.35×. Build the ratchet, and give the head kick a take-off-block window (§3.4).
+2. **Robustness.** Push survival is 70-80% on the strikes and 40-85% on the get-ups, against gates of 95% (punches) / 85% (kicks) / 75% (get-ups). The doc's own upgrade is Liu 2016 per-fragment linear feedback (§1, needs Chris's OK as the grey area under "no training"); cheaper first: Pass B with more scenarios and the gain-scale knots (not built).
+3. **The cross's lean.** It still leans 30-40° forward in its recovery, where the actor stays upright; the torso-tilt term reduced it but the A/B view shows it.
+4. **The tornado** needs a pivot that builds the spin before take-off; the windowed search does not find it. Either a hand-shaped yaw warm start on the support foot or the take-off block of §3.4 with a longer horizon. Until then it stays `failed` and the game plays it raw.
+5. **Integration** (balance build): `loadPolish` + start gate + `PolishedPlayer` in the mocap tracker, the stand-down, mirrored (southpaw) acceptance, and a start-state funnel: these moves were optimised from the clip's first frame held still, and a fighter mid-fight starts elsewhere.

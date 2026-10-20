@@ -3,6 +3,11 @@
 // Open http://localhost:5297/harness/motions.html
 //   ?design=striker&move=jab.13_17.0412     a library move
 //   ?mode=clip&clip=135_07                   a whole source clip, retargeted in the browser
+//   ?mode=compare&design=savate&move=cross.13_17.1024
+//                                            move polish A/B (tools/polish): the mocap, the raw physics
+//                                            playback and the polished one side by side, looping, with
+//                                            the measured numbers (&sync=clip lines them up by clip time,
+//                                            &rawfb=1 adds the raw clip with the polished feedback law)
 import * as THREE from 'three/webgpu';
 import type { RobotDesign, Vec3 } from '../core/types';
 import { DESIGNS } from '../robots/designs';
@@ -17,13 +22,16 @@ import { matFromQuat, mulMtV, mulMV, quatFromMat, rotZ, sub, type Mat3 } from '.
 import { retarget, type Retargeted } from '../robots/motions/retarget';
 import { robotModel } from '../robots/motions/robot-model';
 import { kinematics } from '../robots/motions/kinematics';
+import { compareKeys, lastWall, loadCompare, metricsTable, traceAt, wallAtTau, type CompareData, type VariantName } from './motions-compare';
 
-type Mode = 'library' | 'clip';
+type Mode = 'library' | 'clip' | 'compare';
 
 const params = new URLSearchParams(location.search);
 const state = {
   design: DESIGNS[params.get('design') ?? ''] ? params.get('design')! : 'striker',
-  mode: (params.get('mode') === 'clip' ? 'clip' : 'library') as Mode,
+  mode: (params.get('mode') === 'clip' ? 'clip' : params.get('mode') === 'compare' ? 'compare' : 'library') as Mode,
+  sync: (params.get('sync') === 'clip' ? 'clip' : 'wall') as 'wall' | 'clip',
+  rawfb: params.get('rawfb') === '1',
   clip: params.get('clip') ?? '13_17',
   move: params.get('move') ?? '',
   speed: Number(params.get('speed') ?? 1),
@@ -396,6 +404,13 @@ async function load(): Promise<void> {
   ensurePuppet();
   status('loading…');
   try {
+    if (state.mode === 'compare') {
+      await loadComparison();
+      renderUi();
+      status('');
+      return;
+    }
+    clearComparison();
     if (state.mode === 'clip') {
       playable = await clipPlayable(state.design, state.clip);
     } else {
@@ -413,6 +428,111 @@ async function load(): Promise<void> {
   }
   renderUi();
   infoEl.innerHTML = playable.info();
+}
+
+// ---------------------------------------------------------------- polish A/B (mode=compare)
+
+interface Comparison {
+  data: CompareData;
+  move: Move;
+  shown: Array<'mocap' | VariantName>;
+  puppets: Map<string, Puppet>;
+  labels: Map<string, HTMLDivElement>;
+  spacing: number;
+  loopS: number;
+}
+
+let cmp: Comparison | null = null;
+const labelLayer = document.createElement('div');
+labelLayer.style.cssText = 'position:fixed;inset:0;pointer-events:none;';
+document.body.append(labelLayer);
+const LABEL_COLORS: Record<string, string> = { mocap: '#7fe0ff', raw: '#ff6a5c', 'raw+fb': '#ffb020', polished: '#4fe08a' };
+const LABEL_TEXT: Record<string, string> = { mocap: 'MOCAP (kinematic)', raw: 'RAW PHYSICS', 'raw+fb': 'RAW + FEEDBACK', polished: 'POLISHED PHYSICS' };
+
+function clearComparison(): void {
+  if (!cmp) return;
+  for (const p of cmp.puppets.values()) p.dispose();
+  for (const l of cmp.labels.values()) l.remove();
+  cmp = null;
+  if (puppet) puppet.root.visible = true;
+}
+
+async function loadComparison(): Promise<void> {
+  const keys = compareKeys();
+  if (!keys.some((k) => k.design === state.design && k.move === state.move)) {
+    const k = keys.find((x) => x.design === state.design) ?? keys[0];
+    if (!k) throw new Error('no polished moves yet: run tools/polish/run.ts');
+    state.design = k.design;
+    state.move = k.move;
+  }
+  clearComparison();
+  ensurePuppet();
+  if (puppet) puppet.root.visible = false;
+  for (const p of strip) p.root.visible = false;
+  if (ghost) ghost.group.visible = false;
+  const data = await loadCompare(state.design, state.move);
+  if (library?.design !== state.design) library = await loadLibrary(state.design);
+  const move = library.move(state.move);
+  playable = await movePlayable(library, move);
+  const shown: Comparison['shown'] = ['mocap', 'raw', ...(state.rawfb ? ['raw+fb' as const] : []), 'polished'];
+  const puppets = new Map<string, Puppet>(), labels = new Map<string, HTMLDivElement>();
+  for (const name of shown) {
+    puppets.set(name, new Puppet(DESIGNS[state.design], studio.physicsRoot));
+    const l = document.createElement('div');
+    l.textContent = LABEL_TEXT[name];
+    l.style.cssText = `position:absolute;transform:translate(-50%,-100%);font:700 13px 'Barlow Condensed',sans-serif;letter-spacing:0.12em;color:${LABEL_COLORS[name]};text-shadow:0 1px 3px #000;white-space:nowrap;`;
+    labelLayer.append(l);
+    labels.set(name, l);
+  }
+  const spacing = 1.6 * Math.max(0.8, robotModel(DESIGNS[state.design]).dims.legLength / 0.8);
+  const ends = (['raw', 'raw+fb', 'polished'] as const).filter((v) => data.traces[v]).map((v) => lastWall(data.traces[v]));
+  const loopS = Math.max(data.clipS + data.tailS, ...ends) + 0.6;
+  cmp = { data, move, shown, puppets, labels, spacing, loopS };
+  state.t = Math.min(state.t, loopS);
+  infoEl.innerHTML = metricsTable(data, shown.filter((n): n is VariantName => n !== 'mocap'));
+  poseComparison(state.t);
+  view((state.cam || 'three') as 'front' | 'side' | 'three' | 'top' | 'back');
+}
+
+const projected = new THREE.Vector3();
+
+/** Pose every shown playback at loop time t (real time: each at its own pace; clip time: lined up by τ). */
+function poseComparison(t: number): void {
+  if (!cmp) return;
+  const { data, move, shown, puppets, labels, spacing } = cmp;
+  const n = shown.length;
+  const tau = state.sync === 'clip' ? Math.min(t, data.clipS + data.tailS) : t;
+  shown.forEach((name, k) => {
+    const off = (k - (n - 1) / 2) * spacing; // mocap on the left to polished on the right, seen from the 3/4 front view
+    const p = puppets.get(name)!;
+    let pos: Vec3, rot: Mat3, q: Record<string, number>;
+    if (name === 'mocap') {
+      const s = sample(move, Math.min(tau, move.duration), { mirror: false });
+      q = {};
+      library!.joints.forEach((j, i) => { q[j] = s.q[i]; });
+      pos = s.rootPos;
+      rot = matFromQuat(s.rootQuat);
+    } else {
+      const set = data.traces[name];
+      const wall = state.sync === 'clip' ? wallAtTau(set, tau) : Math.min(t, lastWall(set));
+      const tp = traceAt(set, data.joints, wall);
+      q = tp.q;
+      pos = tp.pos;
+      rot = tp.rot;
+    }
+    p.pose(q, [pos[0], pos[1] + off, pos[2]], rot);
+    updateRobotKit([p.view], null, 0);
+    // Label over the head.
+    const l = labels.get(name)!;
+    projected.set(pos[0], pos[1] + off, pos[2] + 0.75 * spacing);
+    studio.physicsRoot.localToWorld(projected);
+    projected.project(studio.camera);
+    const vis = projected.z < 1;
+    l.style.display = vis && state.ui ? 'block' : 'none';
+    l.style.left = `${((projected.x + 1) / 2) * window.innerWidth}px`;
+    l.style.top = `${((1 - projected.y) / 2) * window.innerHeight}px`;
+  });
+  lastRoot = { pos: [0, 0, 0.9], yaw: 0 };
 }
 
 // ---------------------------------------------------------------- UI
@@ -456,7 +576,15 @@ function renderUi(): void {
   ui.append(row('SOURCE', [
     button('Library', state.mode === 'library', () => { state.mode = 'library'; void load(); }),
     button('Raw clip', state.mode === 'clip', () => { state.mode = 'clip'; void load(); }),
+    button('Polish A/B', state.mode === 'compare', () => { state.mode = 'compare'; state.t = 0; void load(); }),
   ]));
+  if (state.mode === 'compare') {
+    ui.append(row('SYNC', [
+      button('Real time', state.sync === 'wall', () => { state.sync = 'wall'; state.t = 0; renderUi(); }),
+      button('Clip time', state.sync === 'clip', () => { state.sync = 'clip'; state.t = 0; renderUi(); }),
+      button('Raw+FB', state.rawfb, () => { state.rawfb = !state.rawfb; void load(); }),
+    ]));
+  }
   const speedLabel = document.createElement('span');
   speedLabel.textContent = `×${state.speed.toFixed(2)}`;
   ui.append(row('SPEED', [slider(0.1, 2.5, 0.05, state.speed, (v) => { state.speed = v; speedLabel.textContent = `×${v.toFixed(2)}`; }), speedLabel]));
@@ -474,7 +602,24 @@ function renderUi(): void {
   ui.append(row('CAMERA', (['front', 'side', 'three', 'top'] as const).map((v) => button(v === 'three' ? '3/4' : v, false, () => view(v)))));
   const list = document.createElement('div');
   list.id = 'moves';
-  if (state.mode === 'clip') {
+  if (state.mode === 'compare') {
+    let design = '';
+    for (const k of compareKeys()) {
+      if (k.design !== design) {
+        design = k.design;
+        const g = document.createElement('div');
+        g.className = 'grp';
+        g.textContent = DESIGNS[design]?.name ?? design;
+        list.append(g);
+      }
+      const d = document.createElement('div');
+      d.textContent = k.move;
+      if (k.design === state.design && k.move === state.move) d.className = 'sel';
+      d.addEventListener('click', () => { state.design = k.design; state.move = k.move; state.t = 0; void load(); });
+      list.append(d);
+    }
+    if (!list.childElementCount) list.textContent = 'no polished moves yet: run tools/polish/run.ts';
+  } else if (state.mode === 'clip') {
     let kind = '';
     for (const c of CLIPS) {
       if (c.kind !== kind) {
@@ -575,8 +720,9 @@ function drawTimeline(): void {
   ctx.strokeStyle = '#ffb020';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(X(state.t), 2);
-  ctx.lineTo(X(state.t), h - 2);
+  const tMark = Math.min(state.t, playable.duration);
+  ctx.moveTo(X(tMark), 2);
+  ctx.lineTo(X(tMark), h - 2);
   ctx.stroke();
   ctx.lineWidth = 1;
   ctx.fillStyle = '#e9ecef';
@@ -627,8 +773,8 @@ function view(preset: 'front' | 'side' | 'three' | 'top' | 'back'): void {
   };
   const [dx, dy, dz] = dir[preset];
   const c = Math.cos(yaw), s = Math.sin(yaw);
-  const dist = strip.length > 1 ? Math.max(state.dist, strip.length * stripSpacing() * 1.25) : state.dist;
-  const side = strip.length > 1 ? 0 : state.ghost ? GHOST_SIDE_M * 0.5 : 0;
+  const dist = cmp ? Math.max(state.dist, cmp.shown.length * cmp.spacing * 1.35) : strip.length > 1 ? Math.max(state.dist, strip.length * stripSpacing() * 1.25) : state.dist;
+  const side = cmp || strip.length > 1 ? 0 : state.ghost ? GHOST_SIDE_M * 0.5 : 0;
   const target = new THREE.Vector3(pos[0], pos[1] + side, Math.max(0.35, pos[2] * 0.85));
   const eye = new THREE.Vector3(target.x + dist * (c * dx - s * dy), target.y + dist * (s * dx + c * dy), target.z + dist * dz);
   studio.physicsRoot.localToWorld(target);
@@ -639,6 +785,13 @@ function view(preset: 'front' | 'side' | 'three' | 'top' | 'back'): void {
 }
 
 function tick(dt: number): void {
+  if (state.mode === 'compare') {
+    if (cmp && state.playing) state.t = (state.t + dt * state.speed) % cmp.loopS;
+    if (cmp) poseComparison(state.t);
+    drawTimeline();
+    studio.render();
+    return;
+  }
   if (playable && puppet && strip.length > 1) {
     poseStrip();
   } else if (playable && puppet) {
@@ -811,5 +964,84 @@ async function sheet(name: string, opts: { times?: number[]; cam?: 'front' | 'si
   return post(out, name, url);
 }
 
+/**
+ * Polish A/B contact sheet: the comparison posed at several moments (clip-time sync, so every row of
+ * robots is at the same instant of the move), each tile labelled, with the measured numbers below.
+ * Posts one PNG to the local receiver. Times default to 8 evenly spaced moments from the start to the end of the tail.
+ */
+async function compareSheet(name: string, opts: { times?: number[]; cols?: number; tileW?: number; cam?: 'front' | 'side' | 'three' | 'top' | 'back' } = {}, url = RECEIVER): Promise<string> {
+  if (!cmp || !playable) throw new Error('not in compare mode');
+  const c = cmp;
+  const nT = 8;
+  const times = opts.times ?? Array.from({ length: nT }, (_, k) => ((c.data.clipS + c.data.tailS * 0.9) * k) / (nT - 1));
+  const cols = opts.cols ?? 4;
+  const rows = Math.ceil(times.length / cols);
+  const src = document.getElementById('c') as HTMLCanvasElement;
+  const tileW = opts.tileW ?? 640;
+  const tileH = Math.round((tileW * src.height) / src.width);
+  const pad = 26;
+  const tableH = 330;
+  const out = document.createElement('canvas');
+  out.width = cols * tileW;
+  out.height = rows * (tileH + pad) + tableH;
+  const g = out.getContext('2d')!;
+  g.fillStyle = '#07080a';
+  g.fillRect(0, 0, out.width, out.height);
+  const saved = { sync: state.sync, t: state.t, playing: state.playing };
+  state.sync = 'clip';
+  state.playing = false;
+  view(opts.cam ?? (state.cam || 'three') as 'front' | 'side' | 'three' | 'top' | 'back');
+  for (let k = 0; k < times.length; k++) {
+    state.t = times[k];
+    poseComparison(state.t);
+    await step(1, 0);
+    const x = (k % cols) * tileW, y = Math.floor(k / cols) * (tileH + pad);
+    g.drawImage(await grab(), x, y + pad, tileW, tileH);
+    // Labels where the page draws them, scaled into the tile.
+    for (const [nm, l] of c.labels) {
+      if (l.style.display === 'none') continue;
+      const lx = (Number.parseFloat(l.style.left) / window.innerWidth) * tileW, ly = (Number.parseFloat(l.style.top) / window.innerHeight) * tileH;
+      g.font = '700 13px Barlow Condensed, sans-serif';
+      g.fillStyle = l.style.color;
+      g.textAlign = 'center';
+      g.fillText(LABEL_TEXT[nm], x + lx, y + pad + ly);
+    }
+    g.textAlign = 'left';
+    g.fillStyle = '#e9ecef';
+    g.font = '600 14px JetBrains Mono, monospace';
+    const band = playable.bands.find((b) => times[k] >= b.from - 1e-6 && times[k] <= b.to + 1e-6);
+    g.fillText(`clip ${times[k].toFixed(2)} s ${band ? band.label : times[k] > c.data.clipS ? 'settle tail' : ''}`, x + 8, y + 18);
+  }
+  // Numbers: the info panel's table, as text.
+  const shown = c.shown.filter((n): n is VariantName => n !== 'mocap');
+  const tbl = document.createElement('div');
+  tbl.innerHTML = metricsTable(c.data, shown);
+  const lines = [...tbl.querySelectorAll('tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent ?? ''));
+  const y0 = rows * (tileH + pad) + 22;
+  g.fillStyle = '#e9ecef';
+  g.font = '600 16px JetBrains Mono, monospace';
+  g.fillText(`${c.data.design.toUpperCase()} · ${c.data.move} · clip ${c.data.clipS.toFixed(2)} s · polish CPU ${Math.round(c.data.cpuS / 60)} min${c.data.stale ? ' · STALE' : ''}`, 12, y0);
+  g.font = '13px JetBrains Mono, monospace';
+  const colW = [250, 110, 110, 110];
+  const half = Math.ceil((lines.length - 1) / 2);
+  const blocks = [lines.slice(1, 1 + half), lines.slice(1 + half)];
+  blocks.forEach((blk, bi) => {
+    const bx = 12 + bi * (colW.reduce((a, b) => a + b, 0) + 40);
+    const head = lines[0];
+    let yy = y0 + 26;
+    g.fillStyle = '#8b929a';
+    head.forEach((h, i) => g.fillText(h, bx + colW.slice(0, i).reduce((a, b) => a + b, 0), yy));
+    for (const r of blk) {
+      yy += 19;
+      r.forEach((v, i) => {
+        g.fillStyle = i === 0 ? '#8b929a' : '#e9ecef';
+        g.fillText(v, bx + colW.slice(0, i).reduce((a, b) => a + b, 0), yy);
+      });
+    }
+  });
+  Object.assign(state, saved);
+  return post(out, name, url);
+}
+
 // Handy for automated checks from the console.
-Object.assign(window, { motions: { state, load, step, seek, view, shot, sheet, studio, playable: () => playable, library: () => library, mulMtV, sub } });
+Object.assign(window, { motions: { state, load, step, seek, view, shot, sheet, compareSheet, studio, playable: () => playable, library: () => library, comparison: () => cmp, mulMtV, sub } });
