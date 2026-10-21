@@ -49,6 +49,9 @@
 //                           feints, reflexes), fed 60 Hz telemetry with the game's 0.3 s reaction delay
 //   --combos body           House Mind runs: drop the brain-sequenced combo steps (what the brain would
 //                           send with COMBO_SEQUENCING = 'body'; the body runs each combination whole)
+//   reactions (Phase 4, tests/balance/reaction-recorder.ts): blows the body felt, absorbs, pre-braces, braces;
+//   recoveries (steps, time to steady); falls (brace before the first non-foot contact, what touched first);
+//   get-ups (first movement and fall to stable standing)
 //   pace (tests/balance/pace-recorder.ts): idle-in-range share and why, the first two-way exchange,
 //   committed strikes per minute, combo completion, feint reads and bites against a no-feint baseline
 import loadMujoco from '@mujoco/mujoco';
@@ -62,10 +65,19 @@ import type { Corner, MatchSetup } from '../src/core/types';
 import { controllerOf, controlSystem, sparringIntent } from '../src/physics/control';
 import { COM_REF } from '../src/physics/control/balance/com-ref';
 import { FOOTWORK_TUNING } from '../src/physics/control/balance/footsteps';
-import { BALANCE_TUNING } from '../src/physics/control/balance/index';
+import { BALANCE_TUNING, KICK_GATE, LUNGE } from '../src/physics/control/balance/index';
 import { MOCAP_STEPS } from '../src/physics/control/balance/mocap-steps';
 import { MOCAP_STYLE } from '../src/physics/control/balance/mocap-style';
 import { anyContact } from '../src/physics/control/contacts';
+import { KICK_RBAL, ROUTE, STRIKE_P3 } from '../src/physics/control/mocap/strikes';
+import { STRIKE_PATH } from '../src/physics/control/strike-path';
+import { INVERSE_DYNAMICS } from '../src/physics/control/feedforward';
+import { IMPEDANCE } from '../src/physics/control/balance/impedance';
+import { GYRO_POLICY } from '../src/physics/control/balance/gyro-policy';
+import { STEP_ADJUST } from '../src/physics/control/balance/step-adjust';
+import { REACTIONS } from '../src/physics/control/balance/reactions';
+import { BEHAVIOURS } from '../src/physics/control/balance/behaviours';
+import { GETUP_SPEED } from '../src/physics/control/getup-speed';
 import { RingIq, type Zone } from '../src/physics/control/ring-iq';
 import type { SkillRun } from '../src/physics/control/skills/types';
 import { buildContext } from '../src/physics/runtime';
@@ -75,6 +87,7 @@ import { buildTelemetry } from '../src/physics/systems/telemetry';
 import { compileWorld } from '../src/physics/world';
 import { exchanges, PaceRecorder, type PaceReport } from '../tests/balance/pace-recorder';
 import { activityOf, BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
+import { ReactionRecorder, summarizeReactions, type ReactionMetrics } from '../tests/balance/reaction-recorder';
 import { DamageRecorder, damageSummary, type FighterDamage } from './damage-metrics';
 
 const INTENT_EVERY_S = 0.5;
@@ -157,6 +170,8 @@ interface FighterReport {
   gyroSatMean: number;
   gyroSatMax: number;
   balance: BalanceMetrics;
+  /** Phase 4 reactions: blows felt, recoveries, braces, what landed first, get-up times (tests/balance/reaction-recorder.ts). */
+  reactions?: ReactionMetrics;
   /** Strikes delivered and what the damage model did (tools/damage-metrics.ts). */
   damage?: FighterDamage;
 }
@@ -189,7 +204,7 @@ export interface FightReport {
 
 const now = () => performance.now();
 
-const TUNABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, COM_REF, MOCAP_STEPS, MOCAP_STYLE };
+const TUNABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, COM_REF, MOCAP_STEPS, MOCAP_STYLE, STRIKE_P3, STRIKE_PATH, LUNGE, ROUTE, KICK_GATE, KICK_RBAL, INVERSE_DYNAMICS, IMPEDANCE, GYRO_POLICY, STEP_ADJUST, REACTIONS, BEHAVIOURS, GETUP_SPEED };
 
 /** SD_TUNE='TABLE.key=value,...': set numeric tunables before a fight (A/B runs, as balance-drills --tune). */
 function applyTune(spec: string | undefined): void {
@@ -235,6 +250,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
 
   const ctl = ctx.robots.map((r) => controllerOf(r)!);
   const recorders = [new BalanceRecorder(ctx, 0, 0.3), new BalanceRecorder(ctx, 1, 0.3)];
+  const reactRecs = ctx.robots.map((r) => (ctl[r.corner].engine ? new ReactionRecorder(ctx, r) : null));
   const pace = new PaceRecorder(ctl);
   // House Mind: the real Brain (src/brain), no network, fed telemetry frames; its intents land after
   // the game's reaction delay, as in the worker.
@@ -358,6 +374,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
     }
     for (const s of systems) s.post?.(ctx);
     for (const rec of recorders) rec.sample(ctx);
+    for (const rec of reactRecs) rec?.sample(ctx);
     for (const e of ctx.events) {
       onEvent(e);
       damageRec.onEvent(e, ctx.time);
@@ -535,6 +552,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
       gyroSatMean: sat[c].n ? sat[c].sum / sat[c].n : 0,
       gyroSatMax: sat[c].max,
       balance: recorders[c].result(),
+      reactions: reactRecs[c]?.result(),
       damage: damageRec.fighter(c as 0 | 1),
     };
   });
@@ -691,6 +709,7 @@ export function summarize(fights: FightReport[]): string {
     `  gyro saturation (no skill) / at touchdown free   ${avg('gyroSatFootwork').toFixed(2)} / ${avg('reserveAtTouchdown').toFixed(2)}`,
     `  single support inside 2 m                ${pct(avg('singleInside2'))}`,
     ...damageSummary(fights),
+    ...(fs.some(({ x }) => x.reactions) ? summarizeReactions(fs.flatMap(({ x }) => (x.reactions ? [x.reactions] : [])), perTwoMin) : []),
     'mocap footwork (Phase 5):',
     `  clip steps ${pct(avg('clipLiftShare'))} of swings (+${pct(avg('followLiftShare'))} the planner's, clip clock following), clip-driven ${pct(avg('clipMoveShare'))} of moving time, style on ${pct(avg('styleShare'))} of the time up`,
     ...ringLines(fs.map(({ x }) => x), minutes),

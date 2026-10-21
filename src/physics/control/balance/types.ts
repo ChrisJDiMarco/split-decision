@@ -33,6 +33,11 @@ export interface BalanceState {
   margin: number;
   /** Share of the gyro's momentum still free (1 − saturation), 0 without a core. */
   gyroReserve: number;
+  /**
+   * Torque reserve of the planted legs (Phase 2): 1 − the largest share of its available torque the
+   * inverse-dynamics feed-forward asked of any planted-leg servo last tick (0: one is at its limit).
+   */
+  torqueReserve: number;
   mode: BalanceStateMode;
   clipRate: number;
   clipSync: { hold: boolean; jumpTo?: number };

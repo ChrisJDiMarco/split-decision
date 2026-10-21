@@ -91,13 +91,18 @@ export function parseCentroid(json: CentroidJson): CentroidSet {
   return { design: json.design, massKg: json.massKg, zc: json.zc, omega0: json.omega0, tracks };
 }
 
-/** Node only: the table read from disk, or null (browser, or none built). */
+/**
+ * Node only: the table read from disk, or null (browser, or none built). SD_CENTROID_DIR names
+ * another folder to read first (tools: an actuator variant's tables, tools/motor-variants.ts).
+ */
 function readFromDisk(designId: string): CentroidJson | null {
-  const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+  const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown; env?: Record<string, string | undefined> } }).process;
   if (typeof proc?.getBuiltinModule !== 'function') return null;
   try {
     const fs = proc.getBuiltinModule('node:fs') as typeof import('node:fs');
     const url = proc.getBuiltinModule('node:url') as typeof import('node:url');
+    const dir = proc.env?.SD_CENTROID_DIR;
+    if (dir && fs.existsSync(`${dir}/${designId}.json`)) return JSON.parse(fs.readFileSync(`${dir}/${designId}.json`, 'utf8')) as CentroidJson;
     const rel = './centroid/' + designId + '.json';
     const path = url.fileURLToPath(new URL(rel, import.meta.url));
     if (!fs.existsSync(path)) return null;

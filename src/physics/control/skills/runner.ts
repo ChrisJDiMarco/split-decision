@@ -131,7 +131,8 @@ export class SkillRunner {
     if (r.phase === 'windup') {
       r.aim = this.leadAim(env, r);
       const ready = r.def.ready ? r.def.ready(env, r) : true;
-      if (!ready && r.t > READY_TIMEOUT_S) {
+      // (A skill whose readiness was called off for good, scratch.abort: a kick's gate, ends now.)
+      if (!ready && (r.t > READY_TIMEOUT_S || r.scratch.abort)) {
         this.cancel(env, true);
         return;
       }

@@ -6,7 +6,7 @@
 // in docs/research/08-modern-roster.md/.json. The IRON AGE class keeps the original hydraulic
 // heavyweights (Bruiser, Striker, Goliath) as an optional selection.
 import type { RobotDesign } from '../../core/types';
-import { buildHumanoid, scaleForHeight } from '../humanoid';
+import { buildHumanoid, scaleForHeight, type HumanoidSpec } from '../humanoid';
 
 // ---------------------------------------------------------------- modern (electric)
 //
@@ -24,7 +24,7 @@ import { buildHumanoid, scaleForHeight } from '../humanoid';
 //    17, HAYMAKER 29 N·s), so a head pops to an exceptional shot or a heavier class's power punch.
 
 const FIRECRACKER_PROPORTIONS = { shoulders: 1.06, arms: 1.06 };
-export const FIRECRACKER = buildHumanoid({
+const FIRECRACKER_SPEC: HumanoidSpec = {
   id: 'firecracker',
   name: 'FIRECRACKER',
   tagline: 'Thirty-eight kilos of fast hands, back up before the count starts.',
@@ -33,7 +33,9 @@ export const FIRECRACKER = buildHumanoid({
   proportions: FIRECRACKER_PROPORTIONS,
   armor: 'polycarb',
   frame: 'al6061',
-  motors: { leg: 'qdd.ak10', knee: 'qdd.rs04', arm: 'qdd.rs06', elbow: 'qdd.rs02', waist: 'qdd.rs03', neck: 'qdd.rs00' },
+  // Strike pass (docs/design/strike-power.md §2.8, approved 2026-10-06; gantry A/B in docs/research/
+  // 08-modern-roster.md): the shoulder pitch and elbow were torque-bound through every punch.
+  motors: { leg: 'qdd.ak10', knee: 'qdd.rs04', arm: 'qdd.rs06', elbow: 'qdd.rs06', waist: 'qdd.rs03', neck: 'qdd.rs00', shoulderPitch: 'qdd.ak10' },
   fist: 'block',
   head: 'visor',
   gyro: { maxTorqueNm: 70, momentumNms: 24, massKg: 3.1 }, // mgh ≈ 250 N·m: 0.28·mgh, 8% of the body
@@ -49,10 +51,11 @@ export const FIRECRACKER = buildHumanoid({
   era: 'modern',
   // 2.5 mm polycarbonate covers (production-humanoid practice), a dense torso holding the pack.
   shell: { armorMm: 2.5, frameMm: 2, headMm: 2.5, fillKgM3: 100, torsoFillKgM3: 245, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
-});
+};
+export const FIRECRACKER = buildHumanoid(FIRECRACKER_SPEC);
 
 const SAVATE_PROPORTIONS = { legs: 1.04, arms: 1.06, torso: 0.96 };
-export const SAVATE = buildHumanoid({
+const SAVATE_SPEC: HumanoidSpec = {
   id: 'savate',
   name: 'SAVATE',
   tagline: 'Twin-drive legs, 22 rad/s at the knee. The shins are the weapon.',
@@ -61,7 +64,9 @@ export const SAVATE = buildHumanoid({
   proportions: SAVATE_PROPORTIONS,
   armor: 'polycarb',
   frame: 'al7075',
-  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs04', elbow: 'qdd.rs03', waist: 'qdd.rs04', neck: 'servo.neck' },
+  // Strike pass (strike-power.md §2.8): AKE90 shoulder pitch, a twin-AKE90 waist yaw (the chest
+  // turned 6-7 of 21 rad/s on the RS04) and a twin-RS06 elbow (50 rad/s: a human elbow extends at 22-41).
+  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs04', elbow: 'qdd.rs06x2', waist: 'qdd.rs04', neck: 'servo.neck', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2' },
   fist: 'block',
   head: 'slit',
   gyro: { maxTorqueNm: 140, momentumNms: 49, massKg: 6.5 }, // mgh ≈ 695 N·m: 0.2·mgh
@@ -75,10 +80,11 @@ export const SAVATE = buildHumanoid({
   weightClass: 'middle',
   era: 'modern',
   shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 140, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
-});
+};
+export const SAVATE = buildHumanoid(SAVATE_SPEC);
 
 const HAYMAKER_PROPORTIONS = { shoulders: 1.03, legs: 0.97, arms: 1.04, head: 0.95 };
-export const HAYMAKER = buildHumanoid({
+const HAYMAKER_SPEC: HumanoidSpec = {
   id: 'haymaker',
   name: 'HAYMAKER',
   tagline: 'The heaviest thing electric joints can carry. Every punch is thrown to end it.',
@@ -87,7 +93,12 @@ export const HAYMAKER = buildHumanoid({
   proportions: HAYMAKER_PROPORTIONS,
   armor: 'uhmw',
   frame: 'al7075',
-  motors: { leg: 'plan.x12', knee: 'qdd.ake90x3', arm: 'qdd.rs04', elbow: 'qdd.rs04', waist: 'plan.x12', neck: 'servo.neck' },
+  // Strike pass (strike-power.md §2.8, decision D3: the hips too): AKE90 shoulder pitch, twin-AKE90
+  // waist yaw, triple-AKE90 hip pitch and yaw (the X12 ran kicks at 0.75 of its 13.1 rad/s). Elbow
+  // after the gantry A/B: the AKE90 (170 N·m, 22 rad/s) snaps as fast as the twin RS06 on this arm (7.05
+  // vs 7.01 m/s) and pushes a 114 kg body up off the canvas (get-ups 7/8 against 5/6 and the RS04's
+  // 5/8). Hip roll, the ankles and the waist pitch stay on the X12.
+  motors: { leg: 'plan.x12', knee: 'qdd.ake90x3', arm: 'qdd.rs04', elbow: 'qdd.ake90', waist: 'plan.x12', neck: 'servo.neck', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2', hipPitch: 'qdd.ake90x3', hipYaw: 'qdd.ake90x3' },
   fist: 'block',
   head: 'slit',
   gyro: { maxTorqueNm: 195, momentumNms: 68, massKg: 9.1 }, // mgh ≈ 950 N·m: 0.2·mgh, the biggest core
@@ -103,10 +114,11 @@ export const HAYMAKER = buildHumanoid({
   era: 'modern',
   // UHMW slabs are 15-20 mm on the chest faces and thinner elsewhere: 7 mm averaged over the shells.
   shell: { armorMm: 7, frameMm: 2.5, headMm: 8, fillKgM3: 100, torsoFillKgM3: 75, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
-});
+};
+export const HAYMAKER = buildHumanoid(HAYMAKER_SPEC);
 
 const PYLON_PROPORTIONS = { legs: 1.06, arms: 1.12, torso: 0.94, head: 0.92, shoulders: 0.95 };
-export const PYLON = buildHumanoid({
+const PYLON_SPEC: HumanoidSpec = {
   id: 'pylon',
   name: 'PYLON',
   tagline: "Six foot two of legs. It hits you from where you can't hit back.",
@@ -115,7 +127,9 @@ export const PYLON = buildHumanoid({
   proportions: PYLON_PROPORTIONS,
   armor: 'carbon',
   frame: 'al7075',
-  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs03', elbow: 'qdd.rs06', waist: 'qdd.rs04', neck: 'qdd.rs00' },
+  // Strike pass (strike-power.md §2.8): AKE90 shoulder pitch, twin-RS06 elbow (the RS06 ran at
+  // 0.27-0.43 of no-load, torque-bound), twin-AKE90 waist yaw.
+  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs03', elbow: 'qdd.rs06x2', waist: 'qdd.rs04', neck: 'qdd.rs00', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2' },
   fist: 'block',
   head: 'twin',
   gyro: { maxTorqueNm: 150, momentumNms: 51, massKg: 6.8 }, // mgh ≈ 745 N·m: 0.2·mgh (it saturates first: narrow hips, high COM)
@@ -129,7 +143,8 @@ export const PYLON = buildHumanoid({
   weightClass: 'middle',
   era: 'modern',
   shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 120, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
-});
+};
+export const PYLON = buildHumanoid(PYLON_SPEC);
 
 // ---------------------------------------------------------------- iron age (hydraulic heavyweights)
 
@@ -202,6 +217,17 @@ export const GOLIATH = buildHumanoid({
   weightClass: 'open',
   era: 'iron',
 });
+
+/**
+ * The modern designs' builder specs, by id: tools rebuild variants from them (an actuator A/B on the
+ * gantry and in the drills, docs/research/08-modern-roster.md). The game uses DESIGNS.
+ */
+export const MODERN_SPECS: Readonly<Record<string, HumanoidSpec>> = {
+  firecracker: FIRECRACKER_SPEC,
+  savate: SAVATE_SPEC,
+  haymaker: HAYMAKER_SPEC,
+  pylon: PYLON_SPEC,
+};
 
 /** The whole roster in display order: the modern four first, then the iron age. */
 export const DESIGNS: Record<string, RobotDesign> = {

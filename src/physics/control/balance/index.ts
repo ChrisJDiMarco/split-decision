@@ -28,13 +28,15 @@ import { clampToPolygon, convexHull, footCorners, polygonDistance, type FootPlac
 import type { MocapSet } from '../mocap/library';
 import { ComReference } from './com-ref';
 import { DcmPlan, newDcmSample } from './dcm';
-import { FOOTWORK_TUNING, FootstepPlanner, soleCmp, type GaitKind, type PlanInput } from './footsteps';
+import { constrainFrom, FOOTWORK_TUNING, FootstepPlanner, pushCmp, soleCmp, type GaitKind, type PlanInput } from './footsteps';
 import { GYRO_POLICY, gyroPolicy, newGyroCommand } from './gyro-policy';
 import { FUTURE_S, MOCAP_STEPS, MocapSteps, type ClipFootstep } from './mocap-steps';
 import { MOCAP_STYLE } from './mocap-style';
 import { newRolloutResult, rollout } from './rollout';
 import { newTakeoffState, planTakeoff, TAKEOFF, type TakeoffRequest } from './takeoff';
-import { adjustSwing, captureStep, followCapture } from './step-adjust';
+import { adjustSwing, captureStep, followCapture, STEP_ADJUST } from './step-adjust';
+import { Impedance } from './impedance';
+import { REACTIONS, Reactions } from './reactions';
 import { Swing } from './swing';
 import type { BalanceProbe, BalanceState } from './types';
 
@@ -74,6 +76,9 @@ export const BALANCE_TUNING = {
   trimTauS: 0.4, // holding still: the pelvis trim closes the body's DCM error to the plan at this rate...
   trimMaxM: 0.04, // ...by at most this much, and only below this error...
   trimSpeed: 0.1, // ...and this COM speed (m/s)
+  // ...and through a kick's weight shift at this rate (0: not then). Measured at 0.15 and 0.08 s: the lift
+  // gate then opened on bodies not ready for one foot (kick falls per 10: 2.1-3.8 on SAVATE and PYLON). Off.
+  kickTrimTauS: 0,
   stableSpeed: 0.3, // m/s and rad/s: stable (Euphoria's thresholds)
   stableErrM: 0.05, // DCM error under this counts as stable
   steadyReserve: 0.6, // gyro momentum free to count as steady (§5.2: ready to throw from a set stance)...
@@ -93,6 +98,11 @@ export const BALANCE_TUNING = {
   stepStrikeInsideM: 0.02,
   copSlewM: 0.018, // the planned COP (and the ground force's CMP) moves at most this far per control tick
   noPickS: 0.6, // a clip step that waited out liftWaitS blocks mocap picks this long
+  resquareS: 0.3, // holding position, a stance knocked out of shape is re-formed only after this long stable
+  stallCapture: 1, // a lift that stalled liftWaitS with the DCM outside the soles becomes a catch step (0: re-plan)
+  // Recovering on two feet after a hit or a catch step (reactions.ts 'recover'): the DCM feedback's gain ×
+  // this, so the body is brought to rest over its new stance sooner (the COP stays inside the soles).
+  recoverKp: 1,
 };
 
 /**
@@ -108,6 +118,27 @@ export const KICK_GATE = {
   xiM: 0.02,
   flat: 0.97,
   waitS: 0.3,
+  // The momentum the gyro must have free (mocap/strikes.ts kickClip): this share of the centroid table's
+  // peak (the actor's whole body turning; the robot's feet stay planted and its trunk turns a share),
+  // less what the stance sole carries over the leg's flight (m·g·(half-width − soleMarginM)·flight).
+  momentumShare: 0.6,
+  soleMarginM: 0.02,
+  outM: 0.02, // the DCM this far outside both soles during the shift calls the kick off at once
+};
+
+/**
+ * A blow's step-in (requestLunge; docs/design/strike-power.md §2.6), exported so tools can sweep it:
+ * the stride's limits, the swing's, and how long the lunging foot may take to unload.
+ */
+export const LUNGE = {
+  maxStride: 0.3, // × leg length
+  minM: 0.04, // a shorter step-in is not taken
+  minSwingS: 0.14,
+  maxSwingS: 0.32,
+  unloadS: 0.06, // the foot lifts once the pressure is off it, or after this long
+  pushShare: 0.6, // the rear sole pushes from at most this share of its half-length toward the travel
+  frontShare: 0.7, // after the landing the CMP goes this share of the way from the rear foot to the front one
+  maxStanceShare: 1.3, // the front foot lands at most this × the stance's length ahead of the rear one
 };
 
 export interface EngineInput {
@@ -128,6 +159,14 @@ export interface EngineInput {
   gyroTorqueNm: number;
   gyroMomentumNms: number;
   legs: Record<Side, LegCommand>;
+  /** Phase 4 (reactions.ts): the opponent's windup when he is within reach with a strike (0..1)... */
+  threat?: number;
+  /** ...and whether this body is throwing one itself (its lean is on purpose; no pre-brace). */
+  striking?: boolean;
+  /** The torso's up axis as last commanded (world; the reactions judge only the lean beyond it). */
+  torsoUpCmd?: readonly number[];
+  /** Standing up out of the get-up crouch (the COM is low on purpose). */
+  rising?: boolean;
 }
 
 const ZERO: P2 = [0, 0];
@@ -138,7 +177,7 @@ export class BalanceEngine {
   readonly swing = new Swing();
   readonly ref = newDcmSample();
   readonly state: BalanceState = {
-    xi: [0, 0], xiRef: [0, 0], margin: 1, gyroReserve: 1, mode: 'steady', clipRate: 1, clipSync: { hold: false },
+    xi: [0, 0], xiRef: [0, 0], margin: 1, gyroReserve: 1, torqueReserve: 1, mode: 'steady', clipRate: 1, clipSync: { hold: false },
     steady: false, canStrike: false, canKick: false, xiTouch: [0, 0], touchIn: -1,
   };
   readonly gyro = newGyroCommand();
@@ -208,6 +247,25 @@ export class BalanceEngine {
   private takeoff: TakeoffRequest | null = null;
   private takeoffFresh = false;
   readonly takeoffState = newTakeoffState();
+  /** A blow's step-in waiting for its foot to unload (requestLunge), and since when. */
+  private lunge: { side: Side; place: FootPlace; land: number; since: number; ux: number; uy: number } | null = null;
+  /** Step-ins taken, and the last one's stride (diagnostics). */
+  lunges = 0;
+  lastLungeM = 0;
+  private settledSince = -1;
+  /** The polygon the planned COP was kept inside this tick (the soles shrunk; the stance sole alone while a
+   *  foot unloads to step): the feed-forward's soles stay inside it too. */
+  copSupport: P2[] = [];
+  /** How far the DCM sits outside the soles on two feet (m; ≤ 0 inside, 0 in single support). */
+  private xiOutside = 0;
+  /** A lift stalled with the DCM outside the support: the next capture check steps whatever the plan says. */
+  private forceCapture = false;
+  /** Per-joint gain and damping scales (impedance.ts). */
+  private readonly impedance: Impedance;
+  /** Phase 4: what the body is doing about a hit or a fall (absorb, recover, brace; reactions.ts). */
+  readonly reactions: Reactions;
+  private comMeasured = false;
+  private readonly shareFn = (side: Side): number => this.loadShare(side);
 
   constructor(
     readonly geo: HumanoidGeometry,
@@ -218,6 +276,9 @@ export class BalanceEngine {
     readonly probe: BalanceProbe,
   ) {
     this.planner = new FootstepPlanner(geo, stance, gait);
+    this.impedance = new Impedance(r, jm);
+    // (The COM's standing height is refined from the body the first time it stands: reset.)
+    this.reactions = new Reactions(geo, 0.5 * geo.height);
   }
 
   /** The design's motion library has loaded: footwork from its clips from now on. */
@@ -240,6 +301,135 @@ export class BalanceEngine {
     this.takeoffFresh = true;
     this.mocap?.cancel();
     return true;
+  }
+
+  /**
+   * A blow's step-in (strike-power.md §2.6: the lead foot timed to plant on the impact frame, the rear
+   * leg pushing before the arm fires): from two planted feet, the front foot along `heading` (`side`
+   * when they are level) steps `dist` forward (within LUNGE.maxStride and the legs' span), landing as
+   * wide of the rear foot as its stance slot, at `landAt`.
+   * The foot unloads first (the pressure goes onto the other sole), then swings while the rear sole
+   * pushes (as hard as the DCM needs to arrive over the new stance, lungeTick), so the body arrives
+   * moving into the blow; the landing is the step adjuster's, like any planned step. False when the
+   * body is not settled on two planted feet (state.canStrike) or something else owns them (a kick's
+   * shift, a take-off, a capture step, a swing), or the step would be too short to matter.
+   */
+  requestLunge(side: Side, dist: number, heading: number, landAt: number, now: number): boolean {
+    const g = this.gait;
+    if (g.phase !== 'double' || !g.bothPlanted() || this.takeoff || this.capturing || this.swing.active || this.lunge) return false;
+    // Only from a settled stance (the DCM inside the feet with margin, the trunk still: canStrike from two
+    // planted feet): a body still coming off the walk's last step has no push to spare (stepping again at
+    // once braked it and swung its capture point out past the new stance into a catch step).
+    if (!this.state.canStrike) return false;
+    const ux = Math.cos(heading), uy = Math.sin(heading);
+    // The foot nearer him steps (after a walk the stance's lead may be the one behind); `side` when level.
+    const fl = g.feet.l.place, fr = g.feet.r.place;
+    const ahead = (fl.x - fr.x) * ux + (fl.y - fr.y) * uy;
+    if (Math.abs(ahead) > 0.02) side = ahead > 0 ? 'l' : 'r';
+    const f = g.feet[side].place;
+    // `dist` (within the stride) further along the heading than the foot stands now, and as wide of the
+    // rear foot as the stance's own slot (a walk can leave the feet nearly in line: a blow thrown over
+    // that base swings the capture point out sideways), within what the legs can span (the feet never cross).
+    const d0 = Math.min(dist, LUNGE.maxStride * this.geo.legLength);
+    const slot = g.partnerSlot(side, heading);
+    // ...and never longer than maxStanceShare × the stance's own length (a walk can end in a long stance:
+    // stepping on from it leaves a base the blow's turn and the target's push-back topple).
+    const rear = g.feet[other(side)].place;
+    const nominal = Math.abs(this.stance.slots.l.x - this.stance.slots.r.x);
+    const along = Math.min(f.x * ux + f.y * uy + d0, rear.x * ux + rear.y * uy + LUNGE.maxStanceShare * nominal);
+    const lat = -slot.x * uy + slot.y * ux;
+    const want: FootPlace = { x: along * ux - lat * uy, y: along * uy + lat * ux, yaw: slot.yaw };
+    const place = constrainFrom(this.geo, g.feet[other(side)].place, side, want, FOOTWORK_TUNING.maxSepL * this.geo.legLength);
+    const d = (place.x - f.x) * ux + (place.y - f.y) * uy;
+    if (d < LUNGE.minM) return false;
+    this.lunge = { side, place, land: landAt, since: now, ux, uy };
+    this.lastLungeM = d;
+    this.mocap?.cancel();
+    return true;
+  }
+
+  /** A step-in on its way (requested, waiting for its foot) or none. */
+  get lunging(): boolean {
+    return this.lunge !== null;
+  }
+
+  /** The step-in's foot lifts once it is unloaded; then the plan pushes off the rear sole into the landing. */
+  private lungeTick(s: Sense): void {
+    const L = this.lunge!;
+    const g = this.gait;
+    if (g.phase !== 'double' || !g.bothPlanted() || this.swing.active || this.takeoff) {
+      this.lunge = null;
+      return;
+    }
+    const stance = other(L.side);
+    const inner = footCorners(this.geo, stance, g.feet[stance].place, BALANCE_TUNING.copShrinkM);
+    if (polygonDistance(inner, this.cop).d > BALANCE_TUNING.captureCopM && s.time - L.since < LUNGE.unloadS) return;
+    this.lunge = null;
+    const t = s.time;
+    const swing = clamp(L.land - t, LUNGE.minSwingS, LUNGE.maxSwingS);
+    const lift = FOOTWORK_TUNING.walkLift * this.geo.legLength;
+    if (!g.engineStep(L.side, L.place, swing, lift)) return;
+    this.swing.start(t, g.feet[L.side].place, 0, L.place, swing, lift, BALANCE_TUNING.swingLeadS);
+    this.swingSide = L.side;
+    this.landNom = { ...L.place };
+    this.capturing = false;
+    this.captureSide = null;
+    this.waitSince = -1;
+    this.lunges++;
+    this.probe.lifts++;
+    // The plan: the rear sole pushes from its ball while the foot is in the air, then the CMP slides
+    // onto the new support's centre.
+    const cmpNow: P2 = [0, 0];
+    if (this.planned) this.dcm.cmpAt(this.planClock(t), cmpNow);
+    else {
+      cmpNow[0] = this.cop[0];
+      cmpNow[1] = this.cop[1];
+    }
+    const rear = g.feet[stance].place;
+    // The weight goes on onto the front foot (the blow's weight transfer), not just back to the middle:
+    // the DCM should arrive there as the foot lands. The rear sole pushes only as hard as that takes from
+    // where the DCM is now (ξ(T) = c + (ξ₀ − c)·e^{ωT}, so c = (ξ(T) − ξ₀·e^{ωT}) / (1 − e^{ωT})), at most
+    // from its ball (pushShare) and at least from inside it: a body already coming forward off the walk's
+    // own step is pushed less, or braked, so its DCM does not carry past the new stance into a capture step.
+    const k = LUNGE.frontShare;
+    const goal: P2 = [rear.x + (L.place.x - rear.x) * k, rear.y + (L.place.y - rear.y) * k];
+    const E = Math.exp(s.omega0 * swing);
+    const want: P2 = [(goal[0] - this.xiM[0] * E) / (1 - E), (goal[1] - this.xiM[1] * E) / (1 - E)];
+    const push = clampToPolygon(footCorners(this.geo, stance, rear, BALANCE_TUNING.copShrinkM), want);
+    const ball = pushCmp(this.geo, stance, rear, L.ux, L.uy, LUNGE.pushShare);
+    const over = (push[0] - ball[0]) * L.ux + (push[1] - ball[1]) * L.uy;
+    if (over > 0) {
+      push[0] -= over * L.ux;
+      push[1] -= over * L.uy;
+    }
+    this.dcm.clear();
+    this.dcm.add(t, cmpNow[0], cmpNow[1]);
+    this.dcm.add(t + Math.min(0.05, swing * 0.3), push[0], push[1]);
+    this.dcm.add(t + swing, push[0], push[1]);
+    this.dcm.add(t + swing + FOOTWORK_TUNING.finalDs / s.omega0, goal[0], goal[1]);
+    this.dcm.solve(s.omega0);
+    this.planner.count = this.planner.next = 0;
+    this.planner.gait = 'drag';
+    this.planner.gaitSince = t;
+    this.holdPlan = false;
+    this.planned = true;
+    // The reference starts from the measured DCM (the push was sized from it) and blends onto the plan's:
+    // a plan's own DCM now lies behind a body already coming forward, and tracking it would brake him.
+    this.dcm.sample(t, this.scratch);
+    this.blend[0] = this.xiM[0] - this.scratch.xi[0];
+    this.blend[1] = this.xiM[1] - this.scratch.xi[1];
+    this.blendT = t;
+    this.lastPlanT = t;
+  }
+
+  /** A capture step is in the air (planned where the DCM will be, timed for the leg). */
+  get catching(): boolean {
+    return this.capturing && this.swing.active;
+  }
+
+  /** Recovering: a capture step in the air, or on two feet with the DCM outside the soles (STEP_ADJUST.captureOutM). */
+  get recovering(): boolean {
+    return this.catching || this.xiOutside > STEP_ADJUST.captureOutM;
   }
 
   /** The flashy stage dropped the take-off (not ready in time, or changed its mind). */
@@ -317,6 +507,7 @@ export class BalanceEngine {
     this.r.mem[GAZE_STABILIZE_KEY] = false;
     this.mocap?.cancel();
     this.takeoff = null;
+    this.lunge = null;
     this.takeoffState.active = this.takeoffState.ready = false;
     this.swing.stop();
     this.swingSide = null;
@@ -331,9 +522,15 @@ export class BalanceEngine {
     this.lastLanded = null;
     this.capturing = false;
     this.captureSide = null;
+    this.forceCapture = false;
     this.planner.reset(s?.time ?? 0);
     this.com.primed = false;
     this.slewPrimed = false;
+    this.reactions.reset(s?.time ?? 0);
+    if (s && !this.comMeasured && s.pelvisPos[2] > 0.9 * this.stance.pelvisHeight) {
+      this.reactions.setStandingCom(s.com[2] - Math.min(s.feet.l.sole[2], s.feet.r.sole[2]));
+      this.comMeasured = true;
+    }
     if (s) {
       this.com.reset(s);
       this.cmp[0] = this.cop[0] = this.cmpSoles[0] = s.capture[0];
@@ -353,6 +550,17 @@ export class BalanceEngine {
     if (!this.driveSet) this.setDrive(s);
     g.maintain(s);
     this.senseXi(s);
+    // Phase 4: a hit, a recovery, a fall that can no longer be caught (reactions.ts). A brace takes the
+    // feet off the plan: no new steps, no catch steps (the one in the air lands).
+    const R = this.reactions;
+    R.update(s, dt, {
+      gait: g, recovering: this.recovering, gyroReach: inp.gyroHealth > 0 ? gyroReach(s, inp) : 0,
+      threat: inp.threat ?? 0, oppDist: inp.oppDist, striking: !!inp.striking || g.phase === 'shift' || g.phase === 'skill', allowSteps: inp.allowCapture,
+      touchdowns: this.probe.touchdowns,
+      touch: g.phase === 'single' && g.swingSide && this.swing.active && this.state.touchIn >= 0 ? { xi: this.state.xiTouch, landing: this.swing.target, side: g.swingSide } : null,
+      torsoUpCmd: inp.torsoUpCmd ?? null, rising: inp.rising,
+    });
+    if (R.mode === 'brace') inp = { ...inp, holdFeet: true, allowCapture: false };
     if (this.mocap) {
       const up = this.planner.upcoming();
       this.mocap.tick(s.time, dt, up ? up.lift : NaN);
@@ -360,9 +568,10 @@ export class BalanceEngine {
       if (this.mocap.following) this.probe.followTime += dt;
     }
     if (this.swing.active || this.planner.count > this.planner.next) this.probe.moveTime += dt;
+    this.trackSettled(s);
     if (g.phase === 'double' && !g.bothPlanted()) {
       // Feet in the air (dropped off the gantry, not landed yet): hold on, wait for the canvas.
-      this.idle(s, inp);
+      this.idle(s, inp, dt);
       return;
     }
     let touched = false;
@@ -377,6 +586,7 @@ export class BalanceEngine {
     // Plan: kicks and held feet stand on what they have; otherwise at every footstep event and
     // whenever the goal moves; a held stance refreshes its weight shift every tick.
     const kicking = g.phase === 'shift' || g.phase === 'skill';
+    if (this.lunge && !kicking) this.lungeTick(s);
     if (this.takeoff && !kicking) this.planTakeoffTick(s);
     else if (kicking) {
       this.kick(s);
@@ -384,8 +594,12 @@ export class BalanceEngine {
     } else if (inp.holdFeet) {
       if (g.phase === 'double') this.planHold(s, inp, false);
       else if (touched || !this.planned) this.replan(s, inp);
-    } else if (touched || this.needsPlan(s, inp)) this.replan(s, inp);
-    else if (this.holdPlan && g.phase === 'double') this.planHold(s, inp, false);
+    } else if (touched || this.needsPlan(s, inp)) {
+      // Holding position after a shove, a catch step or a hit: the stance is re-formed only once the body
+      // has settled (§6: re-square after 0.3 s stable); until then both feet stay down under the CMP.
+      if (!inp.goal && T.resquareS > 0 && g.phase === 'double' && g.bothPlanted() && !this.settledFor(s.time, T.resquareS)) this.planHold(s, inp, false);
+      else this.replan(s, inp);
+    } else if (this.holdPlan && g.phase === 'double') this.planHold(s, inp, false);
     // Lift-off when the plan says, if the body is ready.
     if (!kicking && !this.takeoff && !inp.holdFeet && g.phase === 'double' && g.bothPlanted()) this.maybeLift(s, inp);
     // The reference (its clock stops while a swing is late or a lift waits), feedback, allocation.
@@ -412,22 +626,28 @@ export class BalanceEngine {
     const physical = shrunk;
     const unloading = this.unloadingFor();
     if (unloading) shrunk = footCorners(this.geo, unloading, g.feet[unloading].place, T.copShrinkM);
+    // (The feed-forward keeps the soles' pressure inside this too: a foot unloading to step stays unloaded.)
+    this.copSupport = shrunk;
     // The COM reference runs the DCM feedback law on itself, under a CMP the soles (and, past
     // them, the gyro) can deliver; the posture tracks it.
     const hasGyro = inp.gyroHealth > 0;
     const reach = hasGyro ? gyroReach(s, inp) : 0;
     // Outside a walk the CMP is also kept behind the body's own DCM (COM_REF.guardFromM).
-    this.com.step(s, this.vCtl, dt, this.ref, this.state.xiRef, 1 + T.kp, shrunk, reach, this.cmp, this.cop, this.gyroShare, this.planner.gait !== 'walk' ? this.xiM : undefined);
+    const kp = T.kp * (R.mode === 'recover' && g.phase === 'double' ? T.recoverKp : 1);
+    this.com.step(s, this.vCtl, dt, this.ref, this.state.xiRef, 1 + kp, shrunk, reach, this.cmp, this.cop, this.gyroShare, this.planner.gait !== 'walk' ? this.xiM : undefined);
     this.cmpSoles[0] = this.cop[0];
     this.cmpSoles[1] = this.cop[1];
     this.slewSoles(physical);
     const cop = this.cmpSoles;
     // Gyro: damping, the emergency remainder; bleed only on two feet with margin.
     const inside = support.length >= 3 ? -polygonDistance(support, this.xiM).d : -1;
-    gyroPolicy(s.mass, s.com[2], s.torsoOmega, hasGyro ? this.gyroShare : ZERO, inp.gyroSaturation, inside, this.bleedShare(t), this.gyro);
+    this.xiOutside = g.phase === 'double' && g.bothPlanted() ? -inside : 0;
+    gyroPolicy(s.mass, s.com[2], s.torsoOmega, hasGyro ? this.gyroShare : ZERO, inp.gyroSaturation, inside, this.bleedShare(t), this.gyro, R.mode === 'recover' || R.mode === 'absorb');
+    if (R.mode === 'brace' && hasGyro) braceGyro(s, inp, this.gyro.demand, this.gyro);
     // The step adjuster (in the air) and capture steps (on two feet).
     if (g.phase === 'single' && g.swingSide && this.swing.active) this.adjust(s, g.swingSide);
-    else if (inp.allowCapture && g.phase === 'double' && g.bothPlanted()) this.capture(s, inp);
+    else if (inp.allowCapture && g.phase === 'double' && g.bothPlanted()) this.capture(s, inp, this.forceCapture);
+    if (g.phase !== 'double') this.forceCapture = false;
     if (g.phase === 'skill' && skillCaptureStep(g, this.geo, s, false)) {
       this.captured = true;
       g.captureSteps++;
@@ -439,17 +659,32 @@ export class BalanceEngine {
     this.force[0] = T.forceFF * s.mass * w * w * (this.com.c[0] - cop[0]);
     this.force[1] = T.forceFF * s.mass * w * w * (this.com.c[1] - cop[1]);
     this.writeLegs(s, inp.legs);
-    this.writeImpedance();
+    this.writeImpedance(dt);
     this.report(s, inp, inside, ex, ey);
     this.wasHolding = this.holdPlan && g.phase === 'double';
     // The head stays locked on its target in the world while the body turns under it (gaze.ts).
     this.r.mem[GAZE_STABILIZE_KEY] = true;
   }
 
+  /** Stable on two planted feet (Euphoria's 0.3 m/s and 0.3 rad/s) since when (-1: not now). */
+  private trackSettled(s: Sense): void {
+    const g = this.gait;
+    const T = BALANCE_TUNING;
+    const ok = g.phase === 'double' && g.bothPlanted() && Math.hypot(s.comVel[0], s.comVel[1]) < T.stableSpeed
+      && Math.hypot(s.torsoOmega[0], s.torsoOmega[1]) < T.stableSpeed;
+    if (!ok) this.settledSince = -1;
+    else if (this.settledSince < 0) this.settledSince = s.time;
+  }
+
+  private settledFor(t: number, span: number): boolean {
+    return this.settledSince >= 0 && t - this.settledSince >= span;
+  }
+
   /** The stance side whose sole carries all the pressure now (a foot unloading to lift), or null. */
   private unloadingFor(): Side | null {
     const g = this.gait;
     if (g.phase !== 'double' || !g.bothPlanted()) return null;
+    if (this.lunge) return other(this.lunge.side);
     return this.captureSide ? other(this.captureSide) : null;
   }
 
@@ -504,10 +739,13 @@ export class BalanceEngine {
   private updateTrim(s: Sense, dt: number, skill: boolean): void {
     const T = BALANCE_TUNING;
     const g = this.gait;
-    const k = Math.min(1, dt / T.trimTauS);
     const err = Math.hypot(this.state.xiRef[0] - this.xiM[0], this.state.xiRef[1] - this.xiM[1]);
-    const still = this.holdPlan && !skill && g.phase === 'double' && g.bothPlanted()
-      && Math.hypot(s.comVel[0], s.comVel[1]) < T.trimSpeed && err < T.trimMaxM;
+    // A kick's weight shift too (both soles still down, the DCM sliding onto the stance foot): the last
+    // centimetres are what the lift gate waits on (KICK_GATE.xiM), and the soft stance legs leave them.
+    const shifting = g.phase === 'shift' && g.bothPlanted() && T.kickTrimTauS > 0;
+    const k = Math.min(1, dt / (shifting ? T.kickTrimTauS : T.trimTauS));
+    const still = err < T.trimMaxM && (shifting
+      || (this.holdPlan && !skill && g.phase === 'double' && g.bothPlanted() && Math.hypot(s.comVel[0], s.comVel[1]) < T.trimSpeed));
     for (let i = 0; i < 2; i++) {
       this.trim[i] = still
         ? clamp(this.trim[i] + (this.state.xiRef[i] - this.xiM[i]) * k, -T.trimMaxM, T.trimMaxM)
@@ -610,7 +848,8 @@ export class BalanceEngine {
     } else {
       this.planner.plan(pin, this.dcm);
       if (m) {
-        if (!sw && this.planner.gait !== 'hold' && this.planner.count > 0 && g.bothPlanted() && !this.capturing) this.pickClip(s, inp, pin, t < this.noPickUntil);
+        // (Not to re-form a held stance: that is one step back into a slot, not a clip's phrase.)
+        if (!sw && this.planner.gait !== 'hold' && this.planner.count > 0 && g.bothPlanted() && !this.capturing && (inp.goal || !FOOTWORK_TUNING.anchorHold)) this.pickClip(s, inp, pin, t < this.noPickUntil);
         else if (!sw || !m.following) m.cancel();
       }
     }
@@ -825,7 +1064,17 @@ export class BalanceEngine {
       return;
     }
     if (this.waitSince < 0) this.waitSince = s.time;
-    else if (s.time - this.waitSince > T.liftWaitS) this.replan(s, inp);
+    else if (s.time - this.waitSince > T.liftWaitS) {
+      // A lift that never came while the DCM ran out of the support (the planned landing does not catch it
+      // and the stance sole cannot hold it): a catch step now (capture() goes on forcing it while its foot
+      // unloads), not another plan that waits the same way.
+      const support = g.supportPolygon();
+      if (T.stallCapture && inp.allowCapture && support.length >= 3 && polygonDistance(support, this.xiM).d > STEP_ADJUST.captureOutM) {
+        this.forceCapture = true;
+        return;
+      }
+      this.replan(s, inp);
+    }
   }
 
   /** A foot may lift once the stance sole holds the DCM or the landing will catch it. */
@@ -911,17 +1160,19 @@ export class BalanceEngine {
     return Math.sqrt(Math.max(0.01, span * span - vert * vert)) + leg.footCenterX;
   }
 
-  private capture(s: Sense, inp: EngineInput): void {
+  private capture(s: Sense, inp: EngineInput, force = false): void {
     // Moving, the DCM runs ahead of the feet on purpose (the next step catches it): only an error
-    // against the plan the soles and gyro cannot take back calls for a capture step.
+    // against the plan the soles and gyro cannot take back calls for a capture step (or a lift that
+    // stalled with the DCM outside the support: `force`).
     const reach = gyroReach(s, inp);
-    if (!this.holdPlan && this.planner.upcoming()) {
+    if (!force && !this.holdPlan && this.planner.upcoming()) {
       const e = Math.hypot(this.xiM[0] - this.state.xiRef[0], this.xiM[1] - this.state.xiRef[1]);
       if (e < BALANCE_TUNING.captureErrM + 0.5 * reach) return;
     }
-    const plan = captureStep(this.geo, this.gait, s, reach, this.planner.drive);
+    const plan = captureStep(this.geo, this.gait, s, reach, this.planner.drive, force);
     if (!plan) {
       this.captureSide = null;
+      this.forceCapture = false;
       return;
     }
     const g = this.gait;
@@ -933,6 +1184,7 @@ export class BalanceEngine {
     const inner = footCorners(this.geo, other(plan.side), g.feet[other(plan.side)].place, BALANCE_TUNING.copShrinkM);
     if (polygonDistance(inner, this.cop).d > BALANCE_TUNING.captureCopM && s.time - this.captureSince < BALANCE_TUNING.captureUnloadS) return;
     this.captureSide = null;
+    this.forceCapture = false;
     this.waitSince = -1;
     this.mocap?.cancel();
     this.cancelTakeoff();
@@ -999,7 +1251,10 @@ export class BalanceEngine {
       this.kickSince = -1;
       return;
     }
-    if (since > T + K.waitS || since > g.shiftLimit()) {
+    // The DCM running out of the soles during the shift: called off at once (the feet are free to catch it).
+    const support = g.supportPolygon();
+    const out = support.length >= 3 && polygonDistance(support, this.xiM).d > K.outM;
+    if (out || since > T + K.waitS || since > g.shiftLimit()) {
       g.cancelShift();
       this.kickSince = -1;
       this.kickCancels++;
@@ -1008,7 +1263,7 @@ export class BalanceEngine {
 
   // ---------------------------------------------------------------- output
 
-  private idle(s: Sense, inp: EngineInput): void {
+  private idle(s: Sense, inp: EngineInput, dt: number): void {
     this.pelvis[0] = s.pelvisPos[0];
     this.pelvis[1] = s.pelvisPos[1];
     const l = this.gait.feet.l.place, r = this.gait.feet.r.place;
@@ -1021,7 +1276,7 @@ export class BalanceEngine {
     this.planned = false;
     this.com.reset(s);
     this.writeLegs(s, inp.legs);
-    this.writeImpedance();
+    this.writeImpedance(dt);
     this.report(s, inp, -1, 0, 0);
   }
 
@@ -1062,37 +1317,17 @@ export class BalanceEngine {
     return clamp(1 - t, 0, 1);
   }
 
-  /** Stance ankles soft (the COP comes from the feed-forward, not from position error). */
-  private writeImpedance(): void {
-    const r = this.r;
-    let kp = r.mem.gainScale as Float64Array | undefined;
-    let kv = r.mem.dampScale as Float64Array | undefined;
-    if (!kp || !kv) {
-      kp = new Float64Array(r.joints.length).fill(1);
-      kv = new Float64Array(r.joints.length).fill(1);
-      r.mem.gainScale = kp;
-      r.mem.dampScale = kv;
-    }
-    const soft = BALANCE_TUNING.stanceAnkleKp, softV = Math.sqrt(soft);
-    const yaw = BALANCE_TUNING.stanceHipYawKp, yawV = Math.sqrt(yaw);
-    for (const side of SIDES) {
-      const m = this.jm.leg[side];
-      const planted = this.gait.planted(side);
-      kp[m.anklePitch] = kp[m.ankleRoll] = planted ? soft : 1;
-      kv[m.anklePitch] = kv[m.ankleRoll] = planted ? softV : 1;
-      // A planted sole's torsional grip is a fraction of the hip yaw's torque: the stance hip yaw
-      // turns the body with a softer spring, so a heading error does not spin the sole.
-      kp[m.hipYaw] = planted ? yaw : 1;
-      kv[m.hipYaw] = planted ? yawV : 1;
-    }
+  /**
+   * Joint impedance (impedance.ts): stance legs soft (the feed-forward carries the load, the spring
+   * only corrects), swing legs stiff, each foot's scales following the weight the plan puts on it.
+   */
+  private writeImpedance(dt: number): void {
+    this.impedance.write(this.gait, this.shareFn, { ankle: BALANCE_TUNING.stanceAnkleKp, hipYaw: BALANCE_TUNING.stanceHipYawKp }, dt);
   }
 
   /** Back to the servos as built (legacy path, a knockout, the get-up). */
   clearImpedance(): void {
-    const kp = this.r.mem.gainScale as Float64Array | undefined;
-    const kv = this.r.mem.dampScale as Float64Array | undefined;
-    kp?.fill(1);
-    kv?.fill(1);
+    this.impedance.clear();
   }
 
   /** The DCM predicted at the touchdown lies inside the support the landing makes (stance sole + landing sole, shrunk). */
@@ -1115,7 +1350,10 @@ export class BalanceEngine {
     st.gyroReserve = inp.gyroHealth > 0 ? 1 - inp.gyroSaturation : 0;
     const cp = clamp(0.5 + inside / 0.2, 0, 1);
     st.margin = clamp(cp - 0.4 * inp.gyroSaturation, 0, 1);
-    st.mode = this.probe.gait === 'capture' ? 'recover' : 'steady';
+    const mode = this.reactions.mode;
+    st.mode = REACTIONS.enabled ? mode : this.probe.gait === 'capture' ? 'recover' : 'steady';
+    // Reacting to a hit or a fall: no new blows until the body is its own again.
+    const reacting = REACTIONS.enabled > 0 && (mode === 'absorb' || mode === 'recover' || mode === 'brace');
     const T = BALANCE_TUNING;
     const speed = Math.hypot(s.comVel[0], s.comVel[1]);
     const rate = Math.hypot(s.torsoOmega[0], s.torsoOmega[1]);
@@ -1123,7 +1361,7 @@ export class BalanceEngine {
     const stable = speed < T.stableSpeed && rate < T.stableSpeed && inside > 0 && err < T.stableErrM;
     const planted = g.phase === 'double' && g.bothPlanted();
     const noGyro = inp.gyroHealth <= 0;
-    st.steady = planted && stable && (noGyro || st.gyroReserve >= T.steadyReserve);
+    st.steady = planted && stable && !reacting && (noGyro || st.gyroReserve >= T.steadyReserve);
     const reserve = noGyro || st.gyroReserve >= T.strikeReserve;
     // Where the DCM is heading: the swing's touchdown, with the CMP held where the stance sole has it.
     const tRem = g.phase === 'single' && g.swingSide && this.swing.active ? Math.max(0, this.swing.t0 + this.swing.T - s.time) : -1;
@@ -1138,7 +1376,7 @@ export class BalanceEngine {
     }
     const capturing = this.capturing || this.probe.gait === 'capture';
     const settled = planted && !capturing && inside >= T.strikeInsideM && rate < T.strikeRate && err < T.strikeErrM;
-    st.canStrike = st.steady || (reserve && rate < T.strikeRate && (settled || (tRem >= 0 && tRem <= T.stepStrikeS && !capturing && this.landingCatches())));
+    st.canStrike = !reacting && (st.steady || (reserve && rate < T.strikeRate && (settled || (tRem >= 0 && tRem <= T.stepStrikeS && !capturing && this.landingCatches()))));
     st.canKick = st.steady && (inp.gyroHealth <= 0 || st.gyroReserve >= T.kickReserve) && s.feet.l.flat > 0.97 && s.feet.r.flat > 0.97;
     const p = this.probe;
     p.cop[0] = this.cop[0];
@@ -1162,6 +1400,23 @@ function gyroReach(s: Sense, inp: EngineInput): number {
   if (tau <= 0) return 0;
   const free = inp.gyroMomentumNms * Math.max(0, 1 - inp.gyroSaturation);
   return (tau / (s.mass * 9.81)) * (1 - Math.exp(-(s.omega0 * free) / tau));
+}
+
+/**
+ * Bracing: the gyro core spends what it has slowing the body's tumble (pitch and roll), with no reserve
+ * kept back and no bleed: the most it can do for the landing (§6). Its torque and momentum caps are the
+ * core's own (gyro.ts).
+ */
+function braceGyro(s: Sense, inp: EngineInput, demand: number[], cmd: { bleedS: number; bleedMaxNm: number }): void {
+  const tau = inp.gyroTorqueNm * inp.gyroHealth;
+  const wx = s.torsoOmega[0], wy = s.torsoOmega[1];
+  const n = Math.hypot(wx, wy);
+  const k = tau / Math.max(n, REACTIONS.braceGyroRateRadS);
+  demand[0] = -k * wx;
+  demand[1] = -k * wy;
+  demand[2] = 0;
+  cmd.bleedS = Infinity;
+  cmd.bleedMaxNm = 0;
 }
 
 /** Moves `p` from `prev` toward its value by at most `max` (in place). */

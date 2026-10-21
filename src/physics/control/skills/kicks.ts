@@ -216,6 +216,14 @@ function legOf(env: SkillEnv, run: SkillRun): Side {
 function kickReady(env: SkillEnv, run: SkillRun): boolean {
   const side = run.def.side!;
   if (run.phase === 'recover') return env.gait.phase === 'double' || env.gait.phase === 'shift';
+  // Balance engine: a weight shift its kick gate called off (the body was not ready for one foot in time,
+  // or the DCM ran out of the soles) is the end of this kick, as for the mocap kicks: asked again at once,
+  // the shift held the feet and the catch step the body needed never came.
+  run.scratch.aborted0 ??= env.gait.abortedShifts;
+  if (env.engine && env.gait.abortedShifts !== run.scratch.aborted0) {
+    run.scratch.abort = true;
+    return false;
+  }
   if (!env.gait.requestSkillLeg(side, SHIFT_WAIT_S)) return false;
   return chamberProgress(run) >= 1;
 }

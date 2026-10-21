@@ -148,6 +148,17 @@ export const MOTORS: Record<string, MotorSpec> = {
     source: 'Stack: three CubeMars AKE90-8 KV35 (cubemars.com/product/ake90-8-kv35-quasi-direct-drive-actuator.html, 170 N·m, 210 rpm, 1.4 kg) on one output; 3 × 170 × 0.95 load share = 485 N·m, 22.0 rad/s, 4.4 kg with coupling',
   },
 
+  // Fast elbow stack (docs/design/strike-power.md §2.8, decision D2): a human elbow extends at
+  // 22-41 rad/s in a punch (Boira Bernabeu et al. 2016); every catalogued module above 60 N·m tops out
+  // near 22 rad/s. Two RobStride 06 (36 N·m peak, 480 rpm = 50.3 rad/s, 621 g each) in parallel on one
+  // output, by the stack convention above: n × peak × 0.95 load share, the same speed, +0.1 kg coupling.
+  'qdd.rs06x2': {
+    id: 'qdd.rs06x2', name: '2 × RobStride 06 in parallel', kind: 'electric',
+    stallTorqueNm: 2 * 36 * 0.95, noLoadSpeedRadS: (480 * 2 * Math.PI) / 60, massKg: 2 * 0.621 + 0.1,
+    heatCapacityJPerK: 2 * 211, thermalResistanceKPerW: 1.3 / 2, maxTempC: 120, copperLossAtStallW: 2 * 820,
+    source: 'Stack: two RobStride 06 (robstride.com/products/robStride06: 11/36 N·m, 480 rpm, 621 g) on one output; 2 × 36 × 0.95 load share = 68.4 N·m, 50.3 rad/s, 1.34 kg with coupling',
+  },
+
   'hyd.cyl50': {
     id: 'hyd.cyl50', name: '50 mm bore hydraulic cylinder @ 210 bar', kind: 'hydraulic',
     // 41 kN at the rod through an ~0.12 m lever arm ≈ 4.9 kN·m; derated to a controllable 1.4 kN·m
@@ -287,6 +298,10 @@ const DRIVE_TRAINS: Record<string, Partial<MotorSpec>> = {
   'qdd.rs06': {
     gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 6.0e-5, gearPeakTorqueNm: shock('qdd.rs06'), ...bearing(86),
     ratingsSource: 'ratio 9:1 published (robstride.com RobStride06); rotor inertia, housing and ratings assumed',
+  },
+  'qdd.rs06x2': {
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 2 * 6.0e-5, gearPeakTorqueNm: shock('qdd.rs06x2'), ...stack(2, 86),
+    ratingsSource: 'two RobStride 06 rotors on one output (ratio 9:1 published, robstride.com RobStride06); rotor inertia, housing and ratings assumed (modules either side of the joint)',
   },
   'plan.x12': {
     gearType: 'planetary', gearRatio: 20, rotorInertiaKgM2: 1.29e-3, gearPeakTorqueNm: shock('plan.x12'), ...bearing(125, 5000, 4500),

@@ -26,6 +26,8 @@
 //   npx tsx tools/mocap/centroid-tables.ts                 every design with a motion library
 //   npx tsx tools/mocap/centroid-tables.ts savate pylon    some of them
 //   npx tsx tools/mocap/centroid-tables.ts --report        also print each move's numbers
+//   --motors 'savate.elbow=qdd.rs04,...' --out DIR          an actuator variant's tables (tools/motor-variants.ts),
+//                                                           read back with SD_CENTROID_DIR=DIR
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +36,7 @@ import { newSample, parseLibrary, sample, type MotionLibrary } from '../../src/r
 import type { LibraryJson } from '../../src/robots/motions/types';
 import { CENTROID_FORMAT, CENTROID_LABELS, KICK_LABELS, type CentroidJson, type CentroidMoveJson } from '../../src/physics/control/mocap/centroid';
 import { makeSim } from '../../tests/control/helpers';
+import { applyMotorVariants } from '../motor-variants';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LIB_DIR = join(HERE, '..', '..', 'src', 'robots', 'motions', 'data');
@@ -310,11 +313,20 @@ async function buildDesign(id: string, report: boolean): Promise<CentroidJson | 
   return { format: CENTROID_FORMAT, design: id, massKg: Math.round(mass * 100) / 100, zc: Math.round(zc * 1000) / 1000, omega0: Math.round(w0 * 1000) / 1000, fps: lib.fps, moves };
 }
 
+function flag(name: string): string | undefined {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
 async function main(): Promise<void> {
   const report = process.argv.includes('--report');
-  const ids = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const motors = flag('motors');
+  const outDir = flag('out') ?? OUT_DIR;
+  const skip = new Set([motors, flag('out')].filter(Boolean));
+  const ids = process.argv.slice(2).filter((a) => !a.startsWith('--') && !skip.has(a));
+  applyMotorVariants(motors);
   const designs = ids.length ? ids : Object.keys(DESIGNS);
-  mkdirSync(OUT_DIR, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
   for (const id of designs) {
     const t0 = performance.now();
     const table = await buildDesign(id, report);
@@ -322,7 +334,7 @@ async function main(): Promise<void> {
       console.log(`${id}: no motion library, skipped`);
       continue;
     }
-    const file = join(OUT_DIR, `${id}.json`);
+    const file = join(outDir, `${id}.json`);
     writeFileSync(file, JSON.stringify(table));
     console.log(`${id}: ${Object.keys(table.moves).length} moves → ${file} (${((performance.now() - t0) / 1000).toFixed(1)} s)`);
   }

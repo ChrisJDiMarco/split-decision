@@ -21,12 +21,12 @@ import { jointMap, newBodyCommand, solveBody, type BodyCommand, type JointMap } 
 import type { Sense } from '../sense';
 import type { StanceParams } from '../stance';
 import { convexHull, footCorners, polygonDistance, type FootPlace, type P2 } from '../support';
+import { getupSpeed, type GetupSpeed } from '../getup-speed';
 import { GETUP_PLAN, type PlanEntry } from './getup-plan';
 import type { MocapSet } from './library';
 import { MotionPlayer } from './player';
 
-const ALIGN_S = 0.55;
-const PACE = 1.15; // × the human actor where the joints allow it (the rate table caps it)
+// (alignment time and pace: GETUP_SPEED, getup-speed.ts)
 const LAG_SLOW_M = 0.1; // pelvis this far below the clip's: slow down...
 const LAG_STOP_M = 0.25; // ...and wait for it at this
 const MIN_PACE = 0.12;
@@ -45,7 +45,6 @@ const backClip = (id: string): boolean => id.startsWith('getup_back');
 const STAND_FLAT = 0.85; // sole up-axis z
 const STAND_FOOT_M = 0.035;
 const STAND_UPRIGHT = -0.1; // torso up-axis z: not hanging head-down off the hips
-const STAND_HEIGHT = 0.35; // × stance pelvis height
 const STAND_MARGIN_M = 0.01;
 const STAND_MAX_SPEED = 0.3; // m/s of the COM: balance takes over a body that has settled
 const FLIGHT_HOLD_S = 0.12; // clip time: stop this short of an airborne moment (the actors hop up)
@@ -95,10 +94,14 @@ const OPTION_SETS: Record<PlanEntry['opts'], ClipOptions> = {
 export function lyingLabel(s: Sense): { label: MoveLabel; downSide: Side; orient: LyingOrientation } {
   const fwdZ = s.torsoRot[6], leftZ = s.torsoRot[7];
   const downSide: Side = leftZ < 0 ? 'l' : 'r';
-  if (fwdZ < -0.5) return { label: 'getup_face_down', downSide, orient: 'face_down' };
-  if (fwdZ > 0.5) return { label: 'getup_back', downSide, orient: 'back' };
+  // (A braced fall leaves the body on a side turned well toward the front or the back: its own family's clips
+  // start from there; the back clips used on a square side cannot start from a body turned face down.)
+  if (fwdZ < -SIDE_TURN_Z) return { label: 'getup_face_down', downSide, orient: 'face_down' };
+  if (fwdZ > SIDE_TURN_Z) return { label: 'getup_back', downSide, orient: 'back' };
   return { label: 'getup_side', downSide, orient: downSide === 'l' ? 'side_l' : 'side_r' };
 }
+/** Torso forward-axis z past which a body on its side counts as face down (or on its back): 0.5 as built. */
+const SIDE_TURN_Z = 0.25;
 
 /** A joint that cannot push: limp, seized, or driven off a circuit with no pressure left. */
 function jointDead(r: RobotRuntime, name: string): boolean {
@@ -172,7 +175,11 @@ export class ClipGetUp {
     waist: 0,
   };
 
+  /** The design's get-up speeds (getup-speed.ts), fixed when the robot is built. */
+  private readonly speed: GetupSpeed;
+
   constructor(private readonly set: MocapSet, private readonly r: RobotRuntime, private readonly geo: HumanoidGeometry, private readonly stance: StanceParams) {
+    this.speed = getupSpeed(r.design.id);
     this.player = new MotionPlayer(set, r.joints.length);
     this.from = new Float64Array(r.joints.length);
     this.jm = jointMap(r);
@@ -190,6 +197,12 @@ export class ClipGetUp {
     return this.stage === 'crouch' ? 'getup_crouch' : this.move?.label ?? 'getup';
   }
 
+  /** A face-down clip is still on the menu for this knockdown (tries left, an arm and the legs to push with). */
+  canFaceDown(): boolean {
+    if (this.tries >= MAX_CLIP_TRIES || this.cannotRise() || (!GETUP_PLAN[this.r.design.id] && !ClipGetUp.force)) return false;
+    return !!this.fromPlan('face_down') || !!this.choose('getup_face_down', 'l');
+  }
+
   /** Both legs wrecked: this robot stays down. */
   cannotRise(): boolean {
     return legWrecked(this.r, 'l') && legWrecked(this.r, 'r');
@@ -199,13 +212,15 @@ export class ClipGetUp {
    * Pick a clip for the way the body lies; false when none is usable (every variant tried, or
    * the damage rules them all out). `qNow`: the measured joint angles (the align start).
    */
-  begin(s: Sense, qNow: Float64Array): boolean {
+  begin(s: Sense, qNow: Float64Array, as?: LyingOrientation): boolean {
     if (this.tries >= MAX_CLIP_TRIES || this.cannotRise()) return false;
     // Only designs whose variants were searched (getup-plan.ts) get up from clips: on the iron-age
     // bodies the unsearched clips fail more often than the scripted get-up (GOLIATH 0/8 against
     // 8/8 laid four ways, two drops each).
     if (!GETUP_PLAN[this.r.design.id] && !ClipGetUp.force) return false;
-    const { label, downSide, orient } = lyingLabel(s);
+    const lying = lyingLabel(s);
+    // `as`: the body was just rolled onto its front (getup.ts): the face-down family whatever the last few degrees say.
+    const { label, downSide, orient } = as === 'face_down' ? { ...lying, label: 'getup_face_down' as MoveLabel, orient: 'face_down' as LyingOrientation } : lying;
     const forced = ClipGetUp.force ? this.set.lib.moves.find((m) => m.id === ClipGetUp.force)?.label : undefined;
     // Back clips off: the plan's back/side entries are all 'getup_back' clips, so fromPlan skips them
     // and the side clip below is used (measured: PYLON on its back up in 4.6 s; the scripted get-up
@@ -222,7 +237,7 @@ export class ClipGetUp {
     this.opts = pick.opts;
     this.key = pick.key;
     this.move = pick.move;
-    this.player.play(pick.move, { mirror: pick.mirror, speed: PACE, mask: 'all' });
+    this.player.play(pick.move, { mirror: pick.mirror, speed: this.speed.pace, mask: 'all' });
     this.from.set(qNow);
     this.stage = 'align';
     this.t = 0;
@@ -299,9 +314,9 @@ export class ClipGetUp {
       return 'fail';
     };
     if (this.stage === 'align') {
-      const k = minJerk(this.t / ALIGN_S);
+      const k = minJerk(this.t / this.speed.alignS);
       for (let i = 0; i < q.length; i++) q[i] = this.from[i] + (p.q[i] - this.from[i]) * k;
-      if (this.t >= ALIGN_S) {
+      if (this.t >= this.speed.alignS) {
         this.stage = 'play';
         this.t = 0;
       }
@@ -335,7 +350,7 @@ export class ClipGetUp {
     addVelocityFeedforward(this.r, q, p.qd);
     if (this.rolledOver(s)) return fail('rolled over');
     if (this.waited > MAX_WAIT_S) return fail(`stalled (pelvis ${lag.toFixed(2)} m below the clip)`);
-    if (this.total > move.duration / PACE + MAX_EXTRA_S) return fail('timeout');
+    if (this.total > move.duration / this.speed.pace + MAX_EXTRA_S) return fail('timeout');
     // Fell back: the clip had the pelvis well up, the body is far below it.
     this.lowFor = this.peakClipZ > 0.5 * H && lag > FELL_BACK_M ? this.lowFor + dt : 0;
     if (this.lowFor > FELL_BACK_S) return fail('fell back');
@@ -346,10 +361,22 @@ export class ClipGetUp {
     const handsLeaving = !this.opts.handGate || ((bits & HANDS) !== 0 && (ahead & HANDS) === 0);
     if ((bits & FEET) === FEET && (handsLeaving || (bits & HANDS) === 0) && this.feetDown(s)) {
       if (this.standing(s)) return 'up';
-      this.enterCrouch(s);
-      return 'busy';
+      // Off the back or a side (this.speed.crouch 0), the clip plays on: the actor's own weight shift over the
+      // feet, not the crouch's (measured: the crouch sat SAVATE and FIRECRACKER back down and lost the feet).
+      if (this.speed.crouch > 0 || move.label === 'getup_face_down') {
+        this.enterCrouch(s);
+        return 'busy';
+      }
     }
-    if (p.done) return this.standing(s) ? 'up' : fail('clip ended off balance');
+    if (p.done) {
+      if (this.standing(s)) return 'up';
+      // Played to its end with the feet down but the body not over them yet: the crouch carries it there.
+      if (this.feetDown(s)) {
+        this.enterCrouch(s);
+        return 'busy';
+      }
+      return fail('clip ended off balance');
+    }
     return 'busy';
   }
 
@@ -415,7 +442,7 @@ export class ClipGetUp {
 
   /** Both soles flat enough and on the canvas. */
   private feetDown(s: Sense): boolean {
-    return SIDES.every((side) => s.feet[side].flat > CROUCH_FLAT && s.feet[side].height < CROUCH_FOOT_M) && s.pelvisPos[2] > STAND_HEIGHT * this.stance.pelvisHeight;
+    return SIDES.every((side) => s.feet[side].flat > CROUCH_FLAT && s.feet[side].height < CROUCH_FOOT_M) && s.pelvisPos[2] > this.speed.standHeight * this.stance.pelvisHeight;
   }
 
   private enterCrouch(s: Sense): void {
@@ -502,7 +529,7 @@ export class ClipGetUp {
       const f = s.feet[side];
       if (f.flat < STAND_FLAT || f.height > STAND_FOOT_M) return false;
     }
-    if (s.upright < STAND_UPRIGHT || s.pelvisPos[2] < STAND_HEIGHT * this.stance.pelvisHeight) return false;
+    if (s.upright < STAND_UPRIGHT || s.pelvisPos[2] < this.speed.standHeight * this.stance.pelvisHeight) return false;
     if (Math.hypot(s.comVel[0], s.comVel[1]) > STAND_MAX_SPEED) return false;
     const soles = convexHull(SIDES.flatMap((side) => footCorners(this.geo, side, { x: s.feet[side].sole[0], y: s.feet[side].sole[1], yaw: s.feet[side].yaw })));
     const inside = (pt: P2) => polygonDistance(soles, pt).d <= -STAND_MARGIN_M;

@@ -17,6 +17,7 @@
 import type { Vec3 } from '../../core/types';
 import type { SimContext } from '../sim-context';
 import { SIDES, type HumanoidGeometry, type Side } from './geometry';
+import { GETUP_SPEED, getupSpeed, type GetupSpeed } from './getup-speed';
 import type { ClipGetUp } from './mocap/getup';
 import { clamp, minJerk, mulMM, mulMtM, mulMV, mulMtV, rotZ, sub, type Mat3 } from './math';
 import { newBodyCommand, solveBody, type BodyCommand, type JointMap } from './posture';
@@ -30,7 +31,6 @@ const DOWN_UPRIGHT = 0.45; // torso up-axis z below this is down
 const DOWN_HEIGHT = 0.55; // pelvis below this fraction of stance height is down
 const RISING_DOWN_HEIGHT = 0.3; // rising out of the crouch (folded by design): only a collapse counts
 const SETTLE_MAX_S = 2.5;
-const STILL_S = 0.12; // lying still this long ends the settle
 const STILL_SPEED = 0.35; // m/s COM
 const STILL_SPIN = 1.2; // rad/s torso
 const MAX_ATTEMPT_S = 12; // a get-up that has not finished by now starts over
@@ -111,10 +111,12 @@ const SETTLE_TEMPO = 0.6;
 
 export function getUpTuning(designId: string): GetUpTuning {
   const t = TUNING[designId] ?? DEFAULT_TUNING;
+  const sp = getupSpeed(designId);
   return {
     ...t,
     speed: t.speed * TEMPO, rollSpeed: t.rollSpeed * TEMPO, sitDur: t.sitDur * TEMPO, sitHold: t.sitHold * TEMPO,
-    brace: t.brace * SETTLE_TEMPO, settleMin: t.settleMin * SETTLE_TEMPO,
+    brace: t.brace * SETTLE_TEMPO * sp.settle, settleMin: t.settleMin * SETTLE_TEMPO * sp.settle,
+    riseS: t.riseS * sp.rise,
   };
 }
 
@@ -200,6 +202,13 @@ export class GetUp {
   attempts = 0;
   /** Mocap get-ups (mocap/getup.ts), tried first once the body lies still; null: scripted only. */
   clip: ClipGetUp | null = null;
+  /**
+   * A braced fall's catch (the reactions had the hands out to the canvas, balance/behaviours.ts): held
+   * through the landing in place of the stance shape. Null: fall stiff in the stance.
+   */
+  catchPose: Float64Array | null = null;
+  /** The design's get-up speeds (getup-speed.ts; the controller sets them when it builds the robot). */
+  speed: GetupSpeed = { ...GETUP_SPEED };
   private below = 0;
   private still = 0;
   private t = 0;
@@ -244,6 +253,11 @@ export class GetUp {
     return this.phase !== 'up';
   }
 
+  /** Holding a braced fall's catch on the canvas (the arms stiff, the legs soft). */
+  get holdingCatch(): boolean {
+    return this.phase === 'settle' && !!this.catchPose && this.t < this.tun.brace;
+  }
+
   /**
    * Watches for a fall while standing; true on the tick the robot goes down. `rising`: still
    * coming up out of the get-up crouch, which is low and folded by design.
@@ -278,10 +292,10 @@ export class GetUp {
     if (this.phase === 'settle') {
       // Fall stiff, like a plank in the fighting stance (a body that keeps its shape lands flat
       // on its front or back), then let the joints go compliant once it lies still.
-      if (this.t < this.tun.brace) q.set(this.brace);
+      if (this.t < this.tun.brace) q.set(this.catchPose ?? this.brace);
       else q.set(qNow);
       this.still = quiet(s) ? this.still + dt : 0;
-      if ((this.t > this.tun.settleMin && this.still > STILL_S) || this.t > SETTLE_MAX_S) this.begin(s, qNow);
+      if ((this.t > this.tun.settleMin && this.still > this.speed.stillS) || this.t > SETTLE_MAX_S) this.begin(s, qNow);
       return false;
     }
     if (this.phase === 'clip' && this.clip) {
@@ -292,12 +306,14 @@ export class GetUp {
       }
       if (res === 'fail') {
         this.clip.fail();
-        this.enter('settle'); // lie still, then the next variant (or the scripted sequence)
+        // Lie still, then the next variant (or the scripted sequence). No stiff stance hold this time: snapped
+        // to the standing pose from a squat or a sprawl, the legs fling the body up (and over).
+        this.resettle();
       }
       return false;
     }
     if (this.total > MAX_ATTEMPT_S || (this.seq !== this.roll && this.seq !== LEGS_OUT && torsoFwdZ(s) > FLIPPED_FWD_Z)) {
-      this.enter('settle'); // stalled, or rolled back over: lie still and start again
+      this.resettle(); // stalled, or rolled back over: lie still and start again
       return false;
     }
     const ph = this.seq[this.index];
@@ -305,16 +321,25 @@ export class GetUp {
     ph.set(this, s);
     solveBody(this.cmd, this.geo, this.jm, this.qik, { pos: s.pelvisPos, rot: s.pelvisRot, shin: { l: s.feet.l.shinRot, r: s.feet.r.shinRot } });
     this.blend(ph, q, dur);
-    if (ph.until && this.t >= dur && ph.until(this, s)) return this.seq === this.roll ? this.startSequence(this.tun.flatten ? LEGS_OUT : PRONE, q) : this.next(q);
+    if (ph.until && this.t >= dur && ph.until(this, s)) return this.seq === this.roll ? this.afterRoll(s, q) : this.next(q);
     if (this.seq === LEGS_OUT && this.t >= ph.dur + ph.hold) return this.choose(s, q);
     if (this.t < dur + hold) return false;
     if (ph.restep && !this.tun.strictRise) return this.next(q);
     if (ph.restep && this.resteps < MAX_RESTEPS && s.upright > RISE_MIN_UPRIGHT) return this.restep(s, q);
     if (ph.until && !ph.lenient) {
-      this.enter('settle'); // stuck: lie still, try again (the other way next time)
+      this.resettle(); // stuck: lie still, try again (the other way next time)
       return false;
     }
     return this.next(q);
+  }
+
+  /** Rolled onto the front: the face-down clip if there is one left (no settle: straight on), else the scripted push-up. */
+  private afterRoll(s: Sense, q: Float64Array): false {
+    if (this.speed.rollFirst > 0 && this.clip?.begin(s, q, 'face_down')) {
+      this.enter('clip');
+      return false;
+    }
+    return this.startSequence(this.tun.flatten ? LEGS_OUT : PRONE, q);
   }
 
   /** Step both feet in again (the one farther behind the COM first) and sit back once more. */
@@ -330,7 +355,7 @@ export class GetUp {
   /** Phase duration and hold for this design. */
   private timesOf(ph: Phase): [number, number] {
     if (ph.name === 'sit') return [this.tun.sitDur, this.tun.sitHold];
-    const k = this.seq === this.roll ? this.tun.rollSpeed : this.seq === LEGS_OUT ? 1 : this.tun.speed;
+    const k = this.seq === this.roll ? this.tun.rollSpeed * this.speed.roll : this.seq === LEGS_OUT ? 1 : this.tun.speed;
     return [ph.dur * k, ph.hold * k];
   }
 
@@ -369,7 +394,10 @@ export class GetUp {
   /** Lying still: straighten out if folded, then push up from the front or roll onto it first. */
   private begin(s: Sense, qNow: Float64Array): void {
     this.attempts++;
-    if (this.clip?.begin(s, qNow)) {
+    this.catchPose = null;
+    // On the back or a side: roll onto the front first (then the face-down clip), if asked and one is left.
+    const roll = this.speed.rollFirst > 0 && torsoFwdZ(s) >= PRONE_FWD_Z && !!this.clip?.canFaceDown();
+    if (!roll && this.clip?.begin(s, qNow)) {
       this.enter('clip');
       return;
     }
@@ -388,6 +416,13 @@ export class GetUp {
     this.rollSide = s.torsoRot[7] > 0 ? 'r' : 'l';
     if (this.attempts % 2 === 0) this.rollSide = this.rollSide === 'l' ? 'r' : 'l';
     return this.startSequence(this.roll, q);
+  }
+
+  /** A failed attempt: lie still again, without the stiff stance hold of the fall itself (snapped to the standing
+   *  pose from a squat or a sprawl, the legs fling the body up and over). */
+  private resettle(): void {
+    this.enter('settle');
+    this.t = this.tun.brace;
   }
 
   private enter(phase: GetUpPhase): void {

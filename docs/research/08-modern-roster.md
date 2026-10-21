@@ -2,6 +2,65 @@
 
 All four fighters are all-electric, with no hydraulic circuits. The numbers below come from running the project's own `buildHumanoid()` and `compileRobot()` on these specs from a scratch script. The new motors were added to the catalog object in memory only; no repo file was modified.
 
+### As built after the strike pass (2026-10-20)
+
+Chris approved every actuator swap in docs/design/strike-power.md §2.8 (2026-10-06), each to be A/B-tested on the gantry first. The per-design actuator tables further down are the original concept; where they differ, the code (`src/robots/designs/index.ts`, catalog ids in `src/robots/catalog.ts`) and this table win. Every module is a real, published one, or a parallel stack of catalogued modules under the catalog's stack rule (n × peak × 0.95 load share, the module's speed, +0.1 kg coupling per added module).
+
+| Joint group | FIRECRACKER | SAVATE | HAYMAKER | PYLON |
+|---|---|---|---|---|
+| Hip yaw, hip pitch | `qdd.ak10` | `qdd.ake90x2` | **`qdd.ake90x3`** (was `plan.x12`) | `qdd.ake90x2` |
+| Hip roll, ankles | `qdd.ak10` | `qdd.ake90x2` | `plan.x12` | `qdd.ake90x2` |
+| Knees | `qdd.rs04` | `qdd.ake90x2` | `qdd.ake90x3` | `qdd.ake90x2` |
+| Shoulder pitch | **`qdd.ak10`** (was `qdd.rs06`) | **`qdd.ake90`** (was `qdd.rs04`) | **`qdd.ake90`** (was `qdd.rs04`) | **`qdd.ake90`** (was `qdd.rs03`) |
+| Shoulder roll, yaw | `qdd.rs06` | `qdd.rs04` | `qdd.rs04` | `qdd.rs03` |
+| Elbows | **`qdd.rs06`** (was `qdd.rs02`) | **`qdd.rs06x2`** (was `qdd.rs03`) | **`qdd.ake90`** (was `qdd.rs04`) | **`qdd.rs06x2`** (was `qdd.rs06`) |
+| Waist yaw | `qdd.rs03` | **`qdd.ake90x2`** (was `qdd.rs04`) | **`qdd.ake90x2`** (was `plan.x12`) | **`qdd.ake90x2`** (was `qdd.rs04`) |
+| Waist pitch | `qdd.rs03` | `qdd.rs04` | `plan.x12` | `qdd.rs04` |
+| Compiled mass | 39.07 kg (was 37.96) | 85.26 kg (was 82.94) | 113.95 kg (was 105.38) | 83.48 kg (was 79.56) |
+
+New catalog entry: `qdd.rs06x2`, two RobStride 06 (robstride.com/products/robStride06: 11/36 N·m, 480 rpm, 621 g) on one output: 68.4 N·m, 50.3 rad/s, 1.34 kg. The builder takes the swaps as optional per-joint entries (`HumanoidSpec.motors.shoulderPitch / waistYaw / hipPitch / hipYaw`); without them a design compiles exactly as before, so the iron-age three are unchanged.
+
+**Gantry A/B** (robot hung on its gantry, controller off, joint targets stepped at full power, the servo damping at the strike drive's 0.15; peak fist or foot speed, m/s; scratch probe `gantry-ab.mts`, same method as `tools/strike-bench.ts --mode gantry`):
+
+| Design | Throw | Before | One swap at a time | All swaps |
+|---|---|---|---|---|
+| FIRECRACKER | straight arm only | 3.48 | shoulder AK10 4.71 | |
+| | straight arm + waist | 5.77 | shoulder AK10 6.31 | |
+| | elbow snap | 4.35 | elbow RS06 6.08 | 6.12 |
+| SAVATE | straight arm only | 3.85 | shoulder AKE90 4.95 | 4.35 |
+| | straight arm + waist | 5.58 | waist AKE90×2 7.33; shoulder 6.22 | **7.49** (RS06×2 elbow) / 7.11 (AKE90 elbow) |
+| | hook arm + waist | 5.72 | waist 7.33 | 7.12 / 7.16 |
+| | elbow snap | 5.50 | RS06×2 7.37; AKE90 6.75 | 7.48 / 6.75 |
+| HAYMAKER | straight arm + waist | 5.98 | shoulder 6.43; waist 6.03 | 6.74 (RS06×2) / 5.93 (AKE90) |
+| | elbow snap | 6.45 | RS06×2 7.01; AKE90 7.05 | 7.11 / 7.05 |
+| | front snap (hip + knee) | 5.69 | hips AKE90×3 **7.55** | 7.55 |
+| | hip yaw turn (shin) | 5.23 | hips AKE90×3 **6.94** | 6.94 |
+| PYLON | straight arm only | 3.56 | shoulder AKE90 4.98 | 4.60 |
+| | straight arm + waist | 5.30 | shoulder 6.45; waist 6.73 | 6.82 (RS06×2) / 5.96 (AKE90) |
+| | hook arm + waist | 5.73 | waist **7.73** | 6.95 |
+| | elbow snap | 6.20 | RS06×2 6.29 | 7.69 / 7.33 |
+
+Elbow choice (decision D2): the twin RS06 is the faster elbow on SAVATE and PYLON (their old RS03 / RS06 had 60 / 36 N·m, so the 68 N·m stack is no weaker). On HAYMAKER the two snap alike (7.01 vs 7.05 m/s), its old RS04 elbow had 120 N·m, and its get-ups need the arms to push 114 kg off the canvas: shoved over 8 ways, it stood back up 7 of 8 times on the AKE90 elbow against 5 of 6 on the twin RS06 (and 5 of 8 on the old motors), so HAYMAKER takes the AKE90. FIRECRACKER's waist (RS03) was left: an RS04 there gained 5-19 % on waist throws for +0.52 kg, and it is not in the approved list.
+
+What it costs: 1.1-8.6 kg per design (HAYMAKER's 8.1 kg is its four hip drives, decision D3: faster kicks and get-ups, the planetary hips' gear-damage weakness gone). The spec masses in `08-modern-roster.json` follow the compiled ones. Balance drills after the swaps (dcm path): approach-and-hold unchanged (0 falls in 160 fighter-drills, closing speed 0.42-0.53 m/s as before); stance pushes of 1.1 m/s survived 6/8, 7/8, 7/8 on FIRECRACKER, SAVATE and HAYMAKER (5, 5 and 7 of 8 before), PYLON 4/8 (7/8 before: its upper body is 3.9 kg heavier; reverting any one of its three swaps alone did not restore it). On the full ΔV ladder PYLON's stance recovery drops about 5 % (mean of the eight directions 1.04 m/s against 1.09), in line with the 4.9 % mass it gained on the same gyro core and feet.
+
+**Speed and impact after the strike pass** (balance engine; `tools/balance-drills.ts --drills strikes`, 8 of each strike at a standing mirror opponent in its guard, thrown from the tactics' own distances; p50 values. Peak: the striking fist's or foot's top speed before contact. Contact: the damage model's closing speed and impulse at the first contact, which is mostly his guard. Punches are driven, `src/physics/control/strike-path.ts`; kicks marked proc are the procedural ones the engine keeps on that design.)
+
+| Design (human straight punch, size-scaled) | Strike | Peak m/s | Contact m/s | Impulse N·s | Throw to contact s | Landed |
+|---|---|---|---|---|---|---|
+| FIRECRACKER (6.6) | jab / cross | 3.7 / 4.4 | 2.1 / 1.8 | 5.7 / 6.6 | 0.24 / 0.33 | 6/8, 4/8 |
+| | hook / uppercut | 4.3 / 4.3 | 3.6 / 3.8 | 6.1 / 6.6 | 0.27 / 0.28 | 8/8, 6/8 |
+| | low kick (proc) | 4.0 | 4.2 | 13.2 | 0.58 | 8/8 |
+| SAVATE (8.7) | jab / cross / hook | 4.5 / 5.5 / 4.0 | 2.4 / 2.9 / 3.6 | 11.3 / 10.3 / 14.9 | 0.28 / 0.35 / 0.26 | 8/8, 7/8, 8/8 |
+| | front / head / low kick | 5.0 / 4.2 / 3.1 | 0.8 / 1.3 / 1.1 | 10.9 / 11.3 / 15.4 | | 4/8, 4/8, 3/8 |
+| HAYMAKER (9.2) | jab / cross / hook | 3.8 / 4.7 / 3.4 | 2.4 / 2.7 / 2.7 | 12.5 / 9.6 / 13.9 | 0.24 / 0.23 / 0.25 | 8/8 each |
+| | uppercut / overhand | 5.1 / 4.9 | 3.2 / 4.0 | 18.6 / 11.0 | 0.25 / 0.23 | 8/8 each |
+| | low kick (proc) | 6.9 | 8.5 | 78.6 | 0.63 | 6/8 |
+| PYLON (9.6) | jab / cross | 4.3 / 5.5 | 2.7 / 2.3 | 6.7 / 11.9 | 0.22 / 0.33 | 6/8, 7/8 |
+| | front kick (proc) / low / head | 6.8 / 3.5 / 4.2 | 1.3 / 1.7 / 1.3 | 9.3 / 18.2 / 15.9 | | 6/8, 5/8, 5/8 |
+
+Against people: an Olympic boxer's straight punch arrives at 9.1 ± 2.1 m/s (Walilko et al. 2005; scaled by reach to these frames, 6.6-9.6 m/s), a roundhouse kick's shin at 5.6-7.2 m/s (Gavagan & Sayers 2017), and a punch's effective mass of about 2.9 kg puts its impulse near 26 N·s. The robots' fists now peak at 40-65 % of their human-scaled speed and meet the guard at 20-45 % of it; the gantry shows the motors can throw 6-7.7 m/s, but in the drill the drive mostly reaches him at the end of its path, still accelerating, and his guard is usually what it meets (guard dropped, SAVATE's cross lands at 5.3 m/s p50). The blows come fast: 0.22-0.35 s from the throw to the contact, against 0.14-1.0 s before the pass (the hooks took 0.6-1.0 s), which is where a person's punch is. HAYMAKER's procedural low kick is the one strike past the human figures (8.5 m/s and 79 N·s into the thigh). Punches fell 0 times in 112 (before: once, a SAVATE hook). Kicks landed 43 of 72 (before 37, procedural only 24) and fell 7 times (before 2): SAVATE's front kick falls 3 in 8 in every variant tried (no r_bal, no gyro gate, slower playback, the old motors 2 in 8), PYLON's three kicks 1 each.
+
 | | FIRECRACKER | SAVATE | HAYMAKER | PYLON |
 |---|---|---|---|---|
 | Class it draws on | Kid-size (G1 / T1 class) | Adult-size (T800 class) | Heavy adult-size, electric | Rangy adult-size (H1 / H2 class) |

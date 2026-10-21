@@ -17,18 +17,30 @@
 //              little off-line each time: lands, contact speed and impulse (the damage model's impact
 //              event), peak striker speed before contact, start to contact, elbow at contact, the
 //              thrower's centre-of-mass speed into the shot, falls and capture steps.
+//   hits       (§8, Phase 4) a lone fighter's torso or head hit with 20, 40 or 73 N·s (over 12 ms) from 8
+//              directions: did it stay up, recovery steps, time to stable, the reaction modes it went through
+//              (absorb, recover, brace); if it fell, as for falls
+//   falls      a shove past capture (--fall-dvs, default 2.2 m/s) from 8 directions: when the brace started, what
+//              touched the canvas first (canvas-contact.ts) and when, and the get-up after (first movement, stable)
+//   getups     (strike-power.md §4.6) laid face down, on its back and on each side, dropped three ways: standing
+//              within 5 s, first movement to stable standing against the per-design targets
 //
 // usage:
 //   npx tsx tools/balance-drills.ts [--drills approach,push,shuffle,strikes] [--designs firecracker,savate,haymaker,pylon]
-//                                   [--trials 8] [--skills jab,cross,...] [--window range|guard]
-//                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance]
+//                                   [--trials 8] [--skills jab,cross,...] [--window range|guard] [--approach] [--guard down]
+//                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance] [--ladder-from 0.6]
+//   npx tsx tools/balance-drills.ts --drills hits,falls,getups [--impulses 20,40,73] [--hit-parts torso,head]
+//                                   [--hit-situations stance,walk] [--fall-dvs 2.2] [--getup-seeds 3] [--getup-orients face_down,back]
+//   npx tsx tools/balance-drills.ts --summary <saved.json>   re-print a saved run's summary
 //   npx tsx tools/balance-drills.ts --job '<json>'        one drill in this process, JSON on stdout
 //   --tune BALANCE_TUNING.stanceAnkleKp=1,FOOTWORK_TUNING.walkGapM=0.03   A/B a tuning table value
 //   --mocap steps|1|0|style   mocap footwork (SD_MOCAP_FOOTWORK): clip steps (the default), steps and style, neither, style only
 //   --ring 1|0                ring IQ's footwork rules (SD_RING_IQ)
+//   --motors 'savate.elbow=qdd.rs03,...' [--centroid DIR]   an actuator variant (tools/motor-variants.ts) and its
+//                             centroid tables (tools/mocap/centroid-tables.ts --motors ... --out DIR)
 //   (the drill children set it before they run; the tables are the engine's exported tunables)
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SimEvent } from '../src/core/protocol';
@@ -47,11 +59,21 @@ import { COUNTER_YAW, YAW_TUNING } from '../src/physics/control/controller';
 import { PACE } from '../src/physics/control/tactics';
 import { isStrikeSkill, SKILLS, type SkillId } from '../src/physics/control/skills';
 import { BURST } from '../src/physics/control/strike-drive';
-import { STRIKE_P3 } from '../src/physics/control/mocap/strikes';
+import { INVERSE_DYNAMICS } from '../src/physics/control/feedforward';
+import { IMPEDANCE } from '../src/physics/control/balance/impedance';
+import { REACTIONS } from '../src/physics/control/balance/reactions';
+import { BEHAVIOURS } from '../src/physics/control/balance/behaviours';
+import { GETUP_SPEED } from '../src/physics/control/getup-speed';
+import { KICK_DRIVE, KICK_RBAL, KICK_SET, ROUTE, STRIKE_P3 } from '../src/physics/control/mocap/strikes';
+import { STRIKE_PATH } from '../src/physics/control/strike-path';
+import { LUNGE } from '../src/physics/control/balance/index';
 import { MOCAP_KICKS } from '../src/physics/control/mocap/skills';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
 import { BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
+import { CanvasContacts, contactClass } from '../tests/balance/canvas-contact';
+import { polygonDistance } from '../src/physics/control/support';
+import { applyMotorVariants } from './motor-variants';
 import { comPos, intent, isDown, makeSim, type Sim } from '../tests/control/helpers';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -67,14 +89,50 @@ const STABLE_HOLD_S = 0.2;
 const BLOWUP_QVEL = 400;
 
 type Situation = 'stance' | 'walk' | 'arrive';
+export type Orient = 'face_down' | 'back' | 'side_l' | 'side_r';
 export type Job =
   | { kind: 'approach'; design: string; dist: number; angle: number; seconds: number; seed: number }
   | { kind: 'push'; design: string; situation: Situation; dir: number; dv: number; seed: number }
   | { kind: 'shuffle'; design: string; seed: number }
-  | { kind: 'strike'; design: string; skill: SkillId; trial: number; seed: number };
+  | { kind: 'strike'; design: string; skill: SkillId; trial: number; seed: number }
+  | { kind: 'hit'; design: string; part: 'torso' | 'head'; impulse: number; dir: number; situation: Situation; seed: number }
+  | { kind: 'fall'; design: string; dir: number; dv: number; seed: number }
+  | { kind: 'getup'; design: string; orient: Orient; seed: number };
 
 export interface ApproachOut { kind: 'approach'; job: Job; robots: BalanceMetrics[]; controlUs: number; blowup: boolean }
 export interface PushOut { kind: 'push'; job: Job; survived: boolean; steps: number; stableAfter: number; satPeak: number; applied: boolean }
+/** Getting up, in seconds after the fall was detected (Infinity: never). */
+export interface GetupTimes {
+  moveAt: number; // the get-up's first movement (the settle on the canvas is over)
+  upAt: number; // balance takes over (the 'getup' event)
+  stableAt: number; // standing, risen, upright at stance height, stable (held STAND_HOLD_S)
+  attempts: number;
+  fails?: string[]; // why each failed attempt failed (mocap/getup.ts), in order
+}
+/**
+ * Phase 4 (§6, §8): a hit (an impulse at the torso or head) or a shove past capture. Times are seconds
+ * after the hit or shove ended (Infinity: never).
+ */
+export interface ReactOut {
+  kind: 'hit' | 'fall';
+  job: Job;
+  applied: boolean;
+  fell: boolean;
+  steps: number; // touchdowns from the hit to stable (or to the fall)
+  stableAfter: number;
+  satPeak: number;
+  xiOutPeak: number; // how far the DCM got outside the soles, m
+  modes: Record<string, number>; // first time each balance mode was seen
+  fallAt: number;
+  braceAt: number;
+  contactAt: number; // the first part other than a sole on the canvas
+  contactParts: string[];
+  getup: GetupTimes | null;
+  braceWhy?: string; // what started the brace (reactions.ts)
+  leanPeak: number; // the torso's largest lean while still up, rad
+  leanAt: Record<string, number>; // first time the lean passed 0.4, 0.6, 0.8, 1.0 rad
+}
+export interface GetupOut { kind: 'getup'; job: Job; ok: boolean; fallAt: number; times: GetupTimes; why: string }
 export interface ShuffleOut { kind: 'shuffle'; job: Job; metrics: BalanceMetrics; legs: Array<{ leg: string; arrived: number; steps: number }>; controlUs: number; blowup: boolean }
 export interface StrikeOut {
   kind: 'strike';
@@ -98,8 +156,10 @@ export interface StrikeOut {
   captureSteps: number;
   gyroPeak: number;
   end: string;
+  step?: boolean; // --approach: the blow started from a step
+  lunge?: boolean; // the blow stepped in from the stance (BalanceEngine.requestLunge)
 }
-export type DrillOut = ApproachOut | PushOut | ShuffleOut | StrikeOut;
+export type DrillOut = ApproachOut | PushOut | ShuffleOut | StrikeOut | ReactOut | GetupOut;
 
 // ------------------------------------------------------------------ one drill (child process)
 
@@ -166,6 +226,38 @@ async function lone(design: string, seed: number, systems: readonly SimSystem[])
   return sim;
 }
 
+/**
+ * Walk 3 m ahead and stop mid-swing ('walk'), or 1 m ahead and stop on arrival ('arrive'); 'stance'
+ * is where the robot stands already. False if it never got there.
+ */
+function reachSituation(sim: Sim, situation: Situation, z0: number): boolean {
+  if (situation === 'stance') return true;
+  const { ctx } = sim;
+  const r = ctx.robots[0];
+  const c = controllerOf(r)!;
+  const f = c.gait.currentFrame();
+  const far = situation === 'walk' ? 3 : 1;
+  c.goal = { x: f.x + Math.cos(f.heading) * far, y: f.y + Math.sin(f.heading) * far, heading: f.heading };
+  const n = Math.round(12 / ctx.dt);
+  for (let i = 0; i < n; i++) {
+    sim.step();
+    ctx.events.length = 0;
+    if (situation === 'walk') {
+      const side = c.gait.swingSide;
+      const sw = side ? c.gait.feet[side] : null;
+      // (The balance engine flies its own swings: their progress is the engine's.)
+      const e = c.engine;
+      const progress = e ? (e.swing.active ? e.swing.progress(ctx.time) : 0) : sw ? sw.t / sw.dur : 0;
+      if (c.gait.phase === 'single' && sw && sw.phase === 'swing' && progress >= 0.4 && ctx.time > 2.5) return true;
+    } else if (c.gait.bothPlanted()) {
+      const g = c.goal!, cur = c.gait.currentFrame();
+      if (Math.hypot(cur.x - g.x, cur.y - g.y) < 0.12) return true;
+    }
+    if (isDown(ctx, r, z0) || r.down) return false;
+  }
+  return false;
+}
+
 async function pushTrial(job: Extract<Job, { kind: 'push' }>): Promise<PushOut> {
   const sim = await lone(job.design, job.seed, SYSTEMS);
   const { ctx } = sim;
@@ -173,34 +265,9 @@ async function pushTrial(job: Extract<Job, { kind: 'push' }>): Promise<PushOut> 
   const c = controllerOf(r)!;
   sim.seconds(1.2);
   const z0 = comPos(ctx, r)[2];
-  let applied = true;
-  if (job.situation !== 'stance') {
-    // Walk 3 m ahead (push mid-swing), or 1 m ahead (push on arrival).
-    const f = c.gait.currentFrame();
-    const far = job.situation === 'walk' ? 3 : 1;
-    c.goal = { x: f.x + Math.cos(f.heading) * far, y: f.y + Math.sin(f.heading) * far, heading: f.heading };
-    applied = false;
-    const n = Math.round(12 / ctx.dt);
-    for (let i = 0; i < n && !applied; i++) {
-      sim.step();
-      ctx.events.length = 0;
-      if (job.situation === 'walk') {
-        const side = c.gait.swingSide;
-        const sw = side ? c.gait.feet[side] : null;
-        // (The balance engine flies its own swings: their progress is the engine's.)
-        const e = c.engine;
-        const progress = e ? (e.swing.active ? e.swing.progress(ctx.time) : 0) : sw ? sw.t / sw.dur : 0;
-        if (c.gait.phase === 'single' && sw && sw.phase === 'swing' && progress >= 0.4 && ctx.time > 2.5) applied = true;
-      } else if (c.gait.bothPlanted()) {
-        const g = c.goal!, cur = c.gait.currentFrame();
-        if (Math.hypot(cur.x - g.x, cur.y - g.y) < 0.12) applied = true;
-      }
-      if (isDown(ctx, r, z0) || r.down) break;
-    }
-    if (!applied) {
-      sim.dispose();
-      return { kind: 'push', job, survived: false, steps: 0, stableAfter: Infinity, satPeak: 0, applied: false };
-    }
+  if (!reachSituation(sim, job.situation, z0)) {
+    sim.dispose();
+    return { kind: 'push', job, survived: false, steps: 0, stableAfter: Infinity, satPeak: 0, applied: false };
   }
   const heading = c.gait.bothPlanted() ? c.gait.currentFrame().heading : c.lastSense!.heading - c.stance.pelvisYaw;
   const dirW = heading + job.dir * DEG;
@@ -244,6 +311,264 @@ async function pushTrial(job: Extract<Job, { kind: 'push' }>): Promise<PushOut> 
   const out: PushOut = { kind: 'push', job, survived: !fell, steps: c.probe.touchdowns - touch0, stableAfter, satPeak, applied: true };
   sim.dispose();
   return out;
+}
+
+// ------------------------------------------------------------------ Phase 4: hits, falls, get-ups
+
+const HIT_S = 0.012; // a blow's contact time: its impulse arrives over this long
+const REACT_WATCH_S = 4; // a hit that does not fell the robot is watched this long
+const DOWN_WATCH_S = 12; // after a fall: this long for the get-up
+const STAND_HOLD_S = 0.3;
+const STAND_UP = 0.9; // torso up-axis z: standing upright
+const STAND_HEIGHT = 0.9; // × stance pelvis height
+
+/**
+ * Watches one robot through a hit or a shove (and the get-up after a fall): recovery steps, time to
+ * stable, the balance modes it went through, when it braced, what of it touched the canvas first
+ * and when, and how long it took to get up.
+ */
+class ReactWatch {
+  readonly out: ReactOut;
+  private t0 = 0;
+  private touch0 = 0;
+  private stableSince = -1;
+  private standSince = -1;
+  private fallT = -1;
+  private lastWhy = '';
+  private readonly cc: CanvasContacts;
+  private readonly torso: number;
+  private readonly z0: number;
+  private readonly heightRef: number;
+
+  constructor(private readonly sim: Sim, kind: 'hit' | 'fall', job: Job) {
+    const { ctx } = sim;
+    const r = ctx.robots[0];
+    this.out = {
+      kind, job, applied: true, fell: false, steps: 0, stableAfter: Infinity, satPeak: 0, xiOutPeak: 0, modes: {},
+      fallAt: Infinity, braceAt: Infinity, contactAt: Infinity, contactParts: [], getup: null, leanPeak: 0, leanAt: {},
+    };
+    this.cc = new CanvasContacts(ctx, r);
+    this.torso = r.parts.get('torso')!.body;
+    this.z0 = comPos(ctx, r)[2];
+    this.heightRef = controllerOf(r)!.stance.pelvisHeight;
+  }
+
+  /** The hit (or shove) has been delivered: times count from here. */
+  begin(touch0: number): void {
+    this.t0 = this.sim.ctx.time;
+    this.touch0 = touch0;
+  }
+
+  /** After every physics step (during the hit too); false once there is nothing more to watch. */
+  step(during = false): boolean {
+    const { ctx } = this.sim;
+    const r = ctx.robots[0];
+    const c = controllerOf(r)!;
+    const o = this.out;
+    const now = ctx.time - this.t0;
+    for (const e of ctx.events as SimEvent[]) {
+      if ((e.kind !== 'fall' && e.kind !== 'getup') || e.corner !== 0) continue;
+      if (e.kind === 'fall' && this.fallT < 0) {
+        this.fallT = ctx.time;
+        o.fallAt = now;
+        o.getup = { moveAt: Infinity, upAt: Infinity, stableAt: Infinity, attempts: 0 };
+      }
+      if (e.kind === 'getup' && o.getup && !Number.isFinite(o.getup.upAt)) o.getup.upAt = ctx.time - this.fallT;
+    }
+    ctx.events.length = 0;
+    const mode = c.engine?.state.mode ?? 'legacy';
+    if (!(mode in o.modes)) o.modes[mode] = during ? 0 : now;
+    if (mode === 'brace' && !Number.isFinite(o.braceAt)) {
+      o.braceAt = during ? 0 : now;
+      o.braceWhy = c.engine?.reactions.braceWhy;
+    }
+    o.satPeak = Math.max(o.satPeak, c.gyro?.saturation ?? 0);
+    if (!Number.isFinite(o.contactAt)) {
+      const parts = this.cc.nonFoot(ctx);
+      if (parts.length) {
+        o.contactAt = during ? 0 : now;
+        o.contactParts = parts;
+      }
+    }
+    const s = c.lastSense;
+    const cv = ctx.data.cvel as Float64Array;
+    const rate = Math.hypot(cv[this.torso * 6], cv[this.torso * 6 + 1]);
+    if (s && !o.fell && !Number.isFinite(o.contactAt)) {
+      const lean = Math.acos(Math.max(-1, Math.min(1, s.upright)));
+      o.leanPeak = Math.max(o.leanPeak, lean);
+      for (const th of [0.4, 0.6, 0.8, 1.0]) if (lean > th && !(String(th) in o.leanAt)) o.leanAt[String(th)] = during ? 0 : now;
+    }
+    if (!o.fell && (this.fallT >= 0 || isDown(ctx, r, this.z0))) {
+      o.fell = true;
+      o.steps = c.probe.touchdowns - this.touch0;
+    }
+    if (!o.fell && s && c.gait.bothPlanted()) {
+      const sup = c.gait.supportPolygon();
+      if (sup.length >= 3) o.xiOutPeak = Math.max(o.xiOutPeak, polygonDistance(sup, [s.capture[0], s.capture[1]]).d);
+    }
+    if (during) return true;
+    if (!o.fell) {
+      if (Number.isFinite(o.stableAfter)) return now < o.stableAfter + 1;
+      const speed = s ? Math.hypot(s.comVel[0], s.comVel[1]) : Infinity;
+      const stable = speed < STABLE_SPEED && rate < STABLE_SPEED && c.gait.bothPlanted() && !r.down;
+      if (!stable) this.stableSince = -1;
+      else if (this.stableSince < 0) this.stableSince = ctx.time;
+      else if (ctx.time - this.stableSince >= STABLE_HOLD_S) {
+        o.stableAfter = this.stableSince - this.t0;
+        o.steps = c.probe.touchdowns - this.touch0;
+      }
+      if (now >= REACT_WATCH_S) o.steps = c.probe.touchdowns - this.touch0;
+      return now < REACT_WATCH_S;
+    }
+    // Down: time the get-up.
+    const g = o.getup;
+    if (!g || this.fallT < 0) return now < REACT_WATCH_S + DOWN_WATCH_S;
+    const since = ctx.time - this.fallT;
+    g.attempts = c.getUp.attempts;
+    const why = c.getUp.clip?.reason;
+    if (why && why !== this.lastWhy) {
+      (g.fails ??= []).push(why);
+      this.lastWhy = why;
+    }
+    if (!Number.isFinite(g.moveAt) && c.getUp.active && c.getUp.phase !== 'settle') g.moveAt = since;
+    const standing = !r.down && !c.getUp.active && !c.rising && !!s && s.upright > STAND_UP && s.pelvisPos[2] > STAND_HEIGHT * this.heightRef
+      && Math.hypot(s.comVel[0], s.comVel[1]) < STABLE_SPEED && rate < STABLE_SPEED && c.gait.bothPlanted();
+    if (!standing) this.standSince = -1;
+    else if (this.standSince < 0) this.standSince = ctx.time;
+    else if (ctx.time - this.standSince >= STAND_HOLD_S && !Number.isFinite(g.stableAt)) g.stableAt = this.standSince - this.fallT;
+    if (Number.isFinite(g.stableAt)) return false;
+    return since < DOWN_WATCH_S;
+  }
+}
+
+/** A blow (§8: torso and head hits of 20, 40 and 73 N·s), from `dir` degrees off the facing. */
+async function hitTrial(job: Extract<Job, { kind: 'hit' }>): Promise<ReactOut> {
+  const sim = await lone(job.design, job.seed, SYSTEMS);
+  const { ctx } = sim;
+  const r = ctx.robots[0];
+  const c = controllerOf(r)!;
+  sim.seconds(1.2);
+  ctx.events.length = 0;
+  const z0 = comPos(ctx, r)[2];
+  const w = new ReactWatch(sim, 'hit', job);
+  if (!reachSituation(sim, job.situation, z0)) {
+    sim.dispose();
+    w.out.applied = false;
+    return w.out;
+  }
+  const heading = c.gait.bothPlanted() ? c.gait.currentFrame().heading : c.lastSense!.heading - c.stance.pelvisYaw;
+  const dirW = heading + Math.PI + job.dir * DEG; // dir 0: the blow comes from straight ahead (pushes him back)
+  const f = job.impulse / HIT_S;
+  const force: Vec3 = [Math.cos(dirW) * f, Math.sin(dirW) * f, 0];
+  const body = r.parts.get(job.part)!.body;
+  const touch0 = c.probe.touchdowns;
+  for (let i = 0; i < Math.round(HIT_S / ctx.dt); i++) {
+    const xf = ctx.data.xfrc_applied as Float64Array;
+    xf[body * 6] += force[0];
+    xf[body * 6 + 1] += force[1];
+    sim.step();
+    const xf2 = ctx.data.xfrc_applied as Float64Array;
+    xf2[body * 6] -= force[0];
+    xf2[body * 6 + 1] -= force[1];
+    w.step(true);
+  }
+  if (job.situation !== 'stance') c.goal = null;
+  w.begin(touch0);
+  while (w.step()) sim.step();
+  sim.dispose();
+  return w.out;
+}
+
+/** A shove past capture: what does the robot do on the way down, what lands first, how fast is it back up. */
+async function fallTrial(job: Extract<Job, { kind: 'fall' }>): Promise<ReactOut> {
+  const sim = await lone(job.design, job.seed, SYSTEMS);
+  const { ctx } = sim;
+  const r = ctx.robots[0];
+  const c = controllerOf(r)!;
+  sim.seconds(1.2);
+  ctx.events.length = 0;
+  const w = new ReactWatch(sim, 'fall', job);
+  const heading = c.gait.bothPlanted() ? c.gait.currentFrame().heading : c.lastSense!.heading - c.stance.pelvisYaw;
+  const dirW = heading + job.dir * DEG;
+  const f = (job.dv * c.mass) / PUSH_S;
+  const force: Vec3 = [Math.cos(dirW) * f, Math.sin(dirW) * f, 0];
+  const body = r.parts.get('torso')!.body;
+  const touch0 = c.probe.touchdowns;
+  for (let i = 0; i < Math.round(PUSH_S / ctx.dt); i++) {
+    const xf = ctx.data.xfrc_applied as Float64Array;
+    xf[body * 6] += force[0];
+    xf[body * 6 + 1] += force[1];
+    sim.step();
+    const xf2 = ctx.data.xfrc_applied as Float64Array;
+    xf2[body * 6] -= force[0];
+    xf2[body * 6 + 1] -= force[1];
+    w.step(true);
+  }
+  w.begin(touch0);
+  while (w.step()) sim.step();
+  sim.dispose();
+  return w.out;
+}
+
+/** The root orientation that lays the body face down, on its back or on a side (tests/control/getup-search.ts). */
+const LAY: Record<Orient, [number, number, number, number]> = {
+  face_down: [Math.cos(Math.PI / 4), 0, Math.sin(Math.PI / 4), 0],
+  back: [Math.cos(-Math.PI / 4), 0, Math.sin(-Math.PI / 4), 0],
+  side_l: [Math.cos(-Math.PI / 4), Math.sin(-Math.PI / 4), 0, 0],
+  side_r: [Math.cos(Math.PI / 4), Math.sin(Math.PI / 4), 0, 0],
+};
+
+/** Laid on the canvas in `orient` (dropped from a little above it): how fast and how surely it gets up. */
+async function getupTrial(job: Extract<Job, { kind: 'getup' }>): Promise<GetupOut> {
+  const sim = await makeSim({ design: job.design, x: 0, y: 0, yaw: 0 }, { design: job.design, x: 8, y: 0, yaw: Math.PI }, { seed: job.seed, systems: SYSTEMS });
+  const parked = controllerOf(sim.ctx.robots[1]);
+  if (parked) parked.enabled = false;
+  const { ctx } = sim;
+  sim.seconds(0.6); // the motion library attaches
+  sim.release(0);
+  const r = ctx.robots[0];
+  const c = controllerOf(r)!;
+  const a = r.rootQadr;
+  const q = LAY[job.orient];
+  const qpos = ctx.data.qpos as Float64Array;
+  qpos[a + 2] = 0.28 + 0.04 * ((job.seed - 1) % 3);
+  for (let i = 0; i < 4; i++) qpos[a + 3 + i] = q[i];
+  ctx.mj.mj_forward(ctx.model, ctx.data);
+  ctx.events.length = 0;
+  const t0 = ctx.time;
+  const times: GetupTimes = { moveAt: Infinity, upAt: Infinity, stableAt: Infinity, attempts: 0 };
+  let fallAt = -1, standSince = -1;
+  const torso = r.parts.get('torso')!.body;
+  const n = Math.round(DOWN_WATCH_S / ctx.dt);
+  for (let i = 0; i < n; i++) {
+    sim.step();
+    for (const e of ctx.events as SimEvent[]) {
+      if ((e.kind !== 'fall' && e.kind !== 'getup') || e.corner !== 0) continue;
+      if (e.kind === 'fall' && fallAt < 0) fallAt = ctx.time;
+      if (e.kind === 'getup' && fallAt >= 0 && !Number.isFinite(times.upAt)) times.upAt = ctx.time - fallAt;
+    }
+    ctx.events.length = 0;
+    if (fallAt < 0) continue;
+    const since = ctx.time - fallAt;
+    times.attempts = c.getUp.attempts;
+    const why = c.getUp.clip?.reason;
+    if (why && why !== (times.fails?.[times.fails.length - 1] ?? '')) (times.fails ??= []).push(why);
+    if (!Number.isFinite(times.moveAt) && c.getUp.active && c.getUp.phase !== 'settle') times.moveAt = since;
+    const s = c.lastSense;
+    const cv = ctx.data.cvel as Float64Array;
+    const rate = Math.hypot(cv[torso * 6], cv[torso * 6 + 1]);
+    const standing = !r.down && !c.getUp.active && !c.rising && !!s && s.upright > STAND_UP && s.pelvisPos[2] > STAND_HEIGHT * c.stance.pelvisHeight
+      && Math.hypot(s.comVel[0], s.comVel[1]) < STABLE_SPEED && rate < STABLE_SPEED && c.gait.bothPlanted();
+    if (!standing) standSince = -1;
+    else if (standSince < 0) standSince = ctx.time;
+    else if (ctx.time - standSince >= STAND_HOLD_S) {
+      times.stableAt = standSince - fallAt;
+      break;
+    }
+  }
+  const why = c.getUp.clip?.reason ?? '';
+  sim.dispose();
+  return { kind: 'getup', job, ok: Number.isFinite(times.stableAt), fallAt: fallAt >= 0 ? fallAt - t0 : Infinity, times, why };
 }
 
 async function shuffle(job: Extract<Job, { kind: 'shuffle' }>): Promise<ShuffleOut> {
@@ -327,9 +652,11 @@ async function strikeWindow(design: string, id: SkillId): Promise<[number, numbe
 async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<StrikeOut> {
   const win = await strikeWindow(job.design, job.skill);
   const k = job.trial;
-  // Deterministic spread over the throw window, a little off-line and turned.
+  // Deterministic spread over the throw window, a little off-line and turned. --approach: a stride
+  // or so beyond the throw edge, on an intent: the tactics walk in and throw (a step-in blow).
   const u = ((k * 0.618034) % 1);
-  const dist = win ? win[0] + (win[1] - win[0]) * u : 1;
+  const approachMode = process.env.SD_STRIKE_APPROACH === '1';
+  const dist = !win ? 1 : approachMode ? win[1] + 0.25 + 0.2 * u : win[0] + (win[1] - win[0]) * u;
   const dy = [0, 0.1, -0.1, 0.05, -0.05][k % 5];
   const dyaw = [0, 0.15, -0.15, -0.08, 0.08][k % 5];
   const out: StrikeOut = {
@@ -348,8 +675,32 @@ async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<Strik
   const def = c.skillFor(job.skill)!;
   const z0 = comPos(ctx, me)[2];
   const cap0 = c.gait.captureSteps;
+  const lunge0 = c.engine?.lunges ?? 0;
+  // --guard down: his hands drop to his sides (a clean-shot measurement: what the blow carries when
+  // nothing is in its way).
+  if (process.env.SD_STRIKE_GUARD === 'down') {
+    const oc = controllerOf(opp)!;
+    for (const sd of ['l', 'r'] as const) {
+      const a = oc.geo.arms[sd];
+      oc.stance.guard[sd].fist = [a.shoulder[0] + 0.08, a.shoulder[1] * 1.15, a.shoulder[2] - 0.9 * (a.upper + a.fore)];
+      oc.stance.guard[sd].pole = [-1, 0, 0];
+    }
+    sim.seconds(0.6, () => { ctx.events.length = 0; });
+  }
   out.mocap = !!def.clip;
-  out.started = c.startSkill(def, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
+  if (approachMode) {
+    me.intent = intent(job.skill as never, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
+    const n0 = Math.round(STRIKE_MAX_S / ctx.dt);
+    for (let i = 0; i < n0 && !c.skills.run; i++) {
+      sim.step();
+      for (const e of ctx.events as SimEvent[]) if (e.kind === 'fall' && e.corner === me.corner) out.fell = true;
+      ctx.events.length = 0;
+    }
+    me.intent = null;
+    out.started = !!c.skills.run && c.skills.run.def.id === job.skill;
+    out.step = c.gait.phase === 'single';
+    out.dist = Math.hypot(comPos(ctx, opp)[0] - comPos(ctx, me)[0], comPos(ctx, opp)[1] - comPos(ctx, me)[1]);
+  } else out.started = c.startSkill(def, STRIKE_ZONE[job.skill] ?? 'head', STRIKE_AGGRESSION);
   if (!out.started) {
     sim.dispose();
     return out;
@@ -415,11 +766,12 @@ async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<Strik
     }
   }
   out.captureSteps = c.gait.captureSteps - cap0;
+  out.lunge = (c.engine?.lunges ?? 0) > lunge0;
   sim.dispose();
   return out;
 }
 
-const TABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE, PACE, BURST, STRIKE_P3, MOCAP_KICKS, KICK_GATE };
+const TABLES: Record<string, Record<string, unknown>> = { REACTIONS, BEHAVIOURS, GETUP_SPEED, BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE, PACE, BURST, STRIKE_P3, MOCAP_KICKS, KICK_GATE, KICK_DRIVE, KICK_RBAL, KICK_SET, ROUTE, STRIKE_PATH, LUNGE, INVERSE_DYNAMICS, IMPEDANCE };
 
 /** SD_TUNE='TABLE.key=value,...': set numeric tunables before a drill (A/B runs). */
 function applyTune(spec: string | undefined): void {
@@ -436,11 +788,15 @@ function applyTune(spec: string | undefined): void {
 
 export async function runJob(job: Job): Promise<DrillOut> {
   applyTune(process.env.SD_TUNE);
+  applyMotorVariants(process.env.SD_MOTORS);
   switch (job.kind) {
     case 'approach': return approach(job);
     case 'push': return pushTrial(job);
     case 'shuffle': return shuffle(job);
     case 'strike': return strikeTrial(job);
+    case 'hit': return hitTrial(job);
+    case 'fall': return fallTrial(job);
+    case 'getup': return getupTrial(job);
   }
 }
 
@@ -456,7 +812,7 @@ function runChild(job: Job, balance: string): Promise<DrillOut> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...process.execArgv, script, '--job', JSON.stringify(job)], {
       stdio: ['ignore', 'pipe', 'inherit'],
-      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('window', '') ? { SD_STRIKE_WINDOW: arg('window', '') } : {}), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
+      env: { ...process.env, SD_BALANCE: balance, SD_TUNE: arg('tune', ''), ...(arg('window', '') ? { SD_STRIKE_WINDOW: arg('window', '') } : {}), ...(arg('guard', '') ? { SD_STRIKE_GUARD: arg('guard', '') } : {}), ...(arg('motors', '') ? { SD_MOTORS: arg('motors', '') } : {}), ...(arg('centroid', '') ? { SD_CENTROID_DIR: arg('centroid', '') } : {}), ...(process.argv.includes('--approach') ? { SD_STRIKE_APPROACH: '1' } : {}), ...(arg('mocap', '') ? { SD_MOCAP_FOOTWORK: arg('mocap', '') } : {}), ...(arg('ring', '') ? { SD_RING_IQ: arg('ring', '') } : {}) },
     });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -464,9 +820,15 @@ function runChild(job: Job, balance: string): Promise<DrillOut> {
     child.on('close', (code) => {
       const line = out.split('\n').find((l) => l.startsWith('{'));
       if (code !== 0 || !line) reject(new Error(`${JSON.stringify(job)} exited ${code}`));
-      else resolve(JSON.parse(line) as DrillOut);
+      else resolve(JSON.parse(line, revive) as DrillOut);
     });
   });
+}
+
+/** Times that never came (Infinity) travel as null in JSON: back to Infinity. */
+const NEVER_KEYS = new Set(['stableAfter', 'fallAt', 'braceAt', 'contactAt', 'moveAt', 'upAt', 'stableAt', 'timeTo13', 'arrivedAt']);
+function revive(key: string, value: unknown): unknown {
+  return value === null && NEVER_KEYS.has(key) ? Infinity : value;
 }
 
 /** A queue of tasks run at most `jobs` at a time; a task may queue more (push ladders). */
@@ -518,6 +880,7 @@ export function summarizeApproach(outs: ApproachOut[], design: string): string[]
     `    planted-leg servo at limit     ${pct(lim)}   target <= 3%   ${ok(lim <= 0.03)}`,
     `    gyro saturation in footwork    ${f2(sat)} (peak ${f2(maxOf(rs.map(({ m }) => m.gyroSatPeak)))})   target <= 0.10   ${ok(sat <= 0.1)}`,
     `    reserve at touchdown           mean ${f2(res)}, min ${f2(Math.min(...rs.map(({ m }) => m.reserveAtTouchdownMin)))}   target >= 0.6   ${ok(res >= 0.6)}`,
+    `    torque reserve (planted legs)  worst servo's share of its torque p50 ${pct(mean(rs.map(({ m }) => m.torqueShareP50 ?? NaN)))}, p95 ${pct(mean(rs.map(({ m }) => m.torqueShareP95 ?? NaN)))}; at the limit by group ankle ${pct(mean(rs.map(({ m }) => m.limitByGroup?.ankle ?? NaN)))} knee ${pct(mean(rs.map(({ m }) => m.limitByGroup?.knee ?? NaN)))} hip ${pct(mean(rs.map(({ m }) => m.limitByGroup?.hip ?? NaN)))}; feed-forward clamped ${pct(mean(rs.map(({ m }) => m.ffClampShare ?? NaN)))} of ticks`,
     `    control cost                   ${f1(us)} µs per robot per step   target < 40   ${ok(us < 40)}`,
     `    mocap footwork                 clip steps ${pct(mean(rs.map(({ m }) => m.clipLiftShare ?? 0)))} of swings (+${pct(mean(rs.map(({ m }) => m.followLiftShare ?? 0)))} followed), ${pct(mean(rs.map(({ m }) => m.clipMoveShare ?? 0)))} of moving time; style on ${pct(mean(rs.map(({ m }) => m.styleShare ?? 0)))}; picks ${rs.reduce((a, { m }) => a + (m.picks ?? 0), 0)}, fallbacks ${rs.reduce((a, { m }) => a + (m.fallbacks ?? 0), 0)}`,
   ];
@@ -526,6 +889,17 @@ export function summarizeApproach(outs: ApproachOut[], design: string): string[]
 export function summarizePush(outs: PushOut[], design: string, situation: Situation): string[] {
   const rs = outs.filter((o) => o.job.design === design && (o.job as Extract<Job, { kind: 'push' }>).situation === situation);
   if (!rs.length) return [];
+  if (arg('dvs', '')) {
+    // Fixed levels: survival by level, and steps and time to stable over the survived.
+    const levels = [...new Set(rs.map((o) => (o.job as Extract<Job, { kind: 'push' }>).dv))].sort((a, b) => a - b);
+    const ok = rs.filter((o) => o.survived && o.applied);
+    const steps = ok.map((o) => o.steps).sort((a, b) => a - b);
+    const stable = ok.map((o) => o.stableAfter).filter(Number.isFinite).sort((a, b) => a - b);
+    const within2 = ok.filter((o) => o.steps <= 2).length;
+    return [`  push (${situation}) by level: ${levels.map((dv) => { const l = rs.filter((o) => (o.job as Extract<Job, { kind: 'push' }>).dv === dv); return `${dv.toFixed(1)}: ${l.filter((o) => o.survived).length}/${l.length}`; }).join(', ')}`
+      + `; failed ${rs.filter((o) => !o.survived).map((o) => `${(o.job as Extract<Job, { kind: 'push' }>).dir}°@${(o.job as Extract<Job, { kind: 'push' }>).dv}`).join(' ') || 'none'}`
+      + `; steps median ${steps[Math.floor(steps.length / 2)] ?? '-'} (≤ 2 in ${within2}/${ok.length}); stable after median ${f2(stable[Math.floor(stable.length / 2)] ?? NaN)} s`];
+  }
   const dirs = [...new Set(rs.map((o) => (o.job as Extract<Job, { kind: 'push' }>).dir))].sort((a, b) => a - b);
   const cells = dirs.map((d) => {
     const list = rs.filter((o) => (o.job as Extract<Job, { kind: 'push' }>).dir === d);
@@ -549,6 +923,7 @@ export function summarizeShuffle(outs: ShuffleOut[], design: string): string[] {
   return [
     `  shuffle: falls ${m.falls.length}${m.falls.length ? ` (${m.falls.map((x) => `${f1(x.t)}s ${x.activity}`).join(', ')})` : ''}, legs ${o.legs.map((l) => `${l.leg} ${Number.isFinite(l.arrived) ? f1(l.arrived) + 's' : l.leg.startsWith('circle') ? '' : 'never'}/${l.steps}st`).join(', ')}`,
     `    single support ${pct(m.singleInside2)}, torso rate ${f2(m.torsoRateLow)}/${f2(m.torsoRateHigh)}, tilt ${f1(m.tiltPeakDeg)}°, COP jump ${f1(m.copJumpCm)} cm, DCM err ${f1(m.dcmErrCm)} cm, servo at limit ${pct(m.servoLimitShare)}, gyro ${f2(m.gyroSatFootwork)}, control ${f1(o.controlUs)} µs${o.blowup ? ', BLOW-UP' : ''}`,
+    `    torque reserve: worst planted servo p50 ${pct(m.torqueShareP50 ?? NaN)} / p95 ${pct(m.torqueShareP95 ?? NaN)} of its torque; at the limit ankle ${pct(m.limitByGroup?.ankle ?? NaN)} knee ${pct(m.limitByGroup?.knee ?? NaN)} hip ${pct(m.limitByGroup?.hip ?? NaN)}; feed-forward clamped ${pct(m.ffClampShare ?? NaN)}; gyro reserve at touchdown mean ${f2(m.reserveAtTouchdown)} min ${f2(m.reserveAtTouchdownMin)}`,
     `    mocap footwork: clip steps ${pct(m.clipLiftShare ?? 0)} of swings (+${pct(m.followLiftShare ?? 0)} followed), ${pct(m.clipMoveShare ?? 0)} of moving time, style on ${pct(m.styleShare ?? 0)}`,
   ];
 }
@@ -559,16 +934,19 @@ const pctile = (xs: number[], q: number) => {
 };
 
 export function summarizeStrikes(outs: StrikeOut[], design: string): string[] {
-  const rs = outs.filter((o) => o.job.design === design && o.started);
-  if (!rs.length) return [];
-  const lines: string[] = ['  strikes (standing mirror opponent, from the throw window):'];
+  const all = outs.filter((o) => o.job.design === design);
+  const rs = all.filter((o) => o.started);
+  if (!all.length) return [];
+  const lines: string[] = [`  strikes (standing mirror opponent${process.argv.includes('--approach') ? ', walked in on an intent' : ', from the throw window'}; ${all.length - rs.length} not started):`];
   const ids = [...new Set(rs.map((o) => (o.job as Extract<Job, { kind: 'strike' }>).skill))];
   for (const id of ids) {
     const t = rs.filter((o) => (o.job as Extract<Job, { kind: 'strike' }>).skill === id);
     const hit = t.filter((o) => o.impact);
     const v = hit.map((o) => o.vContact), imp = hit.map((o) => o.impulse);
     const clean = hit.filter((o) => o.part === 'head' || o.part === 'torso' || o.part === 'pelvis' || /thigh|shin/.test(o.part ?? '')).length;
-    lines.push(`    ${id.padEnd(10)} ${t[0].mocap ? 'mocap' : 'proc '} landed ${hit.length}/${t.length} (clean ${clean}), falls ${t.filter((o) => o.fell).length}, capture steps ${t.reduce((a, o) => a + o.captureSteps, 0)}`
+    const steps = t.filter((o) => o.step).length;
+    const lunges = t.filter((o) => o.lunge).length;
+    lines.push(`    ${id.padEnd(10)} ${t[0].mocap ? 'mocap' : 'proc '} landed ${hit.length}/${t.length}${steps ? ` (${steps} from a step)` : ''}${lunges ? ` (${lunges} stepped in)` : ''} (clean ${clean}), falls ${t.filter((o) => o.fell).length}, capture steps ${t.reduce((a, o) => a + o.captureSteps, 0)}`
       + `; contact p50/p90 ${f1(pctile(v, 0.5))}/${f1(pctile(v, 0.9))} m/s (peak ${f1(pctile(t.map((o) => o.vPeak), 0.5))}), impulse p50/p90 ${f1(pctile(imp, 0.5))}/${f1(pctile(imp, 0.9))} N·s`
       + `, start→contact ${f2(pctile(hit.map((o) => o.tContact), 0.5))} s, elbow ${f2(pctile(hit.map((o) => o.elbow), 0.5))} rad, COM into it ${f2(pctile(hit.map((o) => o.comAlong), 0.5))} m/s, torso yaw ${f1(pctile(t.map((o) => o.torsoYawRate), 0.5))} rad/s, gyro ${f2(pctile(t.map((o) => o.gyroPeak), 0.9))}`);
   }
@@ -579,6 +957,88 @@ export function summarizeStrikes(outs: StrikeOut[], design: string): string[] {
   return lines;
 }
 
+/** Get-up targets per design, first movement to stable standing (docs/design/strike-power.md §4.6): median, p90. */
+const GETUP_TARGET: Record<string, [number, number]> = {
+  firecracker: [1.5, 2.5], savate: [2.0, 3.0], pylon: [2.2, 3.0], haymaker: [2.5, 3.5], striker: [2.5, 3.5], bruiser: [4, 6], goliath: [4, 6],
+};
+const GETUP_WITHIN_S = 5; // success: standing within this long of going down (healthy legs: >= 95%)
+
+/** Falls (from hits that felled the robot, and shoves past capture): the brace, what landed first, the get-up. */
+export function summarizeFalls(outs: ReactOut[], design: string): string[] {
+  const fs = outs.filter((o) => o.job.design === design && o.applied && o.fell);
+  if (!fs.length) return [];
+  const touched = fs.filter((o) => Number.isFinite(o.contactAt));
+  const braced = touched.filter((o) => o.braceAt <= o.contactAt);
+  const head = touched.filter((o) => o.contactParts.includes('head'));
+  const cls = new Map<string, number>();
+  for (const o of touched) {
+    const k = [...new Set(o.contactParts.map(contactClass))].sort().join('+');
+    cls.set(k, (cls.get(k) ?? 0) + 1);
+  }
+  const lead = braced.map((o) => o.contactAt - o.braceAt);
+  const g = fs.map((o) => o.getup).filter((x): x is GetupTimes => !!x);
+  const up5 = g.filter((x) => x.stableAt <= GETUP_WITHIN_S).length;
+  const move = g.map((x) => x.stableAt - x.moveAt).filter(Number.isFinite);
+  const total = g.map((x) => x.stableAt).filter(Number.isFinite);
+  const [tm, tp] = GETUP_TARGET[design] ?? [2.5, 3.5];
+  const share = (k: number, n: number) => (n ? k / n : NaN);
+  return [
+    `  falls ${fs.length} (${outs.filter((o) => o.job.design === design && o.kind === 'fall').length} shoves past capture, ${fs.filter((o) => o.kind === 'hit').length} from hits)`,
+    `    brace before the first non-foot contact   ${pct(share(braced.length, touched.length))} (${braced.length}/${touched.length}), lead median ${f2(pctile(lead, 0.5))} s   target >= 90%   ${ok(share(braced.length, touched.length) >= 0.9)}`,
+    `    head first                                ${pct(share(head.length, touched.length))} (${head.length}/${touched.length})   target <= 10%   ${ok(share(head.length, touched.length) <= 0.1)}`,
+    `    first contact by part                     ${[...cls].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`,
+    `    get-up: standing within ${GETUP_WITHIN_S} s of the fall ${up5}/${g.length}; first movement to stable median/p90 ${f2(pctile(move, 0.5))}/${f2(pctile(move, 0.9))} s (target ${tm}/${tp}); fall to stable ${f2(pctile(total, 0.5))}/${f2(pctile(total, 0.9))} s`,
+  ];
+}
+
+/** Hits that did not fell the robot: recovery steps and time to stable (§8), by blow. */
+export function summarizeHits(outs: ReactOut[], design: string): string[] {
+  const hs = outs.filter((o) => o.job.design === design && o.kind === 'hit' && o.applied);
+  if (!hs.length) return [];
+  const lines: string[] = [];
+  const keys = [...new Set(hs.map((o) => { const j = o.job as Extract<Job, { kind: 'hit' }>; return `${j.situation} ${j.part} ${j.impulse}`; }))];
+  for (const k of keys) {
+    const t = hs.filter((o) => { const j = o.job as Extract<Job, { kind: 'hit' }>; return `${j.situation} ${j.part} ${j.impulse}` === k; });
+    const ok2 = t.filter((o) => !o.fell);
+    const steps = ok2.map((o) => o.steps);
+    const st = ok2.map((o) => o.stableAfter);
+    const m = (name: string) => t.filter((o) => name in o.modes).length;
+    lines.push(`    ${k.padEnd(18)} N·s: stayed up ${ok2.length}/${t.length}, steps median ${pctile(steps, 0.5)} (max ${steps.length ? Math.max(...steps) : '-'}), stable after median/p90 ${f2(pctile(st, 0.5))}/${f2(pctile(st, 0.9))} s, gyro peak ${f2(pctile(t.map((o) => o.satPeak), 0.5))}, DCM out ${f1(100 * pctile(t.map((o) => o.xiOutPeak), 0.5))} cm; absorb ${m('absorb')} recover ${m('recover')} brace ${m('brace')}`);
+  }
+  const up = hs.filter((o) => !o.fell);
+  const stepped = up.filter((o) => o.steps > 0);
+  const allSteps = up.map((o) => o.steps), recSteps = stepped.map((o) => o.steps);
+  const st = up.map((o) => o.stableAfter), stRec = stepped.map((o) => o.stableAfter);
+  const stMed = pctile(stRec, 0.5);
+  return [
+    `  hits ${hs.length}: stayed up ${up.length} (${stepped.length} with a recovery step); recovery steps median ${pctile(recSteps, 0.5)}   target <= 2   ${ok(pctile(recSteps, 0.5) <= 2)}; time to stable over recoveries median ${f2(stMed)} s, p90 ${f2(pctile(stRec, 0.9))} s   target <= 0.8   ${ok(stMed <= 0.8)} (all hits that stayed up: median ${f2(pctile(st, 0.5))}, p90 ${f2(pctile(st, 0.9))}, never ${st.filter((x) => !Number.isFinite(x)).length}; steps median ${pctile(allSteps, 0.5)})`,
+    ...lines,
+  ];
+}
+
+/** Laid on the canvas: get-up success and times, by orientation (strike-power.md §4.6). */
+export function summarizeGetups(outs: GetupOut[], design: string): string[] {
+  const gs = outs.filter((o) => o.job.design === design);
+  if (!gs.length) return [];
+  const [tm, tp] = GETUP_TARGET[design] ?? [2.5, 3.5];
+  const move = gs.map((o) => o.times.stableAt - o.times.moveAt).filter(Number.isFinite);
+  const total = gs.map((o) => o.times.stableAt).filter(Number.isFinite);
+  const within = gs.filter((o) => o.times.stableAt <= GETUP_WITHIN_S).length;
+  const mMed = pctile(move, 0.5), mP90 = pctile(move, 0.9);
+  const by = (['face_down', 'back', 'side_l', 'side_r'] as const).map((or) => {
+    const l = gs.filter((o) => (o.job as Extract<Job, { kind: 'getup' }>).orient === or);
+    if (!l.length) return '';
+    const t = l.map((o) => o.times.stableAt - o.times.moveAt).filter(Number.isFinite);
+    return `${or} ${l.filter((o) => o.ok).length}/${l.length} ${f2(pctile(t, 0.5))} s`;
+  }).filter(Boolean);
+  const fails = gs.filter((o) => !o.ok).map((o) => `${(o.job as Extract<Job, { kind: 'getup' }>).orient}#${o.job.seed}: ${o.why || 'timeout'}`);
+  return [
+    `  get-ups (laid down) ${gs.length}: standing within ${GETUP_WITHIN_S} s ${within}/${gs.length} (${pct(within / gs.length)})   target >= 95%   ${ok(within / gs.length >= 0.95)}`,
+    `    first movement to stable median ${f2(mMed)} s, p90 ${f2(mP90)} s   target ${tm} / ${tp}   ${ok(mMed <= tm && mP90 <= tp)}; down to stable median ${f2(pctile(total, 0.5))}, p90 ${f2(pctile(total, 0.9))} s; balance took over at median ${f2(pctile(gs.map((o) => o.times.upAt - o.times.moveAt), 0.5))} s after the first movement`,
+    `    by orientation: ${by.join(', ')}${fails.length ? `; failed: ${fails.slice(0, 6).join(' | ')}` : ''}`,
+  ];
+}
+
 async function main(): Promise<void> {
   const ji = process.argv.indexOf('--job');
   if (ji >= 0) {
@@ -586,10 +1046,13 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(out));
     return;
   }
+  const sumFile = arg('summary', '');
+  const saved = sumFile ? JSON.parse(readFileSync(sumFile, 'utf8'), revive) as { results: DrillOut[]; designs: string[]; balance: string; label: string } : null;
   const drills = arg('drills', 'approach,push,shuffle').split(',');
-  const designs = arg('designs', MODERN.join(',')).split(',');
-  const balance = arg('balance', CONTROL.balance);
-  const jobs = Math.min(2, Math.max(1, Number(arg('jobs', '2'))));
+  const designs = saved ? saved.designs : arg('designs', MODERN.join(',')).split(',');
+  const balance = saved ? saved.balance : arg('balance', CONTROL.balance);
+  // At most 2 at once on a shared Mac; speed mode (Chris, 2026-10-07) allows up to 7 heavy processes.
+  const jobs = Math.min(7, Math.max(1, Number(arg('jobs', '2'))));
   const quick = process.argv.includes('--quick');
   const label = arg('label', quick ? 'quick' : 'full');
   const situations = arg('situations', 'stance,walk').split(',') as Situation[];
@@ -616,8 +1079,31 @@ async function main(): Promise<void> {
       const ids = (d.abilities as string[]).filter((a) => SKILLS[a as SkillId] && isStrikeSkill(SKILLS[a as SkillId]!) && (!want.length || want.includes(a))) as SkillId[];
       for (const skill of ids) for (let trial = 0; trial < trials; trial++) add({ kind: 'strike', design, skill, trial, seed: seed + trial });
     }
+    if (drills.includes('hits')) {
+      // §8: torso and head hits of 20, 40 and 73 N·s from 8 directions (--impulses, --hit-parts, --hit-situations).
+      const imps = arg('impulses', '20,40,73').split(',').map(Number);
+      const parts = arg('hit-parts', 'torso,head').split(',') as Array<'torso' | 'head'>;
+      const sits = arg('hit-situations', 'stance').split(',') as Situation[];
+      for (const situation of sits) for (const part of parts) for (const impulse of imps) for (let dir = 0; dir < 360; dir += 45) add({ kind: 'hit', design, part, impulse, dir, situation, seed });
+    }
+    if (drills.includes('falls')) {
+      // Shoves past capture (--fall-dvs), 8 directions: the brace, what lands first, the get-up.
+      for (const dv of arg('fall-dvs', '2.2').split(',').map(Number)) for (let dir = 0; dir < 360; dir += 45) add({ kind: 'fall', design, dir, dv, seed });
+    }
+    if (drills.includes('getups')) {
+      const n = Number(arg('getup-seeds', '3'));
+      const orients = arg('getup-orients', 'face_down,back,side_l,side_r').split(',') as Orient[];
+      for (const orient of orients) for (let k = 1; k <= n; k++) add({ kind: 'getup', design, orient, seed: k });
+    }
     if (drills.includes('push')) {
+      // --dvs 1.0,1.1,1.2: every direction at each of these shoves (no ladder): a survival rate around a
+      // level, which one ladder (stopped at its first fall) or one level cannot give.
+      const dvs = arg('dvs', '').split(',').filter(Boolean).map(Number);
       for (const situation of situations) {
+        if (dvs.length) {
+          for (let dir = 0; dir < 360; dir += 45) for (const dv of dvs) add({ kind: 'push', design, situation, dir, dv, seed });
+          continue;
+        }
         for (let dir = 0; dir < 360; dir += 45) {
           // A ladder: 0.6 m/s up by 0.1 to the first fall (quick: 1.1 only).
           const ladder = (dv: number): void => void add({ kind: 'push', design, situation, dir, dv, seed }, (o) => {
@@ -626,10 +1112,14 @@ async function main(): Promise<void> {
               ladder(Math.round((dv + 0.1) * 10) / 10);
             }
           });
-          ladder(quick ? 1.1 : 0.6);
+          ladder(quick ? 1.1 : Number(arg('ladder-from', '0.6')));
         }
       }
     }
+  }
+  if (saved) {
+    tasks.length = 0;
+    results.push(...saved.results);
   }
   await pool(tasks, jobs);
   const tune = arg('tune', '');
@@ -642,8 +1132,24 @@ async function main(): Promise<void> {
     lines.push(...summarizeShuffle(results.filter((o): o is ShuffleOut => o.kind === 'shuffle'), design));
     for (const situation of situations) lines.push(...summarizePush(results.filter((o): o is PushOut => o.kind === 'push'), design, situation));
     lines.push(...summarizeStrikes(results.filter((o): o is StrikeOut => o.kind === 'strike'), design));
+    const react = results.filter((o): o is ReactOut => o.kind === 'hit' || o.kind === 'fall');
+    lines.push(...summarizeHits(react, design));
+    lines.push(...summarizeFalls(react, design));
+    lines.push(...summarizeGetups(results.filter((o): o is GetupOut => o.kind === 'getup'), design));
+  }
+  // Phase 4 gate over all designs (§9): recovery steps, time to stable, brace before contact, head first.
+  const react = results.filter((o): o is ReactOut => (o.kind === 'hit' || o.kind === 'fall') && o.applied);
+  if (react.length) {
+    const up = react.filter((o) => o.kind === 'hit' && !o.fell);
+    const rec = up.filter((o) => o.steps > 0).map((o) => o.steps);
+    const st = up.filter((o) => o.steps > 0).map((o) => o.stableAfter);
+    const falls = react.filter((o) => o.fell && Number.isFinite(o.contactAt));
+    const braced = falls.filter((o) => o.braceAt <= o.contactAt).length;
+    const head = falls.filter((o) => o.contactParts.includes('head')).length;
+    lines.push(`PHASE 4 GATE: recovery steps median ${pctile(rec, 0.5)} (${rec.length} hits that stepped)   <= 2 ${ok(pctile(rec, 0.5) <= 2)}; time to stable over recoveries median ${f2(pctile(st, 0.5))} s   <= 0.8 ${ok(pctile(st, 0.5) <= 0.8)}; hits survived ${up.length}/${react.filter((o) => o.kind === 'hit').length}; brace before contact ${pct(braced / Math.max(1, falls.length))} (${braced}/${falls.length})   >= 90% ${ok(braced >= 0.9 * falls.length && falls.length > 0)}; head first ${pct(head / Math.max(1, falls.length))} (${head}/${falls.length})   <= 10% ${ok(head <= 0.1 * falls.length)}`);
   }
   console.log(lines.join('\n'));
+  if (saved) return;
   mkdirSync(OUT_DIR, { recursive: true });
   const file = join(OUT_DIR, `${label}-${balance}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
   writeFileSync(file, JSON.stringify({ balance, label, drills, designs, results, summary: lines }, null, 1));

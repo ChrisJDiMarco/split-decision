@@ -175,13 +175,14 @@ export interface CapturePlan {
  * Double support: does the DCM need a capture step? `gyroReach`: how far past the soles the
  * gyro can still carry the CMP (m). Returns the step to take, or null.
  */
-export function captureStep(geo: HumanoidGeometry, gait: Gait, s: Sense, gyroReach: number, drive: LegDrive): CapturePlan | null {
+export function captureStep(geo: HumanoidGeometry, gait: Gait, s: Sense, gyroReach: number, drive: LegDrive, force = false): CapturePlan | null {
   if (gait.phase !== 'double' || !gait.bothPlanted()) return null;
   const xi: P2 = [s.capture[0], s.capture[1]];
   const support = gait.supportPolygon();
   if (support.length < 3) return null;
   const { d } = polygonDistance(support, xi);
-  if (d < STEP_ADJUST.captureOutM || d < gyroReach * 0.5) return null;
+  // (`force`: the gyro has been given its chance already: a stalled lift with the DCM outside.)
+  if (d < STEP_ADJUST.captureOutM || (!force && d < gyroReach * 0.5)) return null;
   const w = s.omega0;
   const T0 = STEP_ADJUST.captureSwingW / w;
   let best: CapturePlan | null = null;

@@ -11,6 +11,7 @@ import type { MotionPlayer } from '../mocap/player';
 import type { BodyCommand, JointMap } from '../posture';
 import type { Sense } from '../sense';
 import type { StanceParams } from '../stance';
+import type { JointDynamics } from '../strike-path';
 import type { OpponentView } from './targets';
 
 export type SkillId =
@@ -55,6 +56,8 @@ export interface SkillEnv {
   rng: () => number;
   /** The balance engine (CONTROL.balance = 'dcm'); null on the legacy path, whose strikes are as they were. */
   engine?: BalanceEngine | null;
+  /** Balance engine: the robot's dynamics now (strike-path.ts plans blows on them); null on the legacy path. */
+  dyn?: JointDynamics | null;
 }
 
 export interface SkillRun {

@@ -124,9 +124,24 @@ const ENGINE_KICK_DEFS: Partial<Record<SkillId, SkillDef>> = {
 
 export const MOCAP_SKILLS: Partial<Record<SkillId, SkillDef>> = { ...PUNCHES, ...KICK_DEFS };
 
+/**
+ * Balance engine: the kicks that stay procedural on a design, where the mocap kick does not yet pass
+ * the kick drill against them (tools/balance-drills.ts --drills strikes, 8 of each kick at a standing
+ * opponent, 2026-10-20, after the strike-pass motors). Mocap kicks fell 3 in 8 front kicks on
+ * FIRECRACKER (procedural: none) and missed every PYLON front kick (procedural: 6 of 8); the procedural
+ * low kick lands as often on FIRECRACKER and on HAYMAKER more often and far harder (8.6 m/s, 73 N·s at
+ * the thigh against 1.9 m/s and 29 N·s). Everywhere else the mocap kick lands more often with no more falls.
+ */
+export const ENGINE_PROCEDURAL_KICKS: Readonly<Record<string, readonly SkillId[]>> = {
+  firecracker: ['front_kick', 'low_kick'],
+  haymaker: ['low_kick'],
+  pylon: ['front_kick'],
+};
+
 /** The mocap version of a skill if this library has moves for it (`engine`: on the balance engine). */
 export function mocapSkill(set: MocapSet | null, id: SkillId, engine = false): SkillDef | null {
   if (!set || !mocapStrikesEnabled()) return null;
+  if (engine && ENGINE_PROCEDURAL_KICKS[set.lib.design]?.includes(id)) return null;
   const def = PUNCHES[id] ?? (engine && MOCAP_KICKS.engine ? ENGINE_KICK_DEFS[id] : MOCAP_KICKS.enabled ? KICK_DEFS[id] : undefined);
   if (!def) return null;
   return (set.byLabel.get(id as never)?.length ?? 0) > 0 ? def : null;

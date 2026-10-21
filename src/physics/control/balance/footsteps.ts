@@ -63,6 +63,7 @@ export const FOOTWORK_TUNING = {
   cmpToe: 0.3, // ...to here
   cmpPush: 0.25, // step-drag: the pushing sole's CMP toward the travel, × half-length
   holdTol: { pos: 0.1, yaw: 0.3 }, // a held stance moves only past these...
+  anchorHold: 1, // re-forming a held stance steps one foot back into its slot around the weight-bearing one (0: a pair around their midpoint)
   moveTol: { pos: 0.05, yaw: 0.15 }, // ...and a moving one stops inside these
   horizon: 8, // footsteps planned ahead
   swingTorqueShare: 0.55, // a swing may ask the hip for this share of its stall torque at peak (the leg-as-rod model underestimates: FIRECRACKER, whose hips bind first, fell at 0.8)
@@ -193,7 +194,7 @@ export class FootstepPlanner {
     };
     const baseT = sw ? sw.land : pin.time;
     const cur = frameOf(this.feet, place);
-    const goal = pin.goal ?? { x: cur.x, y: cur.y, heading: pin.bearing };
+    const goal = pin.goal ?? this.holdFrame(pin, cur, place);
     this.planned.x = goal.x;
     this.planned.y = goal.y;
     this.planned.heading = goal.heading;
@@ -246,6 +247,33 @@ export class FootstepPlanner {
       this.gait = 'hold';
     }
     return this.gait;
+  }
+
+  /**
+   * Holding position (no goal), facing `bearing`: the stance frame the feet already describe. Once they
+   * are out of their slots (a capture step, a shove, a hit), the frame is anchored on the foot nearer the
+   * DCM (the one carrying the weight, usually the one that just caught the body), keeping its own yaw
+   * within FOOTWORK_TUNING.holdTol.yaw of the bearing: only the other foot steps back into its slot, one
+   * step, instead of a step-drag pair (or two) re-forming the stance around the feet's midpoint.
+   */
+  private holdFrame(pin: PlanInput, cur: StanceFrame, place: Record<Side, FootPlace>): StanceFrame {
+    const want: StanceFrame = { x: cur.x, y: cur.y, heading: pin.bearing };
+    if (!FOOTWORK_TUNING.anchorHold) return want;
+    let err = 0;
+    for (const side of ['l', 'r'] as const) {
+      const sl = this.feet.slot(side, want);
+      err = Math.max(err, Math.hypot(sl.x - place[side].x, sl.y - place[side].y));
+    }
+    if (err <= FOOTWORK_TUNING.holdTol.pos) return want;
+    const dl = Math.hypot(place.l.x - pin.xi[0], place.l.y - pin.xi[1]);
+    const dr = Math.hypot(place.r.x - pin.xi[0], place.r.y - pin.xi[1]);
+    const anchor: Side = dl <= dr ? 'l' : 'r';
+    const p = place[anchor];
+    const zero = this.feet.slot(anchor, { x: 0, y: 0, heading: pin.bearing });
+    const tol = FOOTWORK_TUNING.holdTol.yaw;
+    const heading = pin.bearing + clamp(wrapAngle(p.yaw - zero.yaw), -tol, tol);
+    const o = this.feet.slot(anchor, { x: 0, y: 0, heading });
+    return { x: p.x - o.x, y: p.y - o.y, heading };
   }
 
   private dragDs(pin: PlanInput): number {
@@ -484,7 +512,8 @@ export class FootstepPlanner {
     const dx = goal.x - cur.x, dy = goal.y - cur.y;
     const dist = Math.hypot(dx, dy);
     const dyaw = wrapAngle(goal.heading - cur.heading);
-    const pairs = Math.max(1, Math.ceil(dist / stride - 1e-6), Math.ceil(Math.abs(dyaw) / T.maxTurnPerPair - 1e-6));
+    // (Re-forming a held stance (no goal) is one pair at most: holdFrame anchored it on a foot already in its slot.)
+    const pairs = !pin.goal && T.anchorHold ? 1 : Math.max(1, Math.ceil(dist / stride - 1e-6), Math.ceil(Math.abs(dyaw) / T.maxTurnPerPair - 1e-6));
     const ux = dist > 1e-6 ? dx / dist : Math.cos(cur.heading), uy = dist > 1e-6 ? dy / dist : Math.sin(cur.heading);
     this.travel = Math.atan2(uy, ux);
     const Tsw = T.dragSwing / w, Tds = this.dragDs(pin) / w;
@@ -644,7 +673,7 @@ export function soleCmp(geo: HumanoidGeometry, side: Side, p: FootPlace, fwd: nu
 }
 
 /** The pushing point of a sole for travel along (ux, uy): toward the travel, inside the sole. */
-function pushCmp(geo: HumanoidGeometry, side: Side, p: FootPlace, ux: number, uy: number, share: number): P2 {
+export function pushCmp(geo: HumanoidGeometry, side: Side, p: FootPlace, ux: number, uy: number, share: number): P2 {
   const leg = geo.legs[side];
   const [fx, fy] = rot2(ux, uy, -p.yaw); // travel in the foot frame
   const ax = share * leg.footHalfLength * fx, ay = share * leg.footHalfWidth * fy;

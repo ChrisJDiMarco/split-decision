@@ -127,6 +127,10 @@ function buildSet(r: RobotRuntime, lib: MotionLibrary): MocapSet {
     byLabel.set(m.label, list);
   }
   const cache = new WeakMap<Move, Partial<Record<JointMask, Float32Array>>>();
+  // The robot's own motors set the speed limits, not the library's snapshot of them (a design's
+  // actuators can change without its moves being rebuilt: the strike pass, docs/research/08).
+  // (A stand-in runtime without motors, as the footwork tests build, keeps the library's.)
+  const speedLimit = Float64Array.from(lib.joints, (_, j) => (toRobot[j] >= 0 ? r.joints[toRobot[j]]?.motor?.noLoadSpeedRadS : undefined) ?? lib.jointSpeedLimit[j]);
   const masks: Record<JointMask, boolean[]> = {
     all: lib.joints.map(() => true),
     upper: lib.joints.map((n) => UPPER.test(n)),
@@ -138,7 +142,7 @@ function buildSet(r: RobotRuntime, lib: MotionLibrary): MocapSet {
       const c = cache.get(move) ?? {};
       let t = c[mask];
       if (!t) {
-        t = rateTable(lib, move, masks[mask]);
+        t = rateTable(lib, move, masks[mask], speedLimit);
         c[mask] = t;
         cache.set(move, c);
       }
@@ -149,12 +153,12 @@ function buildSet(r: RobotRuntime, lib: MotionLibrary): MocapSet {
 
 /**
  * Per frame, the largest time scale at which every masked joint stays under SPEED_FRACTION of its
- * motor's no-load speed (capped at MAX_RATE), then min-filtered so playback slows before a fast
+ * motor's no-load speed (`speedLimit`, the robot's own motors; capped at MAX_RATE), then min-filtered so playback slows before a fast
  * segment rather than inside it. Joint speed is the sampler's own spline derivative, taken a few
  * times across each frame's half-width either side (the lookup rounds to the nearest frame): a
  * Catmull-Rom spline runs up to ~1.5x the frame-difference speed between frames.
  */
-function rateTable(lib: MotionLibrary, move: Move, mask: boolean[]): Float32Array {
+function rateTable(lib: MotionLibrary, move: Move, mask: boolean[], speedLimit: ArrayLike<number>): Float32Array {
   const nj = lib.joints.length;
   const n = move.frames;
   const raw = new Float32Array(n);
@@ -167,7 +171,7 @@ function rateTable(lib: MotionLibrary, move: Move, mask: boolean[]): Float32Arra
       for (let j = 0; j < nj; j++) {
         if (!mask[j]) continue;
         const v = Math.abs(s.qd[j]);
-        if (v > 1e-6) lim = Math.min(lim, (SPEED_FRACTION * lib.jointSpeedLimit[j]) / v);
+        if (v > 1e-6) lim = Math.min(lim, (SPEED_FRACTION * speedLimit[j]) / v);
       }
     }
     raw[f] = lim;

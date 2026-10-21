@@ -14,7 +14,12 @@ import type { P2 } from '../support';
 
 /** Tunable (exported for tools/balance-drills.ts sweeps; the worker never changes it). */
 export const GYRO_POLICY = {
-  damping: 0.06, // b_g / (m·g·z_c), s
+  // b_g / (m·g·z_c), s. 0.2 (Phase 2; §3.7 started from GyBAR's 0.06): with the stance legs soft and fed
+  // forward, the trunk's fast wobble is what is left, and the core damps it at no cost to its reserve
+  // (damping integrates to nothing over an oscillation; the taper below still protects the rotor). Approach
+  // drills, torso rate above 3 Hz: 0.09-0.15 → 0.08-0.10 rad/s, FIRECRACKER's hips at their limit 3.3% → 1%;
+  // 1.0-1.2 m/s stance shoves survived 76 → 80 of 96. (0.3: smoother still, 76 of 96 survived.)
+  damping: 0.2,
   tapeFrom: 0.4, // stored momentum share where the damping starts to taper...
   tapeTo: 0.6, // ...and is gone
   emergencyDeadbandM: 0.004, // CMP shortfall the gyro ignores (the soles' own compliance)
@@ -22,6 +27,11 @@ export const GYRO_POLICY = {
   bleedS: 1.2,
   bleedMarginM: 0.015, // COP shift kept back when sizing the bleed torque
   bleedFadeS: 0.08, // the bleed fades in after a touchdown and out before a lift-off over this long
+  // Recovering from a hit or a catch step (reactions.ts): the trunk's wobble after the landing is damped
+  // out of the reserve too (tapering over these instead): the body comes to rest composed, not rocking.
+  // Hit drill (192 torso and head blows): time to stable over the recoveries 0.82 → 0.79 s.
+  recoverTapeFrom: 0.8,
+  recoverTapeTo: 0.95,
 };
 
 export interface GyroCommand {
@@ -40,11 +50,12 @@ export function newGyroCommand(): GyroCommand {
  * world angular velocity of the torso. `bleedShare`: 0..1, how much of the bleed the soles may carry
  * now (two feet down; it fades in and out around the steps, so the COP that carries it never jumps).
  */
-export function gyroPolicy(mass: number, comZ: number, torsoOmega: Vec3, shortfall: P2, saturation: number, inside: number, bleedShare: number, out: GyroCommand): GyroCommand {
+export function gyroPolicy(mass: number, comZ: number, torsoOmega: Vec3, shortfall: P2, saturation: number, inside: number, bleedShare: number, out: GyroCommand, recovering = false): GyroCommand {
   const mg = mass * GRAVITY;
   const P = GYRO_POLICY;
   const bg = P.damping * mg * Math.max(0.3, comZ);
-  const taper = clamp((P.tapeTo - saturation) / (P.tapeTo - P.tapeFrom), 0, 1);
+  const from = recovering ? P.recoverTapeFrom : P.tapeFrom, to = recovering ? P.recoverTapeTo : P.tapeTo;
+  const taper = clamp((to - saturation) / Math.max(1e-6, to - from), 0, 1);
   let ex = shortfall[0], ey = shortfall[1];
   const n = Math.hypot(ex, ey);
   if (n <= P.emergencyDeadbandM) ex = ey = 0;

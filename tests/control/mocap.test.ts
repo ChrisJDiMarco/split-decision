@@ -8,7 +8,7 @@ import { controllerOf } from '../../src/physics/control';
 import { GETUP_PLAN } from '../../src/physics/control/mocap/getup-plan';
 import { mocapSet, SPEED_FRACTION } from '../../src/physics/control/mocap/library';
 import { MotionPlayer } from '../../src/physics/control/mocap/player';
-import { mocapSkill } from '../../src/physics/control/mocap/skills';
+import { ENGINE_PROCEDURAL_KICKS, MOCAP_KICKS, mocapSkill } from '../../src/physics/control/mocap/skills';
 import { SKILLS } from '../../src/physics/control/skills';
 import type { RobotRuntime } from '../../src/physics/sim-context';
 import { SYSTEMS } from '../../src/physics/systems';
@@ -111,7 +111,11 @@ describe('mocap playback and tables', () => {
     }
     for (const id of ['front_kick', 'low_kick', 'head_kick'] as const) {
       expect(mocapSkill(set, id)).toBeNull();
-      expect(c.skillFor(id)).toBe(SKILLS[id]);
+      // On the balance engine the mocap kicks play where they pass the kick drill (MOCAP_KICKS.engine,
+      // ENGINE_PROCEDURAL_KICKS); the legacy path keeps the procedural kicks.
+      const engineKick = c.engine && MOCAP_KICKS.engine && !ENGINE_PROCEDURAL_KICKS.savate?.includes(id) ? mocapSkill(set, id, true) : null;
+      if (engineKick) expect(c.skillFor(id)).toBe(engineKick);
+      else expect(c.skillFor(id)).toBe(SKILLS[id]);
     }
     sim.dispose();
   }, 60_000);

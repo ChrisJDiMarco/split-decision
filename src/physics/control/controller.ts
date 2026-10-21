@@ -6,14 +6,17 @@ import type { Vec3 } from '../../core/types';
 import { latestRead } from '../openings';
 import type { RobotRuntime, SimContext } from '../sim-context';
 import { Balance } from './balance';
+import { Behaviours } from './balance/behaviours';
 import { BalanceEngine, CONTROL } from './balance/index';
+import { REACTIONS } from './balance/reactions';
 import { Inertializer } from './balance/inertialize';
 import { MOCAP_STYLE, MocapStyle } from './balance/mocap-style';
 import { newProbe, type BalanceProbe } from './balance/types';
-import { applyGravityFeedforward, jointInfo, VelocityFeedforward, type JointInfo } from './feedforward';
+import { applyGravityFeedforward, INVERSE_DYNAMICS, InverseDynamics, jointInfo, VelocityFeedforward, type InverseDynamicsInput, type JointInfo } from './feedforward';
 import { Gait, type StanceFrame, type StepTiming } from './gait';
 import { humanoidGeometry, SIDES, type HumanoidGeometry, type Side } from './geometry';
 import { GetUp, getUpTuning } from './getup';
+import { getupSpeed, type GetupSpeed } from './getup-speed';
 import { GyroCore } from './gyro';
 import { footLoads, reachablePelvisYaw, soleRoll } from './loads';
 import { clamp, mulMM, mulMtV, readVec, rot2, rotationError, rotY, rotZ, sub, wrapAngle, yawPitchRoll, type Mat3 } from './math';
@@ -23,14 +26,16 @@ import { ClipGetUp } from './mocap/getup';
 import { mocapSet, type MocapSet } from './mocap/library';
 import { MotionPlayer } from './mocap/player';
 import { mocapSkill, registerMocapRanges } from './mocap/skills';
+import { STRIKE_P3 } from './mocap/strikes';
 import { jointMap, newBodyCommand, solveBody, type BodyCommand, type JointMap } from './posture';
 import { bodyIds, GRAVITY, robotMass, sense, views, type BodyIds, type Sense } from './sense';
-import { SKILLS, type SkillId } from './skills';
+import { isStrikeSkill, SKILLS, type SkillId } from './skills';
 import { SkillRunner } from './skills/runner';
 import { opponentView, type OpponentView } from './skills/targets';
 import { neutralPose, type SkillDef, type SkillEnv, type SkillPose } from './skills/types';
 import { stanceFor, type StanceParams } from './stance';
 import { adjustSwing, captureStep, HOLD_TOL, MOVE_TOL, planStep, skillCaptureStep } from './stepping';
+import { anyContact } from './contacts';
 import { clampToPolygon, convexHull, footCorners, type P2 } from './support';
 import { Rise } from './rise';
 import { rollKeysFor } from './roll-keys';
@@ -137,6 +142,19 @@ export class HumanoidController {
   readonly inertia: Inertializer;
   /** The striking chain's burst damping and inertial feed-forward (strike-drive.ts; balance engine only). */
   readonly drive: StrikeDrive | null;
+  /** Inverse-dynamics feed-forward (feedforward.ts; balance engine only). */
+  readonly idyn: InverseDynamics | null;
+  /** Phase 4: arms, waist, posture and stiffness for the reactions (balance/behaviours.ts; balance engine only). */
+  readonly behaviours: Behaviours | null;
+  /** This robot's geoms by part, and the other robot's geoms (the skin a hit is felt through). */
+  private readonly skin: { mine: Map<number, string>; theirs: Set<number> };
+  /** The design's get-up speeds (getup-speed.ts). */
+  private readonly getupSpeed: GetupSpeed;
+  /** The torso's up axis as commanded last tick (world). */
+  private readonly torsoUpCmd: number[] = [0, 0, 1];
+  private readonly idInput: InverseDynamicsInput;
+  /** The Phase 1 feed-forward's torque per joint this tick (the reaction feed-forward adds to it). */
+  private readonly tauFF: Float64Array;
   /** Requested ground speed from Intent.move (m/s), or null (the gait's own pace). */
   moveSpeed: number | null = null;
   /** Ring IQ: a walk toward the opponent ends this far from him (COM to COM, m; 0: at the goal). */
@@ -183,6 +201,8 @@ export class HumanoidController {
   private readonly fullMass: number;
   /** Mocap footwork's style layer (on the dcm path, once the motion library has loaded). */
   private mocapStyle: MocapStyle | null = null;
+  /** Is a foot planted (for the strike drive's stance hips; one closure, not one per tick). */
+  private readonly plantedFn = (side: Side): boolean => this.gait.planted(side);
 
   constructor(ctx: SimContext, readonly r: RobotRuntime) {
     this.geo = humanoidGeometry(r.design);
@@ -203,6 +223,8 @@ export class HumanoidController {
     const tuning = getUpTuning(r.design.id);
     const brace = Float64Array.from(r.joints, (j) => r.design.stance[j.name] ?? 0);
     this.getUp = new GetUp(this.geo, this.jm, this.stance, brace, tuning, rollKeysFor(r.design.id));
+    this.getupSpeed = getupSpeed(r.design.id);
+    this.getUp.speed = this.getupSpeed;
     this.rise = new Rise(tuning.riseS);
     this.pose = neutralPose(this.stance);
     const subtree = ctx.model.body_subtreemass;
@@ -220,6 +242,19 @@ export class HumanoidController {
     this.inertia = new Inertializer(r.joints.length, r.joints.map((j) => j.motor.noLoadSpeedRadS), [this.jm.neckYaw], upper);
     this.inertia.enabled = CONTROL.inertialize;
     this.drive = dcm ? new StrikeDrive(ctx, r, upper) : null;
+    this.idyn = dcm ? new InverseDynamics(ctx.mj, ctx.model.nv, r) : null;
+    this.behaviours = dcm ? new Behaviours(this.geo, this.jm, r) : null;
+    const mine = new Map<number, string>();
+    for (const [id, p] of r.parts) for (const g of p.geoms) mine.set(g, id);
+    const theirs = new Set<number>();
+    for (const p of ctx.robots[r.corner === 0 ? 1 : 0].parts.values()) for (const g of p.geoms) theirs.add(g);
+    this.skin = { mine, theirs };
+    if (this.engine) this.engine.reactions.touching = () => this.touchingOpponent(ctx);
+    this.tauFF = new Float64Array(r.joints.length);
+    this.idInput = {
+      baseAcc: [0, 0], planted: { l: false, r: false }, support: [], plannedCop: [0, 0], gyro: null, gyroPlanned: [0, 0, 0], burst: null, capturing: false, recovering: false, kicking: false, striking: false,
+      rates: this.velFF.rates, loads: (cop: P2) => footLoads(this.geo, this.gait, this.lastSense!, cop),
+    };
     // The guard's reach from the stance geometry (the torso turned by the blade and the waist), less
     // the COM's usual lead over the torso origin; refined from the body once it stands (guardReach).
     const blade = this.stance.pelvisYaw + this.stance.waistYaw;
@@ -275,12 +310,14 @@ export class HumanoidController {
     this.attachMocap(dt);
     const s = sense(ctx, this.r, this.geo, this.ids, this.mass);
     this.lastSense = s;
+    this.drive?.bind(ctx);
     this.opp = opponentView(ctx, ctx.robots[this.r.corner === 0 ? 1 : 0]);
     if (ctx.released && (this.getUp.active || this.r.koReason || this.checkFall(ctx, s, dt))) return this.down(ctx, s, dt);
     const bearing = Math.atan2(this.opp.com[1] - s.com[1], this.opp.com[0] - s.com[0]);
     if (!ctx.released) this.hang(s, bearing);
     else this.stand(ctx, s, dt, bearing);
     solveBody(this.cmd, this.geo, this.jm, this.q, { pos: s.pelvisPos, rot: s.pelvisRot, shin: { l: s.feet.l.shinRot, r: s.feet.r.shinRot } });
+    if (this.engine && this.engineDrove) this.behaviours!.joints(this.engine.reactions, this.q);
     this.markSwitches();
     this.inertia.apply(this.q, dt);
     const e = this.engine;
@@ -290,10 +327,58 @@ export class HumanoidController {
     for (const side of SIDES) this.velFF.hold[this.jm.leg[side].hipYaw] = engineLegs || this.gait.planted(side) ? 1 : 0;
     this.velFF.apply(this.r, this.q, dt);
     if (this.drive && this.engineDrove) this.drive.inertia(ctx, this.q, this.velFF, dt);
-    const ground = e && ctx.released && this.engineDrove ? { force: e.force, headroom: true } : undefined;
-    applyGravityFeedforward(views(ctx), this.r, this.joints, footLoads(this.geo, this.gait, s, this.plannedCop), this.mass, this.q, 1, ground);
+    const kickLeg = this.gait.phase === 'shift' || this.gait.phase === 'skill';
+    const engineFF = !!e && !!this.idyn && ctx.released && this.engineDrove && INVERSE_DYNAMICS.enabled > 0;
+    if (engineFF && INVERSE_DYNAMICS.full && (INVERSE_DYNAMICS.kicks || !kickLeg)) this.inverseDynamics(ctx, s, e!, dt);
+    else {
+      const ground = e && ctx.released && this.engineDrove ? { force: e.force, headroom: true } : undefined;
+      applyGravityFeedforward(views(ctx), this.r, this.joints, footLoads(this.geo, this.gait, s, this.plannedCop), this.mass, this.q, 1, ground, engineFF ? this.tauFF : undefined);
+      // The air leg's own inertia and its reaction on the stance leg, on top (INVERSE_DYNAMICS.full = 0).
+      if (engineFF) this.inverseDynamics(ctx, s, e!, dt, this.tauFF);
+    }
     this.r.targets.set(this.q);
     this.report();
+  }
+
+  /**
+   * The balance engine's feed-forward: whole-body inverse dynamics with the planned COM acceleration and
+   * the limbs' target accelerations, the ground wrench it needs at the soles (feedforward.ts).
+   */
+  private inverseDynamics(ctx: SimContext, s: Sense, e: BalanceEngine, dt: number, tauOld?: Float64Array): void {
+    const inp = this.idInput;
+    const w2 = s.omega0 * s.omega0;
+    if (INVERSE_DYNAMICS.baseFromBody) {
+      // The pelvis accelerates as the soles' planned COP (and the gyro's planned share) push the body's COM.
+      inp.baseAcc[0] = w2 * (s.com[0] - e.cmpSoles[0] - e.gyroShare[0]);
+      inp.baseAcc[1] = w2 * (s.com[1] - e.cmpSoles[1] - e.gyroShare[1]);
+    } else {
+      inp.baseAcc[0] = e.com.a[0];
+      inp.baseAcc[1] = e.com.a[1];
+    }
+    inp.planted.l = this.gait.planted('l');
+    inp.planted.r = this.gait.planted('r');
+    inp.support = INVERSE_DYNAMICS.planSupport && e.copSupport.length >= 3 ? e.copSupport : this.gait.supportPolygon(INVERSE_DYNAMICS.copShrinkM);
+    inp.plannedCop = this.plannedCop;
+    inp.gyro = this.gyro ? this.gyro.applied : null;
+    if (this.gyro && inp.gyroPlanned) {
+      // The emergency share the plan asked for (CMP shift Δ ⇒ couple m·g·(Δy, −Δx)), as far as the core
+      // delivered it (never more than it applied along that direction).
+      const mg = s.mass * GRAVITY;
+      const wx = mg * e.gyroShare[1], wy = -mg * e.gyroShare[0];
+      const n2 = wx * wx + wy * wy;
+      const k = n2 > 1e-9 ? Math.max(0, Math.min(1, (this.gyro.applied[0] * wx + this.gyro.applied[1] * wy) / n2)) : 0;
+      inp.gyroPlanned[0] = wx * k;
+      inp.gyroPlanned[1] = wy * k;
+      inp.gyroPlanned[2] = 0;
+    }
+    inp.burst = this.drive?.burstChain ?? null;
+    inp.capturing = e.catching;
+    inp.recovering = e.recovering;
+    inp.kicking = this.gait.phase === 'skill';
+    inp.striking = this.skills.active();
+    if (tauOld) this.idyn!.applyReaction(ctx, views(ctx), this.joints, inp, this.q, dt, tauOld);
+    else this.idyn!.apply(ctx, views(ctx), this.joints, inp, this.q, dt);
+    e.state.torqueReserve = Math.max(0, 1 - this.idyn!.probe.legLoad);
   }
 
   /**
@@ -302,7 +387,9 @@ export class HumanoidController {
    */
   private markSwitches(): void {
     const run = this.skills.run;
-    if (run !== this.lastRun || this.rise.active !== this.lastRising || this.celebrating !== this.lastCelebrating) this.inertia.mark();
+    // (A brace's hands go out as fast as the arms can take them: a blow it cancels is not decayed into it.)
+    const bracing = this.engine?.reactions.mode === 'brace';
+    if (!bracing && (run !== this.lastRun || this.rise.active !== this.lastRising || this.celebrating !== this.lastCelebrating)) this.inertia.mark();
     // The mocap style layer changed clip (or jumped its clock to a real contact): its arms and waist decay over.
     const m = this.engine?.mocap;
     if (m?.switched) {
@@ -322,6 +409,11 @@ export class HumanoidController {
   /** Standing: has the robot just gone down? Abandons whatever it was doing if so. */
   private checkFall(ctx: SimContext, s: Sense, dt: number): boolean {
     if (!this.getUp.detect(s, dt, this.rise.active)) return false;
+    // A braced fall keeps its catch through the landing (the arms stiff, the legs soft) instead of
+    // snapping back to the stance shape.
+    const caught = !!this.behaviours && this.behaviours.holdsCatch && this.behaviours.braceW > 0.5 && this.engineDrove;
+    this.getUp.catchPose = caught ? Float64Array.from(this.r.targets) : null;
+    this.behaviours?.reset();
     this.rise.active = false;
     this.upperBody.reset();
     this.skills.cancel(this.skillEnv(s), true);
@@ -333,12 +425,27 @@ export class HumanoidController {
     this.goal = null;
     this.gyro?.release(views(ctx).xfrc, this.ids.torso);
     this.engine?.reset(null);
+    this.engine?.reactions.setMode('down', s.time);
+    if (this.engine) this.engine.state.mode = 'down';
     this.engine?.clearImpedance();
     this.drive?.reset();
+    this.idyn?.reset();
     this.inertia.reset();
     this.r.down = true;
     ctx.events.push({ kind: 'fall', corner: this.r.corner });
     return true;
+  }
+
+  /** This robot's parts touching the other robot right now (its skin: one contact scan, only when a hit is felt). */
+  private touchingOpponent(ctx: SimContext): string[] {
+    const out: string[] = [];
+    const { mine, theirs } = this.skin;
+    anyContact(ctx.data, (g1, g2) => {
+      const p = theirs.has(g2) ? mine.get(g1) : theirs.has(g1) ? mine.get(g2) : undefined;
+      if (p && !out.includes(p)) out.push(p);
+      return false;
+    });
+    return out;
   }
 
   /** On the canvas: the scripted get-up owns the joints (a knocked-out robot just lies there). */
@@ -362,7 +469,12 @@ export class HumanoidController {
         ctx.events.push({ kind: 'getup', corner: this.r.corner });
       }
     }
-    this.engine?.clearImpedance();
+    if (this.getUp.holdingCatch) this.behaviours?.holdImpedance(true);
+    else this.engine?.clearImpedance();
+    // The get-up clip's drives track its motion instead of braking it (strike-power.md §2.1 burst, §4.6).
+    const kv = this.r.mem.dampScale as Float64Array | undefined;
+    if (kv && this.getupSpeed.damp !== 1 && this.getUp.clip?.stage === 'play' && this.getUp.phase === 'clip') kv.fill(this.getupSpeed.damp);
+    if (this.engine) this.engine.state.mode = 'down';
     // The get-up's own targets are continuous; running them through keeps the inertializer
     // current, so the switch to the standing posture is the one it smooths.
     this.inertia.apply(this.q, dt);
@@ -405,6 +517,7 @@ export class HumanoidController {
     this.inertia.mark();
     this.upperBody.reset();
     this.velFF.reset();
+    this.idyn?.reset();
     const v = views(ctx);
     const toTorso = (b: number) => mulMtV(s.torsoRot, sub(readVec(v.xpos, b), s.torsoPos));
     this.rise.start(s, this.stance, this.qNow[this.jm.waistPitch], { l: toTorso(this.ids.fist.l), r: toTorso(this.ids.fist.r) });
@@ -474,7 +587,7 @@ export class HumanoidController {
     return {
       s, geo: this.geo, stance: this.stance, opp: this.opp!, zone: 'head', aggression: this.r.intent?.aggression ?? 0.6,
       heading: this.heading, cmd: this.cmd, pose: this.pose, gait: this.gait,
-      mocap: this.mocap, player: this.strikePlayer, jm: this.jm, rng: this.rng, engine: this.engine,
+      mocap: this.mocap, player: this.strikePlayer, jm: this.jm, rng: this.rng, engine: this.engine, dyn: this.drive?.dyn ?? null,
       toTorso: (p: Vec3) => mulMtV(T, sub(p, tp)),
       joint: (name: string) => {
         const i = this.r.jointIndex.get(name);
@@ -502,14 +615,18 @@ export class HumanoidController {
     // on the path it was built and tuned on (a folded body unfolding over planted feet), and the
     // engine starts over from the body as the rise ends.
     const wasDriving = this.engineDrove;
-    this.engineDrove = !!this.engine && !this.rise.active;
+    this.engineDrove = !!this.engine && (!this.rise.active || this.getupSpeed.riseEngine > 0);
     if (this.engine && this.engineDrove) {
       if (!wasDriving) {
         this.engine.reset(s);
         this.inertia.mark();
       }
-      return this.standDcm(ctx, s, dt, bearing, env);
+      this.standDcm(ctx, s, dt, bearing, env);
+      const m = this.engine.state.mode;
+      if (this.rise.active && (m === 'steady' || m === 'absorb' || m === 'recover')) this.engine.state.mode = 'rise';
+      return;
     }
+    if (this.engine && this.rise.active) this.engine.state.mode = 'rise';
     this.engine?.clearImpedance();
     this.decideSteps(s, env, dt);
     if (!this.skills.active()) this.footwork?.style(this.pose, this.cmd);
@@ -565,10 +682,24 @@ export class HumanoidController {
       holdFeet: this.skills.active() || this.pose.holdFeet || this.celebrating || this.strikePending, shift, allowCapture: this.rise.stepsAllowed(),
       gyroHealth: this.gyroHealth(), gyroSaturation: this.gyro?.saturation ?? 0,
       gyroTorqueNm: spec?.maxTorqueNm ?? 0, gyroMomentumNms: spec?.momentumNms ?? 1, legs: this.cmd.legs,
+      threat: opp.windup, striking: !!this.skills.run && isStrikeSkill(this.skills.run.def), torsoUpCmd: this.torsoUpCmd, rising: this.rise.active,
     });
-    if (e.captured) this.skills.cancel(env, true);
+    // Bracing for a fall: whatever was being thrown is over (the hands go to the canvas).
+    const react = e.reactions;
+    if (react.mode === 'brace' && this.skills.active()) this.skills.cancel(env, true);
+    // A capture step drops the skill, except a driven punch (mocap/strikes.ts) cocked or flying: a fist
+    // in flight finishes the blow while the feet catch the body (pulling it back mid-flight does not help
+    // them), and a cocked one thrown on the walk's step rides out one catch step and flies only once the
+    // stance has settled.
+    const run = this.skills.run;
+    if (e.captured && run) run.scratch.capSeen = ((run.scratch.capSeen as number | undefined) ?? 0) + 1;
+    const cocked = run?.phase === 'windup' && STRIKE_P3.flyThroughCapture > 1 && !!run.scratch.rideCapture && ((run.scratch.capSeen as number | undefined) ?? 0) <= 1;
+    const keep = run && run.def.clip && run.def.kind === 'arm' && (run.phase === 'strike' || cocked);
+    if (e.captured && !(STRIKE_P3.flyThroughCapture && keep)) this.skills.cancel(env, true);
     // The striking chain tracks the blow's velocity instead of braking it (strike-drive.ts).
-    this.drive?.impedance(this.skills.run);
+    this.drive?.impedance(this.skills.run, this.plantedFn);
+    // The reaction's stiffness on top: the absorbing chain, the brace, the pre-brace (behaviours.ts).
+    this.behaviours!.impedance(react, this.gait, this.skills.active());
     // Mocap style (arms, waist, pelvis bob, tilt and sway from the clip the feet are taking, or the
     // guard idle), only while nothing else owns the body.
     if (styled) {
@@ -578,20 +709,31 @@ export class HumanoidController {
     }
     if (sty) {
       const m = e.mocap;
-      const on = !this.skills.active() && !this.pose.holdFeet && !this.celebrating;
+      const on = !this.skills.active() && !this.pose.holdFeet && !this.celebrating && react.mode !== 'brace';
       sty.apply(this.pose, this.cmd, dt, on, m?.clip ?? null, m?.tau ?? 0, this.r.intent?.aggression ?? 0.5, s.torsoRot, s.heading);
       if (sty.w > 0) this.probe.styleTime += dt;
     }
+    // Phase 4: the reaction's arms, waist and posture (hands out to the canvas in a brace, the pelvis
+    // lower while recovering or pre-braced).
+    this.behaviours!.pose(react, s, this.pose, this.cmd, dt);
     // Walking squares the hips to the travel; over the last two steps they turn back to the blade.
     const want = e.walking() ? e.planner.travel : bearing + st.pelvisYaw + this.pose.pelvisYaw;
     const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, want), true);
-    // Hip and waist bend (only with the gyro damaged): attitude only; the soles carry the COM.
-    const bend = this.upperBody.update(s, this.gait.supportPolygon(), s.heading, this.gyroHealth(), dt);
+    // Hip and waist bend (with the gyro damaged, or recovering with its reserve low): attitude only; the
+    // soles carry the COM.
+    const reserve = this.gyro ? 1 - this.gyro.saturation : 0;
+    const bendHealth = REACTIONS.enabled && react.mode === 'recover' && reserve < REACTIONS.bendReserve ? Math.min(this.gyroHealth(), 0.1 + 0.4 * (reserve / REACTIONS.bendReserve)) : this.gyroHealth();
+    const bend = this.upperBody.update(s, this.gait.supportPolygon(), s.heading, bendHealth, dt);
     this.cmd.pelvisPos = [e.pelvis[0], e.pelvis[1], st.pelvisHeight - this.pose.pelvisDrop];
     const hip = this.updateHipAssist(s, this.pose.waistPitch + bend.waist, dt);
     this.cmd.pelvisRot = mulMM(this.rise.rotation(yawPitchRoll(yaw, this.pose.pelvisPitch + bend.pitch, bend.roll + this.pose.pelvisRoll)), rotY(-hip));
     this.cmd.waistYaw = this.pose.waistYaw + this.updateCounterYaw(ctx, dt);
     this.cmd.waistPitch = this.pose.waistPitch + bend.waist;
+    // The torso's commanded up axis (pelvis attitude, then the waist): next tick's reactions judge the lean beyond it.
+    const tr = mulMM(mulMM(this.cmd.pelvisRot, rotZ(this.cmd.waistYaw)), rotY(this.cmd.waistPitch));
+    this.torsoUpCmd[0] = tr[2];
+    this.torsoUpCmd[1] = tr[5];
+    this.torsoUpCmd[2] = tr[8];
     if (this.gyro) this.gyro.update(this.r, s.torsoRot, e.gyro.demand, dt, views(ctx).xfrc, this.ids.torso, true, e.gyro.bleedS, e.gyro.bleedMaxNm);
     // The soles carry the gyro's bleed: a couple held by the ground moves the COP by τ/(m·g).
     const mg = s.mass * GRAVITY;

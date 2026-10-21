@@ -15,6 +15,7 @@ import { effectiveKp, type VelocityFeedforward } from './feedforward';
 import type { Side } from './geometry';
 import { isStrikeSkill } from './skills';
 import type { SkillRun } from './skills/types';
+import type { JointDynamics } from './strike-path';
 
 /** Tunables (exported so tools can sweep them; the worker never changes them). */
 export const BURST = {
@@ -27,6 +28,11 @@ export const BURST = {
   headroom: 0.9, // the feed-forward never asks for more than this share of the torque available
   maxShiftRad: 0.35,
   accelTauS: 0.008, // the targets' acceleration is low-passed this much (it is a difference of rates)
+  // Through a punch the stance hip yaws hold the pelvis at this gain scale (the balance engine's 0.35
+  // otherwise, BALANCE_TUNING.stanceHipYawKp): the chest's turn reacts on the pelvis, and a soft hip lets
+  // the pelvis spin back as the chest goes forward, wasting the waist's work. The feet's grip limits the
+  // turn instead (mocap/strikes.ts STRIKE_P3.groundYawShare).
+  hipYawKp: 1,
 };
 
 const ARM = (s: Side) => [`shoulder_pitch_${s}`, `shoulder_roll_${s}`, `shoulder_yaw_${s}`, `elbow_${s}`, 'waist_yaw', 'waist_pitch'];
@@ -45,8 +51,31 @@ export function burstLive(run: SkillRun | null): boolean {
   return run.phase === 'windup' || run.phase === 'strike' || (run.phase === 'recover' && run.t < BURST.followS);
 }
 
+/**
+ * The robot's dynamics for planning a blow (strike-path.ts): MuJoCo's joint-space inertia diagonal and
+ * bias torque at this step, and the share of each motor's torque that health and battery leave (the
+ * motor model's factors, src/physics/systems/motors.ts; the thermal derating is left to the margin).
+ */
+class Dynamics implements JointDynamics {
+  ctx: SimContext | null = null;
+  constructor(private readonly r: RobotRuntime, private readonly diag: Int32Array) {}
+  inertia(i: number): number {
+    return (this.ctx!.data.M as Float64Array)[this.diag[i]];
+  }
+  bias(i: number): number {
+    return (this.ctx!.data.qfrc_bias as Float64Array)[this.r.joints[i].dadr];
+  }
+  torqueScale(i: number): number {
+    const j = this.r.joints[i];
+    if (j.state === 'limp' || j.state === 'seized') return 0;
+    return (0.25 + 0.75 * j.health) * (0.6 + 0.4 * this.r.battery);
+  }
+}
+
 export class StrikeDrive {
   private readonly chains = new Map<string, Int16Array>();
+  /** The dynamics for the skill environment (bound to the step each control tick). */
+  readonly dyn: Dynamics;
   private readonly upper: Int16Array;
   private readonly diag: Int32Array;
   private readonly prevRate: Float64Array;
@@ -63,6 +92,17 @@ export class StrikeDrive {
     this.diag = Int32Array.from(r.joints, (j) => (m.M_rowadr[j.dadr] as number) + (m.M_rownnz[j.dadr] as number) - 1);
     this.prevRate = new Float64Array(r.joints.length);
     this.accel = new Float64Array(r.joints.length);
+    this.dyn = new Dynamics(r, this.diag);
+  }
+
+  /** The striking chain whose burst is on this tick (r.joints indices), or null. */
+  get burstChain(): Int16Array | null {
+    return this.chain;
+  }
+
+  /** This control tick's step (the dynamics read MjData). */
+  bind(ctx: SimContext): void {
+    this.dyn.ctx = ctx;
   }
 
   private chainOf(kind: 'arm' | 'leg', side: Side): Int16Array {
@@ -79,10 +119,12 @@ export class StrikeDrive {
   /**
    * Every control tick on the balance engine, after the engine has written its gain scales: the
    * burst's damping on the chain of the blow under way (the arms and waist go back to as built
-   * otherwise; the legs' scales are the engine's, rewritten every tick).
+   * otherwise; the legs' scales are the engine's, rewritten every tick), and through a punch the
+   * stance hips' yaw gain (BURST.hipYawKp) for the `planted` legs.
    */
-  impedance(run: SkillRun | null): void {
+  impedance(run: SkillRun | null, planted?: (side: Side) => boolean): void {
     const kv = this.r.mem.dampScale as Float64Array | undefined;
+    const kp = this.r.mem.gainScale as Float64Array | undefined;
     this.chain = null;
     if (!kv) return;
     for (const i of this.upper) kv[i] = 1;
@@ -93,6 +135,14 @@ export class StrikeDrive {
     for (const i of chain) kv[i] = Math.min(kv[i], BURST.damp);
     this.chain = chain;
     this.ticks++;
+    if (kp && planted && run!.def.kind === 'arm') {
+      for (const sd of ['l', 'r'] as const) {
+        const i = this.r.jointIndex.get(`hip_yaw_${sd}`);
+        if (i === undefined || !planted(sd)) continue;
+        kp[i] = BURST.hipYawKp;
+        kv[i] = Math.sqrt(BURST.hipYawKp);
+      }
+    }
   }
 
   /**
