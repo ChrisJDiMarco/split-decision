@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { damageState, detachPart } from '../../src/physics/damage';
+import { breakImpulseNs } from '../../src/physics/damage/detach';
 import { DESIGNS } from '../../src/robots/designs';
 import { bodyPos, drain, fireRam, fireRamAt, geomPos, makeRig, mj, ofKind, step } from './helpers';
 
@@ -50,9 +51,11 @@ describe('impacts', () => {
     const { ctx, head, events } = hitHead(60, 12);
     const hit = ofKind(events, 'impact').find((e) => e.part === 'head')!;
     const detach = ofKind(events, 'detach');
-    console.info(`[head pop] 60 kg @ 12 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s (spec ${head.def.detachable!.impulseNs}), ` +
+    const pop = damageState(ctx).robots[0].ledger.detaches[0];
+    console.info(`[head pop] 60 kg @ 12 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s (rating ${head.def.detachable!.impulseNs}, mount ${pop?.thresholdNs}), ` +
       `closing ${hit.speed.toFixed(2)} m/s, energy ${hit.energyJ.toFixed(0)} J, debris vel ${detach[0]?.vel.map((v) => v.toFixed(2))}`);
-    expect(hit.impulseNs).toBeGreaterThanOrEqual(head.def.detachable!.impulseNs);
+    expect(pop?.impactNs).toBeGreaterThanOrEqual(pop?.thresholdNs ?? Infinity);
+    expect(pop).toMatchObject({ part: 'head', cause: 'prop' });
     expect(hit.victim).toBe(0);
     expect(hit.striker).toBeNull(); // a loose prop, not a fighter
     expect(hit.normal[0]).toBeGreaterThan(0.8); // pushed the way the ram was moving (+x)
@@ -78,12 +81,13 @@ describe('impacts', () => {
   });
 
   it('a mid hit below the break impulse leaves an AR500 head untouched but dents a polycarbonate one', () => {
-    // A p90 fight strike (~40-50 N·s, tools/fight-sim.ts) against a 75 N·s break threshold.
+    // A hard fight strike's class of blow against the Bruiser's head mount (75 N·s rating × mountScale).
     const { ctx, head, events } = hitHead(12, 5);
     const hit = ofKind(events, 'impact').find((e) => e.part === 'head')!;
     const neck = ctx.robots[0].joints.find((j) => j.name === 'neck_yaw')!;
     console.info(`[mid hit] Bruiser, 12 kg @ 5 m/s: impulse ${hit.impulseNs.toFixed(1)} N·s, work ${hit.workJ?.toFixed(0)} J, peak ${((hit.peakForceN ?? 0) / 1000).toFixed(1)} kN, head hp ${head.part.hp.toFixed(3)}, neck health ${neck.health.toFixed(3)}`);
     expect(ofKind(events, 'detach')).toHaveLength(0);
+    expect(hit.impulseNs).toBeLessThan(breakImpulseNs(damageState(ctx), head));
     // 4 mm AR500 yields at ~35 kN: a 12 kg ram at 5 m/s leaves no mark on the plate.
     expect(head.part.hp).toBe(1);
     expect(hit.dent).toBeUndefined();

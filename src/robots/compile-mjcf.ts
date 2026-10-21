@@ -1,5 +1,5 @@
 // Robot design → MJCF fragments. Pure function, no MuJoCo dependency, unit-testable.
-import type { Corner, GeomDef, PartDef, Quat, RobotDesign, Vec3 } from '../core/types';
+import type { Corner, GeomDef, JointDef, PartDef, Quat, RobotDesign, Vec3 } from '../core/types';
 import { INTERNAL_FILL_KG_M3, MATERIALS, SOLID_FILL, WALL_MM, motor } from './catalog';
 
 export const COLLIDE = { WORLD: 1, R0: 2, R1: 4, DEBRIS: 8 } as const;
@@ -100,9 +100,16 @@ export function geomMass(g: GeomDef): number {
   return geomArea(g) * wall * density + geomVolume(g) * INTERNAL_FILL_KG_M3;
 }
 
-function partMotorMass(p: PartDef): number {
-  // A passive (tendon-driven) joint has no motor of its own: its drive is weighed with the design.
-  return (p.joints ?? []).reduce((sum, j) => sum + (j.passive ? 0 : motor(j.motor).massKg), 0);
+/**
+ * The drive mass a part carries: its own joints' drives, less those mounted on its parent, plus the
+ * drives of its children's joints that are mounted on it (JointDef.mount, docs/design/robot-realism-pass.md
+ * §2). A passive (tendon-driven) joint has no motor of its own: its drive is weighed with the design.
+ */
+export function partMotorMass(p: PartDef, kids: readonly PartDef[] = []): number {
+  const drive = (j: JointDef) => (j.passive ? 0 : motor(j.motor).massKg);
+  const own = (p.joints ?? []).reduce((sum, j) => sum + (j.mount === 'parent' ? 0 : drive(j)), 0);
+  const hosted = kids.reduce((sum, c) => sum + (c.joints ?? []).reduce((s, j) => s + (j.mount === 'parent' ? drive(j) : 0), 0), 0);
+  return own + hosted;
 }
 
 /** Smallest geom mass MuJoCo gets (a finger phalanx is ~20 g; every older geom is far above this). */
@@ -190,7 +197,7 @@ export function compileRobot(design: RobotDesign, corner: Corner, placement: Pla
     const bodyName = `${prefix}${p.id}`;
     const geomMasses = p.geoms.map(geomMass);
     const geomTotal = geomMasses.reduce((a, b) => a + b, 0);
-    const motorMass = partMotorMass(p);
+    const motorMass = partMotorMass(p, children.get(p.id));
     const gyroMass = design.gyro && design.gyro.part === p.id ? design.gyro.massKg : 0;
     const extra = motorMass + gyroMass;
     const partMass = geomTotal + extra;
@@ -260,7 +267,7 @@ export function compileRobot(design: RobotDesign, corner: Corner, placement: Pla
     const geoms = merged.map(({ g, pos, quat }, i) => {
       const name = `${debrisName}_g${i}`;
       cp.debrisGeomNames.push(name);
-      return geomXml(name, g, geomMass(g) + (i === 0 ? partMotorMass(p) : 0), 0, 0, { pos, quat });
+      return geomXml(name, g, geomMass(g) + (i === 0 ? partMotorMass(p, children.get(p.id)) : 0), 0, 0, { pos, quat });
     });
     const parkPos: Vec3 = [40 + corner * 10 + parkIndex * 1.5, 40, 2];
     parkIndex++;
@@ -323,6 +330,7 @@ function validate(design: RobotDesign): void {
     if (i === 0 && p.parent) throw new Error(`${design.id}: parts[0] must be the root`);
     if (i > 0 && (!p.parent || !ids.has(p.parent))) throw new Error(`${design.id}: part '${p.id}' has unknown or later parent '${p.parent}'`);
     if (p.geoms.length === 0) throw new Error(`${design.id}: part '${p.id}' has no geoms`);
+    if (!p.parent && p.joints?.some((j) => j.mount === 'parent')) throw new Error(`${design.id}: root part '${p.id}' has no parent to mount a drive on`);
   }
   const passive = new Set(design.parts.flatMap((p) => (p.joints ?? []).filter((j) => j.passive).map((j) => j.name)));
   for (const t of design.tendons ?? []) {

@@ -1,15 +1,19 @@
-// Detachment: swaps an attached part for its parked debris twin, mid-fight, without a model rebuild.
+// Detachment. A part (a head) comes off only from one really nice hard solid clean blow: a striking
+// surface of the other robot (or a thrown prop), not blocked by the guard, whose impact impulse reaches
+// the part's mount rating (maybeDetach; impacts.ts decides what counts as that blow). Falls, the
+// floor, the cage, pushes and accumulated shell damage never pop it.
+// detachPart swaps an attached part for its parked debris twin, mid-fight, without a model rebuild:
 //   1. the attached geoms (and their bodies' broadphase masks) stop colliding
 //   2. the attached bodies keep a token mass (body_subtreemass is kept consistent by hand)
 //   3. the debris free joint takes the attached body's pose and velocity, plus a kick along the hit
 //   4. debris collisions switch on (geom and body masks)
 //   5. the parking weld lets go
 //   6. the part (and anything rigid it carries) is marked detached, joints inside go limp
-import type { Vec3 } from '../../core/types';
+import type { Corner, Vec3 } from '../../core/types';
 import { DEBRIS_CONAFFINITY, DEBRIS_CONTYPE } from '../../robots/compile-mjcf';
 import type { SimContext } from '../sim-context';
-import { DETACHED_BODY_MASS_KG, DETACH_KICK_SHARE, DETACH_MAX_KICK_MS } from './constants';
-import type { DamageState, PartInfo } from './state';
+import { DAMAGE_TUNING, DETACHED_BODY_MASS_KG, DETACH_KICK_SHARE, DETACH_MAX_KICK_MS } from './constants';
+import type { DamageState, DetachRecord, PartInfo } from './state';
 import { makeLimp } from './wear';
 
 function shrinkBody(ctx: SimContext, body: number): void {
@@ -114,10 +118,52 @@ export function detachPart(ctx: SimContext, st: DamageState, info: PartInfo, imp
   return true;
 }
 
-/** Break check after a hit: a single impulse over the break spec, or accumulated damage over it. */
-export function maybeDetach(ctx: SimContext, st: DamageState, info: PartInfo, impulseNs: number, impulse: Vec3): boolean {
+/**
+ * What is left of a part's mount: 1 intact, down to 1 − mountWear once the joint that holds it (the
+ * neck under the head) has lost its full health to the bearing channel. That channel reads the side
+ * loads the mount itself carries (the wrench through the neck), so its wear and bends are the mount's;
+ * the drive's gear teeth and encoder are not the mount and do not count.
+ */
+export function mountFactor(st: DamageState, info: PartInfo): number {
+  const mech = st.robots[info.robot.corner].mech;
+  let loss = 0;
+  for (const i of info.jointIdx) loss += mech[i].bearingLoss;
+  return 1 - DAMAGE_TUNING.mountWear * Math.min(1, loss);
+}
+
+/** The impact impulse one clean blow needs to knock a part off now (Infinity if it can't come off). */
+export function breakImpulseNs(st: DamageState, info: PartInfo): number {
   const spec = info.def.detachable;
-  if (!spec || !info.part.attached) return false;
-  if (impulseNs < spec.impulseNs && info.part.damage < spec.damage) return false;
-  return detachPart(ctx, st, info, impulse);
+  if (!spec || !info.part.attached) return Infinity;
+  return spec.impulseNs * DAMAGE_TUNING.mountScale * mountFactor(st, info);
+}
+
+/** The blow that may knock a part off: from impacts.ts, only for a clean strike or a thrown prop. */
+export interface PopBlow {
+  cause: DetachRecord['cause'];
+  byCorner: Corner | null;
+  by: string | null;
+  impactNs: number;
+  windowNs: number;
+  speed: number;
+}
+
+/**
+ * Break check after a blow. Only one clean blow can pop a part: its impact impulse against the mount
+ * (breakImpulseNs). Accumulated shell damage never pops one (the cover is not the mount, and it would
+ * let a fall or the cage finish a battered head); it shows as dents, cracks and lost hp instead.
+ */
+export function maybeDetach(ctx: SimContext, st: DamageState, info: PartInfo, blow: PopBlow | null, impulse: Vec3): boolean {
+  if (!blow || !(blow.impactNs > 0)) return false;
+  const need = breakImpulseNs(st, info);
+  if (blow.impactNs < need) return false;
+  const mount = mountFactor(st, info);
+  if (!detachPart(ctx, st, info, impulse)) return false;
+  const ledger = st.robots[info.robot.corner].ledger;
+  ledger.detaches.push({
+    t: +ctx.time.toFixed(3), part: info.def.id, cause: blow.cause, byCorner: blow.byCorner, by: blow.by,
+    impactNs: +blow.impactNs.toFixed(2), windowNs: +blow.windowNs.toFixed(2), speed: +blow.speed.toFixed(2),
+    thresholdNs: +need.toFixed(2), mount: +mount.toFixed(3),
+  });
+  return true;
 }

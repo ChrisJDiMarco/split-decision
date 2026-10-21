@@ -28,6 +28,18 @@ export const COM_REF = {
   // the plan (m), the CMP is kept guardM behind it along the way it has to go (fully at +3 cm).
   guardFromM: 0.02,
   guardM: 0.01,
+  // Holding a stance on two feet with no skill running, the share of the body's own DCM error (against the
+  // plan) the feedback acts on, the rest being the reference's (the fight-clean pass, 2026-10-20). The
+  // reference is leashed to the body (it re-plans from where a push left it), so its own DCM lags a blow by
+  // the leash's 0.12-0.25 s and leads the body by at most maxErrM: on the reference's error alone, a
+  // guard-holding fighter knocked 7-9 cm off its plan had its CMP held only guardM beyond its DCM, stood
+  // there displaced and drifted back with a time constant near 1 s (the gyro never asked), so the next blow
+  // found the DCM at the sole's edge and a catch step went out. At 1 the feedback acts on the body's DCM as
+  // the design's law has it (§3.3) and the soles, then the gyro, push it back at the feedback's rate
+  // (0.3 s instead of ~1 s in the press drill). Not during steps and skills: there the plan's own DCM
+  // excursions (a step-in, a strike's weight transfer) are the body's on purpose, and acting on the body's
+  // error through them threw more fighters (fight drill exchange, 192 trials: 61 falls against 40).
+  bodyFeedback: 1,
 };
 
 export class ComReference {
@@ -52,7 +64,7 @@ export class ComReference {
    * `gyroReach`: how far past the soles the gyro may carry the CMP right now (m). Writes the
    * commanded CMP, the COP and the gyro's share.
    */
-  step(s: Sense, vel: P2, dt: number, ref: DcmSample, xiRef: P2, gain: number, support: P2[], gyroReach: number, cmp: P2, cop: P2, gyroShare: P2, xiBody?: P2): void {
+  step(s: Sense, vel: P2, dt: number, ref: DcmSample, xiRef: P2, gain: number, support: P2[], gyroReach: number, cmp: P2, cop: P2, gyroShare: P2, xiBody?: P2, bodyShare = 0): void {
     if (!this.primed) this.reset(s, vel);
     const w = s.omega0;
     // Leash to the body.
@@ -64,7 +76,8 @@ export class ComReference {
       if (e > COM_REF.maxErrM) this.c[i] = s.com[i] + COM_REF.maxErrM;
       else if (e < -COM_REF.maxErrM) this.c[i] = s.com[i] - COM_REF.maxErrM;
       this.xi[i] = this.c[i] + this.v[i] / w;
-      cmp[i] = ref.r[i] + gain * (this.xi[i] - xiRef[i]);
+      const xiFb = xiBody ? this.xi[i] + bodyShare * (xiBody[i] - this.xi[i]) : this.xi[i];
+      cmp[i] = ref.r[i] + gain * (xiFb - xiRef[i]);
     }
     if (xiBody) guardCmp(cmp, xiBody, xiRef);
     const p = support.length >= 3 ? clampToPolygon(support, cmp) : cmp;

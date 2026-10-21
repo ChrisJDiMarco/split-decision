@@ -378,7 +378,7 @@ Damage targets (game-design calibration, decision D4; set after stages 1-3 from 
 | Joint wrecked (seized, stripped, bent, limp) | | ≤ 1 per 3 fights |
 | Waist as first degraded joint | 5 of 8 fights | no single joint over 30% of first injuries |
 | Visible dents per minute of exchanges | about 24 (half of 48 contacts) | HAYMAKER and iron age about 0 from non-clean hits; polycarbonate designs dent on ≥ 50% of clean power shots |
-| Head pops | kicks only | top few percent of clean shots (thresholds re-set from the new distribution, the 2026-09-29 rule) |
+| Head pops | kicks only (after P3: a routine jab, see §8) | rare and earned: well under 1 in 4 fights, only from the hardest clean blows (§8: 2 of 32 fights) |
 | Step cost of the damage probe | n/a | ≤ 3% |
 
 ## 6. Honesty rules
@@ -427,6 +427,69 @@ Stage 5a can be built while P3 runs because it lives in other directories, but i
 - D10. Should the iron-age three get the same strike pass, or stay as they are?
 - D11. Neck pitch joint and reflected rotor inertia both touch `humanoid.ts` and balance tuning: confirm they go in with the balance build (stage 6-7), not before.
 
+## 8. Calibration after P3 (stage 5b), 2026-10-20
+
+Measured on the P3 strikes (fists 4-5.7 m/s peak), headless, `SD_BALANCE=dcm`, House Mind, the four judge pairs (SAVATE v HAYMAKER, FIRECRACKER v PYLON, SAVATE v FIRECRACKER, HAYMAKER v PYLON) × seeds 1-8 × 90 s, robots frozen at e97fe26 so the parallel hardware stage's edits did not move the numbers. Every head contact was traced with its cause, part, impact impulse and the attacker's limb.
+
+### 8.1 Why heads popped
+
+- Symptom: FIRECRACKER's head came off live at 0:28 and 0:14 with "0 significant strikes, 0 J peak hit" on the result card. In the judge's 48 sparring fights, 23 of FIRECRACKER's 24 fights ended by its head at 4-55 s.
+- Cause 1: the one-blow ratings sat at the median clean head blow. They were set when strikes landed at 2-4.5 m/s, as head mass × 10 m/s × mount factor (FIRECRACKER 13 N·s, SAVATE 20, HAYMAKER 36, PYLON 19). After P3, FIRECRACKER's clean head blows measure 12-14 N·s median and 15-16 at p90, so a routine jab popped it. All 20 pops in the before set were fist strikes flagged clean (jab, hook, cross at 4.6-8.4 m/s). None came from a fall, the canvas, the cage, debris or the neck's own load or heat.
+- Cause 2: the rating was compared with the strike's whole 30 ms window, so the lean after the blow counted. 5 of the 20 pops only reached the rating that way (HAYMAKER's 36 N·s head came off a 21.6 N·s blow).
+- Cause 3 (latent): the accumulated-damage break (`BreakSpec.damage` 150) was still in pre-overhaul points. Since f96f924 a point is a joule of plastic shell work (×3 when polycarbonate cracks): one 64 J cracking jab booked 182 points. The break was also checked on every contact, including head-first canvas impacts (up to 56 N·s and 131 points in falls), so a battered head could have come off in a fall.
+- The result card counts a "significant strike" at 60 J of presentation energy (½·m_eff·v², `src/ui/scorecard.ts`). A head-popping jab carries only 15-40 J of that (30-64 J of measured absorbed work), so the card read 0 and 0 J. Not changed here (UI).
+
+### 8.2 The rule now (`src/physics/damage/detach.ts`, `impacts.ts` `popBlow`)
+
+- A part pops only from one clean blow, which must:
+  - be a strike by the other robot, or a thrown prop;
+  - have its first and its hardest contact on the part made by a fist, glove, foot or shin, arriving at strike speed (≥ `newStrikeSpeed`, 1.5 m/s);
+  - not have met the guard first (the same striking part touching an arm or leg of the struck robot at or before the head, with ≥ `guardMinNs`);
+  - deliver an impact impulse (its first `impactWindowS`, 8 ms) of at least rating × `mountScale` (2.0) × mount factor.
+- There is no speed threshold: a faster punch only pops a head by landing a harder blow.
+- The mount factor is 1 − `mountWear` (0.4) × min(1, health the neck lost to its bearing channel). That channel reads the wrench the mount carries. Gear slips and shell damage do not weaken the mount.
+- Falls, the floor, the cage, debris, pushes, leans, blocked blows and accumulated shell damage never pop a part. `BreakSpec.damage` is no longer used.
+- The neck is rated as the head's mount. Its bearing floor is `mountBendShare` (0.8) × (rating × `mountScale` / `mountPulseS` 3 ms) × the head's reach from the neck anchor, ÷ (bearingBreak × static factor). It bends only from blows near a pop landing anywhere on the head, and no longer on the RS00 or servo bearing under routine jabs.
+- Each pop is booked in `DamageLedger.detaches` with who, what, impact impulse, threshold and mount factor. `tools/fight-metrics.ts` prints them, and `tools/strike-bench.ts` reports the target's mount and pops per trial.
+
+### 8.3 Before and after (32 fights each, same seeds)
+
+| | Before (e97fe26) | After |
+|---|---|---|
+| Fights ended by a head pop | 20 of 32 (62%); FIRECRACKER 16 of 16, SAVATE 2, PYLON 1, HAYMAKER 1 | 2 of 32 (6%), both FIRECRACKER |
+| Time to first head pop | median 18.5 s (4.9-65.8 s) | 33.6 s and 67.6 s |
+| What popped them | 20 routine clean fist strikes at 13-21 N·s (blow) | a cross at 8.1 m/s, 34.9 N·s and a jab at 6.2 m/s, 32.9 N·s, against a 26 N·s mount (the top 0.6% of 343 clean head blows) |
+| Pops from falls, floor, cage, blocks, pushes | 0 (but possible through the accumulated break) | 0, and impossible by rule (tested) |
+| Fights with a joint injury (degraded or worse) | 24 of 32 (75%), mostly necks | 12 of 32 (38%) |
+| Fights with a joint wrecked | 10 of 32 (31%) in 24.5 min of fighting | 11 of 32 (34%) in 45.9 min |
+| Injured joints per fight-minute | 1.02 | 0.31 |
+
+With the sparring stand-in mind (the one the balance judge used), seeds 1-4: 0 head pops in 16 fights, all to time (the judge's run had 23 of 24 FIRECRACKER fights end by its head). A joint injury in 7 of 16 fights, a wrecked joint in 4 of 16.
+
+The same 16 House Mind fights on the parallel hardware stage's robot edits as they stood at 23:20 (FIRECRACKER RS04 hips, ankle drives, masses moved): 0 pops, a joint injury in 4 of 16 fights, a wrecked joint in 7 of 16 (striker shoulder bends, FIRECRACKER neck-yaw slips and waist bends).
+
+Of the 511 head contacts in the after set, 343 were clean blows. The other 168 could never pop a head:
+- 71 pushes;
+- 53 leans slower than strike speed;
+- 18 heads moving into a held fist;
+- 9 blows blocked by the guard;
+- 6 that did not land with a striking surface;
+- 11 canvas or cage blows, up to 137 N·s.
+
+### 8.4 The rest of the list
+
+- 3-axis wear: every joint of one body reads the same wrench through it, so the bearing channel now books a blow once, on the joint it overloaded most. Gear and end-stop loads stay per axis, since each axis has its own gear train and stop.
+- Trunk blows (torso, head, pelvis) now also arm the legs whose feet are on the canvas (`trunkArmsLegs`). Today's blows stay inside the leg ratings: only a little FIRECRACKER ankle gear wear and hip-yaw housing faults from steps.
+- Injury share is in the 25-50% target. Most injuries are FIRECRACKER's neck yaw (RobStride 00) slipping teeth when hooks and off-centre jabs spin its light head (0.31 of the yaw torque goes through the rotor's reflected inertia). That is honest physics on an assumed gear rating; a bigger neck drive or a slip clutch is a design call.
+- Still open:
+  - Striker self-damage is 15-24% of joint loss (target ≤ 10%). It is mostly the striker's own shoulder bearings bending on hooks and downward jabs into FIRECRACKER's head, and wrecked joints sit at about 1 in 3 fights because of it. Some of these hits land with the 3-axis shoulder close to gimbal lock (roll near ±90°), where the bearing carries the moment structurally.
+  - The RobStride 04 bearing rating uses a 110 mm housing (`src/robots/catalog.ts`), but the published housing is 120 × 120 × 56 mm (OpenELab). At 120 mm the rating would be 4.8 kN radial and 202 N·m (now 4.4 kN and 169 N·m). This needs a catalog edit.
+  - HAYMAKER's forearms gouge from blocks: 1.5-2.9 per fight, 3-6 mm deep, mostly from PYLON's AR500 knuckle plates on 7 mm UHMW. That is consistent with the flat-plate shell model. The fix is thicker forearm guards (a designs change), or a curved-shell model for limb capsules that needs a sourced formula.
+
+### 8.5 For the punch-speed stage
+
+Impact impulse goes with closing speed (J ≈ m_eff·v). Scaling the 343 measured clean head blows: ×1.2 would pop in 9% of fights, ×1.35 (about the gantry's 6-7.7 m/s against today's 4-5.7) in 19%, ×1.5 in 31%. Re-check the head-pop rate once strikes are faster, and re-tune if needed with `SD_TUNE='DAMAGE_TUNING.mountScale=2.2' npx tsx tools/fight-metrics.ts --pairs ... --mind house --balance dcm` (the same seeds before and after). Never lower it to fake pops.
+
 ## Appendix: sources and raw data
 
 Scratch probes (session scratchpad `/private/tmp/claude-501/-Users-chrisdimarco-jarvis/35a12cda-55d8-4dbe-b6de-87829408a2a0/scratchpad/`):
@@ -436,4 +499,4 @@ Scratch probes (session scratchpad `/private/tmp/claude-501/-Users-chrisdimarco-
 - `joint-audit.mts`, `joint-audit-lim.mts`, `rne-bench.mts`, `jsum.py`; output `a1-a4.json`, `dmgaudit/b1-b4.json`, `lim1.json` (8 fights, overload attribution, three-channel loads, hard-stop torque, probe cost).
 - `strike-doc/shell.py` (shell yield loads and dent estimates in 4.1).
 
-References: Walilko, Viano & Bir 2005 (Br J Sports Med 39:710), punch speed, force and effective mass. Boira Bernabeu et al. 2016 (repositorio.comillas.edu/xmlui/handle/11531/16610), elbow extension 22-41 rad/s. Gavagan & Sayers 2017 (PLoS ONE, PMC5571909), roundhouse kick kinematics. docs/research/07-china-robot-fights.md (URKL rules), docs/research/10-engineai-fighters.md (T800 get-up, reflected armature, joint-feedback faults), docs/design/balance-engine.md (sections 5-6), docs/design/ring-iq.md, docs/design/move-polish.md, docs/design/next-gen-chassis.md.
+References: Walilko, Viano & Bir 2005 (Br J Sports Med 39:710), punch speed, force and effective mass. RobStride 04 housing 120 × 120 × 56 mm, 1420 g (OpenELab, openelab.io/blogs/learn/robstride04-qdd-120n-m-integrated-joint-bldc-gear-motor-complete-guide; a reseller page, not RobStride's own datasheet). Boira Bernabeu et al. 2016 (repositorio.comillas.edu/xmlui/handle/11531/16610), elbow extension 22-41 rad/s. Gavagan & Sayers 2017 (PLoS ONE, PMC5571909), roundhouse kick kinematics. docs/research/07-china-robot-fights.md (URKL rules), docs/research/10-engineai-fighters.md (T800 get-up, reflected armature, joint-feedback faults), docs/design/balance-engine.md (sections 5-6), docs/design/ring-iq.md, docs/design/move-polish.md, docs/design/next-gen-chassis.md.

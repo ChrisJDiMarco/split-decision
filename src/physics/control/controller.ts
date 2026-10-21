@@ -11,6 +11,7 @@ import { BalanceEngine, CONTROL } from './balance/index';
 import { REACTIONS } from './balance/reactions';
 import { Inertializer } from './balance/inertialize';
 import { MOCAP_STYLE, MocapStyle } from './balance/mocap-style';
+import { TrunkLimiter, trunkLimiterFor, type TrunkStyle } from './balance/trunk-limit';
 import { newProbe, type BalanceProbe } from './balance/types';
 import { applyGravityFeedforward, INVERSE_DYNAMICS, InverseDynamics, jointInfo, VelocityFeedforward, type InverseDynamicsInput, type JointInfo } from './feedforward';
 import { Gait, type StanceFrame, type StepTiming } from './gait';
@@ -146,6 +147,9 @@ export class HumanoidController {
   readonly idyn: InverseDynamics | null;
   /** Phase 4: arms, waist, posture and stiffness for the reactions (balance/behaviours.ts; balance engine only). */
   readonly behaviours: Behaviours | null;
+  /** The trunk style (dip, pelvis tilt, waist bend) made feasible for the feet (balance/trunk-limit.ts; balance engine only). */
+  readonly trunkLimit: TrunkLimiter | null;
+  private readonly trunkStyle: TrunkStyle = { pelvisDrop: 0, pelvisPitch: 0, pelvisRoll: 0, waistBend: 0 };
   /** This robot's geoms by part, and the other robot's geoms (the skin a hit is felt through). */
   private readonly skin: { mine: Map<number, string>; theirs: Set<number> };
   /** The design's get-up speeds (getup-speed.ts). */
@@ -244,6 +248,7 @@ export class HumanoidController {
     this.drive = dcm ? new StrikeDrive(ctx, r, upper) : null;
     this.idyn = dcm ? new InverseDynamics(ctx.mj, ctx.model.nv, r) : null;
     this.behaviours = dcm ? new Behaviours(this.geo, this.jm, r) : null;
+    this.trunkLimit = dcm ? trunkLimiterFor(ctx, r, this.fullMass) : null;
     const mine = new Map<number, string>();
     for (const [id, p] of r.parts) for (const g of p.geoms) mine.set(g, id);
     const theirs = new Set<number>();
@@ -414,6 +419,7 @@ export class HumanoidController {
     const caught = !!this.behaviours && this.behaviours.holdsCatch && this.behaviours.braceW > 0.5 && this.engineDrove;
     this.getUp.catchPose = caught ? Float64Array.from(this.r.targets) : null;
     this.behaviours?.reset();
+    this.trunkLimit?.reset();
     this.rise.active = false;
     this.upperBody.reset();
     this.skills.cancel(this.skillEnv(s), true);
@@ -697,7 +703,7 @@ export class HumanoidController {
     const keep = run && run.def.clip && run.def.kind === 'arm' && (run.phase === 'strike' || cocked);
     if (e.captured && !(STRIKE_P3.flyThroughCapture && keep)) this.skills.cancel(env, true);
     // The striking chain tracks the blow's velocity instead of braking it (strike-drive.ts).
-    this.drive?.impedance(this.skills.run, this.plantedFn);
+    this.drive?.impedance(this.skills.run, this.plantedFn, dt);
     // The reaction's stiffness on top: the absorbing chain, the brace, the pre-brace (behaviours.ts).
     this.behaviours!.impedance(react, this.gait, this.skills.active());
     // Mocap style (arms, waist, pelvis bob, tilt and sway from the clip the feet are taking, or the
@@ -716,6 +722,20 @@ export class HumanoidController {
     // Phase 4: the reaction's arms, waist and posture (hands out to the canvas in a brace, the pelvis
     // lower while recovering or pre-braced).
     this.behaviours!.pose(react, s, this.pose, this.cmd, dt);
+    // The trunk style (dip, pelvis tilt, waist bend) at accelerations the feet can carry (trunk-limit.ts):
+    // a punch's clip played fast no longer lifts the soles off the canvas. A brace and the rise pass through.
+    const ts = this.trunkStyle;
+    ts.pelvisDrop = this.pose.pelvisDrop;
+    ts.pelvisPitch = this.pose.pelvisPitch;
+    ts.pelvisRoll = this.pose.pelvisRoll;
+    ts.waistBend = this.pose.waistPitch - st.waistPitch;
+    // (A kick's counter-lean is the reaction to its own leg, timed with it: it passes through too.)
+    const kicking = this.skills.run?.def.kind === 'leg' || this.gait.phase === 'shift' || this.gait.phase === 'skill';
+    this.trunkLimit!.apply(ts, dt, react.mode === 'brace' || this.rise.active || kicking);
+    this.pose.pelvisDrop = ts.pelvisDrop;
+    this.pose.pelvisPitch = ts.pelvisPitch;
+    this.pose.pelvisRoll = ts.pelvisRoll;
+    this.pose.waistPitch = st.waistPitch + ts.waistBend;
     // Walking squares the hips to the travel; over the last two steps they turn back to the blade.
     const want = e.walking() ? e.planner.travel : bearing + st.pelvisYaw + this.pose.pelvisYaw;
     const yaw = this.yawTarget(s, reachablePelvisYaw(this.geo, this.gait, want), true);

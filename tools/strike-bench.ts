@@ -7,7 +7,8 @@
 //            contact, the strike episode's impulse / absorbed work / peak force, effective mass,
 //            the target's Δv, pelvis and torso yaw peaks against contact (the kinetic chain), joint
 //            speed and torque use along the chain, and the damage model's verdict: joint-load channel
-//            peaks per joint (× rating) on striker and victim, health lost by channel and role, dents
+//            peaks per joint (× rating) on striker and victim, health lost by channel and role, dents,
+//            and head pops (the blow's impact impulse against the target's mount, DAMAGE_TUNING.mountScale)
 //   contact  one strike into a standing target at fixed placements (the impact probe): the force
 //            profile of the striking surface, contact time, penetration, impulse in the first 10 ms
 //            and over the episode, target Δv at 50 / 150 ms, torso spin, and the same damage verdict
@@ -16,9 +17,11 @@
 //   meff     effective mass at the fist and shin along the strike line, from the mass matrix (all
 //            joints limp, the striking limb rigid, the whole body rigid)
 //
-// Thresholds in the damage model are PROVISIONAL until the balance build's P3 makes strikes fast
-// (stage 5b). This bench is the calibration hook: --tune DAMAGE_TUNING.key=value[,key=value] overrides
-// any of them for a run (src/physics/damage/constants.ts), so before/after tables use the same seeds.
+// Calibration hook (stage 5b): --tune DAMAGE_TUNING.key=value[,key=value] overrides any damage
+// threshold for a run (src/physics/damage/constants.ts), so before/after tables use the same seeds.
+// Head pops were calibrated on 2026-10-20 (mountScale); the joint-load ratings are still labelled
+// assumptions. Fight-level rates (head pops per fight, injury share) come from tools/fight-metrics.ts
+// with SD_TUNE='DAMAGE_TUNING.key=value'.
 //
 // usage:
 //   npx tsx tools/strike-bench.ts --mode matrix|contact|gantry|meff|all [--designs firecracker,savate]
@@ -33,6 +36,7 @@ import type { SimEvent, TargetZone } from '../src/core/protocol';
 import { controllerOf } from '../src/physics/control';
 import type { SkillId } from '../src/physics/control/skills/types';
 import { DAMAGE_TUNING, damageState, type DamageLedger } from '../src/physics/damage';
+import { breakImpulseNs } from '../src/physics/damage/detach';
 import type { RobotRuntime, SimContext } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
 import { motorSystem } from '../src/physics/systems/motors';
@@ -96,6 +100,8 @@ interface Verdict {
   failures: [Record<string, number>, Record<string, number>];
   dents: [number, number];
   peaks: [JointPeak[], JointPeak[]];
+  /** Parts knocked off during the trial, with the blow that did it (DamageLedger.detaches). */
+  detaches: [unknown[], unknown[]];
 }
 
 function ledgerCopy(ctx: SimContext): [DamageLedger, DamageLedger] {
@@ -110,8 +116,10 @@ function verdict(ctx: SimContext, before: [DamageLedger, DamageLedger]): Verdict
   const peaks: Verdict['peaks'] = [[], []];
   const dents: Verdict['dents'] = [0, 0];
   const log: Verdict['log'] = [[], []];
+  const detaches: Verdict['detaches'] = [[], []];
   for (const c of [0, 1] as const) {
     const now = st.robots[c].ledger, was = before[c];
+    detaches[c] = now.detaches.slice(was.detaches.length);
     const seen = new Set(was.log.map((e) => JSON.stringify(e)));
     log[c] = now.log.filter((e) => !seen.has(JSON.stringify(e)));
     for (const [cause, byRole] of Object.entries(now.jointLoss)) {
@@ -130,7 +138,7 @@ function verdict(ctx: SimContext, before: [DamageLedger, DamageLedger]): Verdict
       peaks[c].push({ joint: st.robots[c].robot.joints[i].name, gear: +m.peak[0].toFixed(2), stop: +m.peak[1].toFixed(2), bearing: +m.peak[2].toFixed(2), role: m.role });
     });
   }
-  return { lost, log, failures, dents, peaks };
+  return { lost, log, failures, dents, peaks, detaches };
 }
 
 function strikeEvent(e: Impact): Record<string, unknown> {
@@ -187,6 +195,8 @@ async function trial(spec: TrialSpec): Promise<Record<string, unknown>> {
     return { ...t, error: def ? 'start failed' : 'no such skill' };
   }
   const before = ledgerCopy(ctx);
+  const oppHead = damageState(ctx).robots[opp.corner].parts.get('head');
+  const headNeedNs = oppHead ? breakImpulseNs(damageState(ctx), oppHead) : null;
   const side = def.side ?? 'l';
   const kick = def.kind === 'leg';
   const chain = (kick ? CHAIN_LEG(side) : CHAIN_ARM(side)).map((n) => me.jointIndex.get(n)).filter((i): i is number => i !== undefined);
@@ -316,7 +326,7 @@ async function trial(spec: TrialSpec): Promise<Record<string, unknown>> {
     strikes: strikes.length, pushes: pushes.length, pushImpulseNs: +pushes.reduce((a, e) => a + e.impulseNs, 0).toFixed(1),
     damage: {
       striker: { lost: v0.lost[0], log: v0.log[0], failures: v0.failures[0], dents: v0.dents[0], peaks: v0.peaks[0] },
-      victim: { lost: v0.lost[1], log: v0.log[1], failures: v0.failures[1], dents: v0.dents[1], peaks: v0.peaks[1] },
+      victim: { lost: v0.lost[1], log: v0.log[1], failures: v0.failures[1], dents: v0.dents[1], peaks: v0.peaks[1], headNeedNs: headNeedNs === null ? null : +headNeedNs.toFixed(1), detaches: v0.detaches[1] },
     },
     chain: chainMeta,
   };
@@ -551,7 +561,9 @@ function summary(rows: Array<Record<string, unknown>>): string {
     const self = hit.reduce((a, r) => a + Object.values((r.damage as { striker: { lost: Record<string, number> } }).striker.lost).reduce((x, y) => x + y, 0), 0);
     const vict = hit.reduce((a, r) => a + Object.values((r.damage as { victim: { lost: Record<string, number> } }).victim.lost).reduce((x, y) => x + y, 0), 0);
     const dents = hit.reduce((a, r) => a + ((r.damage as { victim: { dents: number } }).victim.dents), 0);
-    lines.push(`${k.padEnd(28)} landed ${hit.length}/${rs.length}  contact ${mean(hit.map((r) => r.vContact as number)).toFixed(2)} m/s (${mean(hit.map((r) => (r.contactShareOfPeak as number) ?? NaN)).toFixed(2)} of peak)  ${mean(s.map((x) => x.impulseNs as number)).toFixed(1)} N·s  work ${mean(s.map((x) => x.workJ as number)).toFixed(1)} J  peak ${mean(s.map((x) => x.peakKN as number)).toFixed(1)} kN  joint loss victim ${vict.toFixed(3)} / striker ${self.toFixed(3)}  dents ${dents}`);
+    const pops = hit.reduce((a, r) => a + (((r.damage as { victim: { detaches?: unknown[] } }).victim.detaches?.length) ?? 0), 0);
+    const need = (hit[0]?.damage as { victim: { headNeedNs?: number | null } } | undefined)?.victim.headNeedNs;
+    lines.push(`${k.padEnd(28)} landed ${hit.length}/${rs.length}  contact ${mean(hit.map((r) => r.vContact as number)).toFixed(2)} m/s (${mean(hit.map((r) => (r.contactShareOfPeak as number) ?? NaN)).toFixed(2)} of peak)  ${mean(s.map((x) => x.impulseNs as number)).toFixed(1)} N·s  work ${mean(s.map((x) => x.workJ as number)).toFixed(1)} J  peak ${mean(s.map((x) => x.peakKN as number)).toFixed(1)} kN  joint loss victim ${vict.toFixed(3)} / striker ${self.toFixed(3)}  dents ${dents}  head pops ${pops}${need ? ` (mount ${need} N·s)` : ''}`);
   }
   for (const r of rows.filter((x) => x.mode === 'gantry')) lines.push(`gantry ${r.design} ${String(r.throw).padEnd(22)} damping ${r.servoDamping}: ${r.vPeak} m/s at ${r.tPeakS} s`);
   for (const r of rows.filter((x) => x.mode === 'meff')) lines.push(`meff ${r.design} ${r.massKg} kg: fist ${JSON.stringify(r.fist_r)} shin ${JSON.stringify(r.shin_l)}`);

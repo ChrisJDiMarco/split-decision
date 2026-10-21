@@ -684,13 +684,17 @@ export function pushCmp(geo: HumanoidGeometry, side: Side, p: FootPlace, ux: num
 /**
  * Keeps a landing within `maxSep` of the stance sole and clear of it (the feet never cross), and
  * the two feet's yaw inside what the hips can twist between them (Gait.constrainTarget for a
- * stance place that is not planted yet).
+ * stance place that is not planted yet). `frameYaw`: the frame the feet must not cross in, the stance
+ * foot's own by default (planned footholds point the way the stance does). Catch steps and landing
+ * adjustments pass the pelvis's once the stance sole has spun far off it (step-adjust.ts crossFrame): the
+ * legs cross at the hips, and in sparring a rear sole spun 75° turned "behind the body" into "across the
+ * stance foot", so the catch step for a body falling backward was planned in front of it.
  */
-export function constrainFrom(geo: HumanoidGeometry, st: FootPlace, side: Side, target: FootPlace, maxSep: number): FootPlace {
+export function constrainFrom(geo: HumanoidGeometry, st: FootPlace, side: Side, target: FootPlace, maxSep: number, frameYaw = st.yaw): FootPlace {
   const T = FOOTWORK_TUNING;
   const L = geo.legLength;
   const sign = side === 'l' ? 1 : -1;
-  let [rx, ry] = rot2(target.x - st.x, target.y - st.y, -st.yaw);
+  let [rx, ry] = rot2(target.x - st.x, target.y - st.y, -frameYaw);
   ry *= sign;
   ry = Math.max(ry, T.minGapL * L);
   const d = Math.hypot(rx, ry);
@@ -702,7 +706,7 @@ export function constrainFrom(geo: HumanoidGeometry, st: FootPlace, side: Side, 
     rx *= maxSep / d;
     ry *= maxSep / d;
   }
-  const [wx, wy] = rot2(rx, ry * sign, st.yaw);
+  const [wx, wy] = rot2(rx, ry * sign, frameYaw);
   const maxRel = 2 * (0.7 - T.hipYawMargin);
   const rel = clamp(wrapAngle(target.yaw - st.yaw), -maxRel, maxRel);
   return { x: st.x + wx, y: st.y + wy, yaw: st.yaw + rel };

@@ -13,13 +13,13 @@
 // gives dents, cracks and part damage (shell.ts), punctures and breaks. A strike arms the joint-load
 // channels (joint-loads.ts) on the victim's load path, and on the striker's when it landed off-axis or
 // into its own stop; a hard strike right on a drive's housing faults that drive.
-import type { Corner, Vec3 } from '../../core/types';
+import type { Corner, PartTag, Vec3 } from '../../core/types';
 import type { SimContext } from '../sim-context';
 import {
   CAGE_MIN_SPEED, CHAIN_MASS_SHARE, CLEAN_HIT_MIN_SPEED, DAMAGE_TUNING, MAX_ENTRY_PENETRATION_M, MIN_EVENT_IMPULSE_NS, MIN_SPEED_DEBRIS,
   MIN_SPEED_FOOT_CANVAS, MIN_SPEED_PROP, MIN_SPEED_ROBOT_ROBOT, MIN_SPEED_ROBOT_WORLD, NON_STRIKE_DAMAGE_SCALE, OVERLOAD_ARM_TAIL_S,
 } from './constants';
-import { maybeDetach } from './detach';
+import { breakImpulseNs, maybeDetach, type PopBlow } from './detach';
 import { surfaceOf, zoneOf } from './durability';
 import { faultDrive } from './joint-loads';
 import { recordDent, shellResponse, type ShellResponse } from './dent';
@@ -148,7 +148,49 @@ function unit(v: Vec3): Vec3 {
 }
 
 function newTally(info: PartInfo, geom: GeomInfo, other: GeomInfo, zone: Tally['zone'], surface: ShellSurface, striking: boolean): Tally {
-  return { info, geom, other, zone, surface, impulse: 0, jx: 0, jy: 0, jz: 0, work: 0, peakForce: 0, tickForce: 0, forceRing: [], filtPeak: 0, pos: [0, 0, 0], normal: [0, 0, 1], localPos: [0, 0, 0], localNormal: [0, 0, 1], striking, speed: 0 };
+  return {
+    info, geom, other, zone, surface, impulse: 0, jx: 0, jy: 0, jz: 0, work: 0, peakForce: 0, tickForce: 0, forceRing: [], filtPeak: 0,
+    pos: [0, 0, 0], normal: [0, 0, 1], localPos: [0, 0, 0], localNormal: [0, 0, 1], striking, speed: 0, t0: -1, firstOther: null, jImpact: 0,
+  };
+}
+
+/** Parts that guard: a strike that meets one of these first is blocked. */
+const GUARD_TAGS: PartTag[] = ['upperarm', 'forearm', 'fist', 'finger', 'shield', 'thigh', 'shin'];
+
+/** Did the striking part meet the struck robot's guard (an arm or a leg) at or before it reached part t? */
+function blockedBy(g: HitGroup, t: Tally, first: GeomInfo): boolean {
+  const striker = first.part;
+  if (!striker) return false; // a thrown prop
+  for (const u of g.tallies) {
+    if (u === t || u.info.robot !== t.info.robot || u.t0 < 0 || u.t0 > t.t0 || u.impulse < DAMAGE_TUNING.guardMinNs) continue;
+    if (!u.info.def.tags.some((x) => GUARD_TAGS.includes(x))) continue;
+    if ((u.firstOther ?? u.other).part === striker) return true;
+  }
+  return false;
+}
+
+/**
+ * The blow that may knock part t off, or null. Only a really nice hard solid clean hit can: a strike
+ * by the other robot (not a push, not the floor, the cage or debris) or a thrown prop, whose first and
+ * hardest contacts on the part were a striking surface (fist, glove, foot, shin) arriving at strike
+ * speed, and that did not meet the guard first. What then counts against the mount is its impact
+ * impulse (DAMAGE_TUNING.impactWindowS), not the lean that follows, and no speed threshold: a faster
+ * punch only pops a head by delivering a harder blow. Exported for tests.
+ */
+export function popBlow(ctx: SimContext, g: HitGroup, t: Tally): PopBlow | null {
+  if (!t.info.def.detachable || !t.info.part.attached || t.striking || t.t0 < 0) return null;
+  const prop = t.other.kind === GEOM_KIND.PROP;
+  if (g.kind === 'push' || (g.kind === 'pair' && !prop) || !isStrike(t.geom, t.other)) return null;
+  const first = t.firstOther ?? t.other;
+  if (!strikingSurface(first) || !strikingSurface(t.other) || t.speed < DAMAGE_TUNING.newStrikeSpeed) return null;
+  if (blockedBy(g, t, first)) return null;
+  const corner = isRobot(first) ? first.corner : null;
+  const skill = corner !== null ? ctx.robots[corner].skill : null;
+  const part = first.part?.def.id ?? null;
+  return {
+    cause: prop ? 'prop' : 'strike', byCorner: corner, by: part ? `${part}${skill ? ` (${skill})` : ''}` : null,
+    impactNs: t.jImpact, windowNs: t.impulse, speed: t.speed,
+  };
 }
 
 /** The group's tally for a part (one per part per group; several pairs can land on one part). */
@@ -236,9 +278,26 @@ function armStrike(ctx: SimContext, st: DamageState, g: HitGroup, ep: Episode, v
   const striker = swap ? victimIn : strikerIn;
   const into: Vec3 = swap ? [-intoIn[0], -intoIn[1], -intoIn[2]] : intoIn;
   const until = g.closeTick + ticks(ctx, OVERLOAD_ARM_TAIL_S);
-  if (victim.part && isRobot(victim)) armLoadPath(victim.part, until, armContext(ctx, 'victim', striker));
+  if (victim.part && isRobot(victim)) {
+    const arm = armContext(ctx, 'victim', striker);
+    armLoadPath(victim.part, until, arm);
+    if (DAMAGE_TUNING.trunkArmsLegs && TRUNK_TAGS.some((x) => victim.part!.def.tags.includes(x))) armStandingLegs(ctx, st.robots[victim.corner!], until, arm);
+  }
   if (isRobot(striker) && striker.part && strikerLoaded(ctx, st, striker, into)) armLoadPath(striker.part, until, armContext(ctx, 'striker', striker));
   void ep;
+}
+
+const TRUNK_TAGS: PartTag[] = ['torso', 'chassis', 'head', 'pelvis'];
+
+/**
+ * A blow on the trunk goes to the ground through the legs standing on the canvas: arm their hips,
+ * knees and ankles (each foot's load path up to the pelvis). Their channels then read what the legs
+ * really carried; a leg in the air carries almost nothing and books nothing.
+ */
+function armStandingLegs(ctx: SimContext, rd: RobotDamage, until: number, arm: ArmContext): void {
+  for (const p of rd.parts.values()) {
+    if (p.groundTick >= ctx.tick - 1 && p.part.attached && p.def.tags.includes('foot')) armLoadPath(p, until, arm);
+  }
 }
 
 // ---------------------------------------------------------------- episodes
@@ -349,6 +408,11 @@ function join(ctx: SimContext, st: DamageState, g: HitGroup, ep: Episode, ga: Ge
 }
 
 function addToTally(ctx: SimContext, t: Tally, other: GeomInfo, j: number, dir: Vec3, force: number, p: ArrayLike<number>): void {
+  if (t.t0 < 0) {
+    t.t0 = ctx.tick;
+    t.firstOther = other;
+  }
+  if (ctx.tick - t.t0 < ticks(ctx, DAMAGE_TUNING.impactWindowS)) t.jImpact += j;
   t.impulse += j;
   t.jx += j * dir[0];
   t.jy += j * dir[1];
@@ -432,11 +496,13 @@ function flushWork(ctx: SimContext, ep: Episode): void {
   ep.prevF = 0;
 }
 
-/** A detachable part whose running impulse already beats its break spec in a clean hit pops now. */
-function breaksNow(g: HitGroup): boolean {
+/** A detachable part whose clean blow already reaches its mount's break impulse pops now. */
+function breaksNow(ctx: SimContext, st: DamageState, g: HitGroup): boolean {
+  if (g.kind === 'push') return false;
   for (const t of g.tallies) {
-    const spec = t.info.def.detachable;
-    if (spec && t.info.part.attached && t.impulse >= spec.impulseNs && isCleanHit(t.geom, t.other, t.speed) && g.kind !== 'push') return true;
+    if (!t.info.def.detachable) continue;
+    const blow = popBlow(ctx, g, t);
+    if (blow && blow.impactNs >= breakImpulseNs(st, t.info)) return true;
   }
   return false;
 }
@@ -556,10 +622,9 @@ function finalize(ctx: SimContext, st: DamageState, g: HitGroup): void {
     if (res) recordDent(ctx, rd, t, res);
     if (t.info.circuits.length && t.work >= tune.punctureWorkJ) t.info.punctured = true;
     if (strike && g.kind !== 'push' && !t.striking) housingHits(ctx, st, rd, t, armContext(ctx, 'victim', t.other));
-    // Only a clean hard strike pops a part in one blow; anything else can finish it off through
-    // accumulated damage, never in one go.
-    const clean = g.kind !== 'push' && isCleanHit(t.geom, t.other, t.speed);
-    maybeDetach(ctx, st, t.info, clean ? t.impulse : 0, [t.jx, t.jy, t.jz]);
+    // Only one really nice hard solid clean blow pops a part (popBlow); falls, the floor, the cage,
+    // pushes, blocked blows and accumulated damage never do.
+    if (t.info.def.detachable) maybeDetach(ctx, st, t.info, popBlow(ctx, g, t), [t.jx, t.jy, t.jz]);
   }
 }
 
@@ -567,6 +632,9 @@ function trackContact(ctx: SimContext, st: DamageState, c: ContactView, efc: Flo
   const g1 = c.geom1, g2 = c.geom2;
   const i1 = st.geoms[g1], i2 = st.geoms[g2];
   if (!i1 || !i2 || !interesting(i1, i2)) return;
+  // A part on the canvas (a foot: that leg carries the trunk's blows to the ground, armStrike).
+  if (i1.kind === GEOM_KIND.CANVAS && isRobot(i2) && i2.part) i2.part.groundTick = ctx.tick;
+  else if (i2.kind === GEOM_KIND.CANVAS && isRobot(i1) && i1.part) i1.part.groundTick = ctx.tick;
   const a = g1 < g2 ? g1 : g2;
   const b = g1 < g2 ? g2 : g1;
   const key = a * st.ngeom + b;
@@ -633,6 +701,6 @@ export function impactStep(ctx: SimContext, st: DamageState): void {
     // A strike or push keeps its whole window (a glance off the guard and the hit behind it are one
     // strike); a single pair (canvas, cage, debris, props) closes when it separates.
     const separated = g.kind === 'pair' && !g.pairs.some((ep) => ep.lastTick === ctx.tick);
-    if (ctx.tick >= g.closeTick || separated || breaksNow(g)) finalize(ctx, st, g);
+    if (ctx.tick >= g.closeTick || separated || breaksNow(ctx, st, g)) finalize(ctx, st, g);
   }
 }

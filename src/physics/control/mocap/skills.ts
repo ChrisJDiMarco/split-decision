@@ -75,14 +75,46 @@ function kick(base: SkillDef, side: Side): SkillDef {
   };
 }
 
+/** Engine kicks' reach from the weight shift (engineKick), exported so tools can sweep it. */
+export const ENGINE_KICK = {
+  shiftReachL: 0.12, // × leg length: the stance's half-length (0.14 L) less the COM's lead over its centre
+};
+
 /**
  * The same kick on the balance engine: the procedural kick's range and approach, which are the leg's
- * own reach from a planted stance (the brain's range facts, src/brain/ranges.ts, read those too). The
- * clips' own distances include the actor stepping 0.5-1.1 m into the kick, which the robot does not.
+ * own reach from a planted stance, plus what the weight shift brings: these are rear-leg kicks, and the
+ * shift puts the body over the front foot before the leg lifts, the kicking hip turning over beside it
+ * (strikes.ts kickClip), so the hip the leg swings from stands about the stance's half-length
+ * (stance.ts: 0.14 × leg length) further toward him than where the COM started, less the COM's own
+ * lead over the stance centre (ENGINE_KICK.shiftReachL). Without it a kick's sweet spot lay inside
+ * the two guards' standoff: walked in there, the guards met and his pushed the shift back off the
+ * stance foot (sparring, 2026-10-21: 60% of kicks called off by the lift gate). The clips' own
+ * distances include the actor stepping 0.5-1.1 m into the kick, which the robot does not.
+ * (The brain's range facts, src/brain/ranges.ts, read the procedural kicks' ranges.)
  */
 function engineKick(base: SkillDef, side: Side): SkillDef {
-  return { ...kick(base, side), range: base.range, approach: base.approach };
+  return { ...kick(base, side), range: shiftedRange(base), approach: base.approach };
 }
+
+/** A rear-leg kick's range on the balance engine: the procedural reach plus the weight shift's (engineKick). */
+function shiftedRange(base: SkillDef): SkillDef['range'] {
+  return (geo: HumanoidGeometry): [number, number] => {
+    const [lo, hi] = base.range(geo);
+    const d = ENGINE_KICK.shiftReachL * geo.legLength;
+    return [lo + d, hi + d];
+  };
+}
+
+/**
+ * The procedural kicks as the balance engine throws them: the rear-leg ones (low and head kick) reach
+ * as far as the weight shift onto the front foot carries the hip (shiftedRange); the lead-leg front
+ * kick shifts back onto the rear foot, its hip already ahead of the COM, and keeps its reach.
+ */
+const ENGINE_PROCEDURAL_DEFS: Partial<Record<SkillId, SkillDef>> = {
+  front_kick: FRONT_KICK,
+  low_kick: { ...LOW_KICK, range: shiftedRange(LOW_KICK) },
+  head_kick: { ...HEAD_KICK, range: shiftedRange(HEAD_KICK) },
+};
 
 /**
  * Mocap kicks are built (kickClip) but off: in the strike drill (every modern design, 12 s per
@@ -94,12 +126,17 @@ function engineKick(base: SkillDef, side: Side): SkillDef {
 export const MOCAP_KICKS = {
   enabled: false,
   /**
-   * On the balance engine the mocap kicks play (P3: motor-rate playback from the centroid tables, the
-   * pre-position over 1/ω₀, the lift gate and the cancel, the landing by the step adjuster). The strike
-   * drill (tools/balance-drills.ts --drills strikes) is the gate: they land at least as often as the
-   * procedural kicks with no more falls (numbers in the build report).
+   * On the balance engine: 1, the mocap kicks play where ENGINE_PROCEDURAL_KICKS does not keep the
+   * procedural one (P3: motor-rate playback from the centroid tables, the pre-position over 1/ω₀, the lift
+   * gate and the cancel, the landing by the step adjuster); 0, every kick is the procedural one
+   * (ENGINE_PROCEDURAL_DEFS). 0 since the kick pass (2026-10-21): once the weight shift reached the lift
+   * gate (ENGINE_KICK reach and PACE.kickRoomM room, BALANCE_TUNING.kickBodyFeedback, KICK_GATE.soleM), the
+   * procedural kicks landed clean and hard after a walk-in (strike drill --approach, 16 of each: SAVATE
+   * front, low and head kick 16/16/16 at 10.0/9.5/4.3 m/s, PYLON low and head kick 15/16 at 9.7 and 16/16
+   * at 7.2 m/s, no falls) where the mocap kicks touched his guard at 1.1-1.5 m/s with 20-31 catch steps
+   * per 16 (their r_bal rate cap plays them slowly to the impact, and the aim warp brings the foot in late).
    */
-  engine: 1,
+  engine: 0,
 };
 
 const PUNCHES: Partial<Record<SkillId, SkillDef>> = {
@@ -141,7 +178,7 @@ export const ENGINE_PROCEDURAL_KICKS: Readonly<Record<string, readonly SkillId[]
 /** The mocap version of a skill if this library has moves for it (`engine`: on the balance engine). */
 export function mocapSkill(set: MocapSet | null, id: SkillId, engine = false): SkillDef | null {
   if (!set || !mocapStrikesEnabled()) return null;
-  if (engine && ENGINE_PROCEDURAL_KICKS[set.lib.design]?.includes(id)) return null;
+  if (engine && (ENGINE_PROCEDURAL_KICKS[set.lib.design]?.includes(id) || (!MOCAP_KICKS.engine && ENGINE_PROCEDURAL_DEFS[id]))) return ENGINE_PROCEDURAL_DEFS[id] ?? null;
   const def = PUNCHES[id] ?? (engine && MOCAP_KICKS.engine ? ENGINE_KICK_DEFS[id] : MOCAP_KICKS.enabled ? KICK_DEFS[id] : undefined);
   if (!def) return null;
   return (set.byLabel.get(id as never)?.length ?? 0) > 0 ? def : null;

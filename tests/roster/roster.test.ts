@@ -8,13 +8,16 @@ import { describe, expect, it } from 'vitest';
 import type { MatchSetup, PartDef, RobotDesign } from '../../src/core/types';
 import { CUSHION_MATERIALS } from '../../src/physics/damage/constants';
 import { compileWorld } from '../../src/physics/world';
-import { MATERIALS, motor } from '../../src/robots/catalog';
-import { compileRobot } from '../../src/robots/compile-mjcf';
+import { MATERIALS, motor, reflectedInertia } from '../../src/robots/catalog';
+import { compileRobot, partMotorMass } from '../../src/robots/compile-mjcf';
 import { DESIGNS, design } from '../../src/robots/designs';
+import { ARMATURE_FLOOR_KG_M2 } from '../../src/robots/humanoid';
 
 const MODERN = ['firecracker', 'savate', 'haymaker', 'pylon'] as const;
 const IRON = ['bruiser', 'striker', 'goliath'] as const;
 const TOLERANCE = 0.04;
+/** The modern masses stay this close to the roster doc (docs/design/robot-realism-pass.md §3). */
+const MASS_BUDGET = 0.01;
 
 const SPEC = JSON.parse(readFileSync(new URL('../../docs/research/08-modern-roster.json', import.meta.url), 'utf8')) as Array<{ id: string; height_m: number; mass_kg: number; abilities: string[] }>;
 const specOf = (id: string) => SPEC.find((s) => s.id === id)!;
@@ -76,16 +79,49 @@ describe('modern roster on spec', () => {
       expect(Math.abs(h / spec.height_m - 1)).toBeLessThan(TOLERANCE);
     });
 
-    it(`${id} weighs ${spec.mass_kg} kg (±${TOLERANCE * 100}%), per-part mass table`, () => {
+    it(`${id} weighs ${spec.mass_kg} kg (±${MASS_BUDGET * 100}%), per-part mass table`, () => {
       const c = compileRobot(d, 0, { pos: [0, 0, d.rootHeight], yaw: 0 });
       const rows = c.parts.map((p) => {
         const def = part(d, p.id);
-        const motors = (def.joints ?? []).reduce((s, j) => s + motor(j.motor).massKg, 0);
+        // The drives this part carries: its own, less those mounted on its parent, plus its children's
+        // mounted on it (JointDef.mount).
+        const motors = partMotorMass(def, d.parts.filter((x) => x.parent === p.id));
         const gyro = d.gyro?.part === p.id ? d.gyro.massKg : 0;
         return `  ${p.id.padEnd(11)} ${p.massKg.toFixed(2).padStart(6)} kg  (actuators ${motors.toFixed(2)}${gyro ? `, gyro ${gyro}` : ''}, structure ${(p.massKg - motors - gyro).toFixed(2)})`;
       });
       console.log(`${d.name}: ${c.totalMassKg.toFixed(2)} kg (spec ${spec.mass_kg}), ${standingHeight(d).toFixed(3)} m (spec ${spec.height_m})\n${rows.join('\n')}`);
-      expect(Math.abs(c.totalMassKg / spec.mass_kg - 1)).toBeLessThan(TOLERANCE);
+      expect(Math.abs(c.totalMassKg / spec.mass_kg - 1)).toBeLessThan(MASS_BUDGET);
+      // Every drive is weighed exactly once, wherever it is mounted.
+      const drives = d.parts.reduce((s, p) => s + (p.joints ?? []).reduce((t, j) => t + motor(j.motor).massKg, 0), 0);
+      const carried = d.parts.reduce((s, p) => s + partMotorMass(p, d.parts.filter((x) => x.parent === p.id)), 0);
+      expect(carried).toBeCloseTo(drives, 9);
+    });
+
+    it(`${id} joints carry their drive train's reflected inertia; drives sit where real builds put them`, () => {
+      for (const p of d.parts) {
+        for (const j of p.joints ?? []) {
+          const m = motor(j.motor);
+          const reflected = reflectedInertia(m);
+          expect(reflected, `${j.name} ${j.motor}`).toBeDefined();
+          expect(j.armature, j.name).toBeCloseTo(Math.max(ARMATURE_FLOOR_KG_M2, reflected!), 12);
+          const parentMounted = /^(shoulder_pitch|elbow|hip_yaw|knee|ankle_pitch|ankle_roll)_[lr]$/.test(j.name);
+          expect(j.mount ?? 'self', j.name).toBe(parentMounted ? 'parent' : 'self');
+        }
+      }
+      // The ankles are their own group, sized about 1.5-2 N·m per kg of body (robot-realism-pass.md §3).
+      const m = compiledMass(d);
+      for (const name of ['ankle_pitch_l', 'ankle_roll_r']) {
+        const j = d.parts.flatMap((p) => p.joints ?? []).find((x) => x.name === name)!;
+        const perKg = motor(j.motor).stallTorqueNm / m;
+        expect(perKg, `${id} ${name} ${j.motor}`).toBeGreaterThan(1.3);
+        expect(perKg, `${id} ${name} ${j.motor}`).toBeLessThan(2.2);
+      }
+      // No part keeps a drive it does not hold: the feet carry no motor, the forearms none.
+      const c = compileRobot(d, 0, { pos: [0, 0, d.rootHeight], yaw: 0 });
+      for (const pid of ['foot_l', 'foot_r', 'forearm_l', 'forearm_r']) {
+        expect(partMotorMass(part(d, pid), d.parts.filter((x) => x.parent === pid)), pid).toBe(0);
+        expect(c.parts.find((x) => x.id === pid)!.massKg, pid).toBeLessThan(2.5);
+      }
     });
 
     it(`${id} runs on electric actuators only, all sourced`, () => {

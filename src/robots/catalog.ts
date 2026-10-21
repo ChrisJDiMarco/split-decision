@@ -178,11 +178,15 @@ export const MOTORS: Record<string, MotorSpec> = {
     heatCapacityJPerK: 900, thermalResistanceKPerW: 0.3, maxTempC: 80, copperLossAtStallW: 0,
     source: 'Combat-robot flipper practice: CO2 at 800 psi through a 1.5 in bore ram',
   },
+  // The neck pan drive is a RobStride 02, run as one (docs/design/robot-realism-pass.md §4): its sheet's
+  // 410 rpm and the qdd.rs02 entry's thermal numbers, not the slower made-up 12 rad/s it had. The mass
+  // stays 0.41 kg, the sheet's 405 g rounded as it always was here, so the frozen iron-age bodies
+  // (tests/roster/fixtures/iron-age-baseline.json) compile to the same bytes.
   'servo.neck': {
-    id: 'servo.neck', name: 'Neck pan servo (RobStride 02)', kind: 'electric',
-    stallTorqueNm: 17, noLoadSpeedRadS: 12, massKg: 0.41,
-    heatCapacityJPerK: 180, thermalResistanceKPerW: 1.8, maxTempC: 110, copperLossAtStallW: 160,
-    source: 'RobStride 02: 17 N·m peak, 405 g',
+    id: 'servo.neck', name: 'Neck pan drive (RobStride 02, 7.75:1)', kind: 'electric',
+    stallTorqueNm: 17, noLoadSpeedRadS: (410 * 2 * Math.PI) / 60, massKg: 0.41,
+    heatCapacityJPerK: 138, thermalResistanceKPerW: 1.6, maxTempC: 120, copperLossAtStallW: 370,
+    source: 'github.com/RobStride/Product_Information: RobStride 02, 7/17 N·m, 410 rpm, 405 g (thermal numbers as qdd.rs02)',
   },
   // Grip drive of the dexterous hand (src/robots/hands.ts): one motor in the palm reels a flexor
   // tendon routed over all ten finger joints, like the single-actuator underactuated hands
@@ -194,11 +198,14 @@ export const MOTORS: Record<string, MotorSpec> = {
     heatCapacityJPerK: 125, thermalResistanceKPerW: 2.2, maxTempC: 100, copperLossAtStallW: 180,
     source: 'cubemars.com/product/ak60-6-v1-1-kv80-robotic-actuator.html: 3/9 N·m, 320 rpm, 368 g, 6:1; single-actuator tendon hand after Dollar & Howe, "The Highly Adaptive SDM Hand" (IJRR 2010)',
   },
+  // Wheel hub drive (no design uses it yet). The RobStride 04's 120 N·m is at the output of its 9:1
+  // box, so the hub is the geared module as sold, with the qdd.rs04 numbers (robot-realism-pass.md §4);
+  // a truly direct hub on that motor would give about 13 N·m.
   'drive.wheel': {
-    id: 'drive.wheel', name: 'Hub drive motor (RobStride 04 direct)', kind: 'electric',
-    stallTorqueNm: 120, noLoadSpeedRadS: 30, massKg: 1.6,
-    heatCapacityJPerK: 500, thermalResistanceKPerW: 0.9, maxTempC: 120, copperLossAtStallW: 1200,
-    source: 'RobStride 04 class hub motor',
+    id: 'drive.wheel', name: 'Hub drive (RobStride 04 QDD, 9:1)', kind: 'electric',
+    stallTorqueNm: RS04_TORQUE, noLoadSpeedRadS: RS04_SPEED, massKg: 1.42,
+    heatCapacityJPerK: 480, thermalResistanceKPerW: 0.9, maxTempC: 120, copperLossAtStallW: 1300,
+    source: 'openelab.io RobStride04: 40/120 N·m at the 9:1 output, 200 rpm, 1420 g, as a wheel hub drive',
   },
 };
 
@@ -344,8 +351,19 @@ const DRIVE_TRAINS: Record<string, Partial<MotorSpec>> = {
     ratingsSource: 'cubemars.com AK60-6 V1.1: 6:1 published; rotor inertia, housing and ratings assumed',
   },
   'drive.wheel': {
-    gearType: 'direct', gearRatio: 1, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: 2 * MOTORS['drive.wheel'].stallTorqueNm, ...bearing(110),
-    ratingsSource: 'direct-drive hub: no gear teeth; ratings assumed',
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: shock('drive.wheel'), ...bearing(110),
+    ratingsSource: 'as qdd.rs04 (the same module as a hub drive): ratio 9:1 published; rotor inertia, gear and bearing ratings assumed',
   },
 };
 for (const [id, d] of Object.entries(DRIVE_TRAINS)) if (MOTORS[id]) Object.assign(MOTORS[id], d);
+
+/**
+ * Rotor inertia reflected to the joint output, kg·m²: the published reflected figure where there is
+ * one, else rotor inertia × ratio² (the damage model's value, src/physics/damage/durability.ts
+ * driveRatings). Undefined for a drive with neither (none in this catalog).
+ */
+export function reflectedInertia(spec: MotorSpec): number | undefined {
+  if (spec.reflectedInertiaKgM2 !== undefined) return spec.reflectedInertiaKgM2;
+  if (spec.rotorInertiaKgM2 !== undefined && spec.gearRatio !== undefined) return spec.rotorInertiaKgM2 * spec.gearRatio * spec.gearRatio;
+  return undefined;
+}

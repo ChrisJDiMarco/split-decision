@@ -124,6 +124,12 @@ export interface JointDef {
   frictionloss?: number; // dry friction (N·m)
   hydraulicCircuit?: string; // joints powered by a hydraulic circuit lose torque with pressure
   /**
+   * Which body carries the drive's mass: 'self' (the default) the part this joint moves; 'parent' the
+   * part it hangs from, as a real build fixes the stator there or mounts the drive high and runs a
+   * linkage (docs/design/robot-realism-pass.md §2). Only the mass moves; the joint is unchanged.
+   */
+  mount?: 'parent' | 'self';
+  /**
    * A passive joint with no servo of its own, moved through a tendon (RobotDesign.tendons) against a
    * return spring: the underactuated finger joints of a dexterous hand. `motor` then names the drive
    * that pulls the tendon (its mass is counted once, on the tendon, not per joint).

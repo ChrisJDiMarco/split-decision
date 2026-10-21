@@ -19,8 +19,10 @@ import type { SkillEnv } from './skills/types';
 
 /** Tunables (exported so tools can sweep them; the worker never changes them). */
 export const STRIKE_PATH = {
-  kappa: 0.85, // share of the torque-speed line the time scaling plans with (the servo keeps the rest for feedback and coupling)
-  speedCap: 0.95, // × no-load speed
+  // Share of the torque-speed line the time scaling plans with: all of it (the path runs at the motors' real
+  // limit; a target the arm cannot follow the servo chases at full torque, which is the same limit).
+  kappa: 1,
+  speedCap: 1, // × no-load speed (the line itself gives no torque there)
   throughM: 0.3, // the aim point sits this far past the first surface (strike-power §2.2: 0.25-0.35)
   elbowEndRad: -0.17, // the path ends with the elbow this far from straight (near, never into, its stop: §2.4)
   kneeEndRad: 0.2, // ...and a kick's with the knee this far from straight

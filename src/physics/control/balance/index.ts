@@ -26,7 +26,7 @@ import type { StanceParams } from '../stance';
 import { skillCaptureStep } from '../stepping';
 import { clampToPolygon, convexHull, footCorners, polygonDistance, type FootPlace, type P2 } from '../support';
 import type { MocapSet } from '../mocap/library';
-import { ComReference } from './com-ref';
+import { COM_REF, ComReference } from './com-ref';
 import { DcmPlan, newDcmSample } from './dcm';
 import { constrainFrom, FOOTWORK_TUNING, FootstepPlanner, pushCmp, soleCmp, type GaitKind, type PlanInput } from './footsteps';
 import { GYRO_POLICY, gyroPolicy, newGyroCommand } from './gyro-policy';
@@ -64,10 +64,20 @@ export const BALANCE_TUNING = {
   captureCopM: 0.015, // a capture step goes once the planned COP is this close to its stance sole
   earlyTouch: 0.75, // a swing touching down after this share of its time is planted
   earlyTouchWalk: 0.9,
+  // ...a catch step only when it is also within this share of its step from the landing: a falling body
+  // brings the canvas up to the foot early, and planted where it scuffed, a catch step lands short (in
+  // sparring 54% of the catch steps that touched before 90% of their swing left the DCM outside the new
+  // support, against 14% of those on time). Short of that the foot flies on to its landing.
+  captureTouchShare: 0.25,
   lateTouchS: 0.12,
   touchdownM: 0.006, // sole this close to the canvas: contact
   liftedM: 0.01,
   kickPreW: 1.0, // weight onto the stance foot over this × 1/ω₀ before a kick (then KICK_GATE decides the lift)
+  // Through a kick's weight shift the DCM feedback acts on this share of the body's own DCM error (the rest the
+  // COM reference's, which the leash drags back with a body that lags it; 0: the reference alone). The leashed
+  // reference lagged with a body that did not follow and the shift crept onto the stance sole too slowly for
+  // the lift gate (a SAVATE front kick after a walk-in: the DCM 3.4 cm off at 0.6 s with 0, 2.2 cm with 1).
+  kickBodyFeedback: 1,
   stanceAnkleKp: 0.3, // stance ankle gain scale (kv scales with its square root)
   stanceHipYawKp: 0.35, // stance hip yaw gain scale (§3.6: a pivot's 0.35)
   forceFF: 1, // share of the planned horizontal ground force fed forward through Jᵀ·F
@@ -96,9 +106,18 @@ export const BALANCE_TUNING = {
   strikeErrM: 0.12,
   stepStrikeS: 0.4,
   stepStrikeInsideM: 0.02,
+  // Recovering (reactions.ts 'recover': after a hit or a catch step, until stable for a moment) an arm
+  // strike may still start once the body is settled on two planted feet with its DCM this far inside the
+  // soles and its COM slower than recoverStrikeSpeed (a fighter knocked back a step countering off the
+  // landing). Off (speed 0): measured in 64 sparring fights it cut idle in range 54% → 48% but the
+  // counters thrown off a body still recovering raised the self-falls 44 → 56 (the 'recover' gate held
+  // 17% of the idle time without it).
+  recoverStrikeInsideM: 0.04,
+  recoverStrikeSpeed: 0,
   copSlewM: 0.018, // the planned COP (and the ground force's CMP) moves at most this far per control tick
   noPickS: 0.6, // a clip step that waited out liftWaitS blocks mocap picks this long
   resquareS: 0.3, // holding position, a stance knocked out of shape is re-formed only after this long stable
+  recoverSettle: 1, // ...and recovering (reactions 'recover'), no planned step either until then (0: off)
   stallCapture: 1, // a lift that stalled liftWaitS with the DCM outside the soles becomes a catch step (0: re-plan)
   // Recovering on two feet after a hit or a catch step (reactions.ts 'recover'): the DCM feedback's gain ×
   // this, so the body is brought to rest over its new stance sooner (the COP stays inside the soles).
@@ -116,6 +135,11 @@ export const BALANCE_TUNING = {
 export const KICK_GATE = {
   minPre: 0.8, // × kickPreW/ω₀ of weight shift before a lift
   xiM: 0.02,
+  // > 0: the DCM anywhere on the stance sole shrunk by this also passes (0: only within xiM of its centre). The
+  // sole's COP holds a DCM it lies over; the margin is the room left for the kick's own push. Within 2 cm of the
+  // centre only, the procedural low kicks after a walk-in never lifted (FIRECRACKER 0/11, HAYMAKER 0/7 in the
+  // strike drill --approach); with 0.03, 10/11 and 7/7 landed clean, no falls.
+  soleM: 0.03,
   flat: 0.97,
   waitS: 0.3,
   // The momentum the gyro must have free (mocap/strikes.ts kickClip): this share of the centroid table's
@@ -596,8 +620,13 @@ export class BalanceEngine {
       else if (touched || !this.planned) this.replan(s, inp);
     } else if (touched || this.needsPlan(s, inp)) {
       // Holding position after a shove, a catch step or a hit: the stance is re-formed only once the body
-      // has settled (§6: re-square after 0.3 s stable); until then both feet stay down under the CMP.
-      if (!inp.goal && T.resquareS > 0 && g.phase === 'double' && g.bothPlanted() && !this.settledFor(s.time, T.resquareS)) this.planHold(s, inp, false);
+      // has settled (§6: re-square after 0.3 s stable); until then both feet stay down under the CMP. The
+      // same while recovering with a goal to walk to (the fight-clean pass): planned right after a catch step
+      // landed, the walk's next step lifted a foot from under a body still moving, and the DCM ran out of the
+      // one sole left (in the fight drill, catch-step chains that had already caught the body went on from
+      // there). A catch step still goes out whenever one is needed (capture() runs regardless).
+      const recovering = REACTIONS.enabled > 0 && R.mode === 'recover' && T.recoverSettle > 0;
+      if ((!inp.goal || recovering) && T.resquareS > 0 && g.phase === 'double' && g.bothPlanted() && !this.settledFor(s.time, T.resquareS)) this.planHold(s, inp, false);
       else this.replan(s, inp);
     } else if (this.holdPlan && g.phase === 'double') this.planHold(s, inp, false);
     // Lift-off when the plan says, if the body is ready.
@@ -634,7 +663,12 @@ export class BalanceEngine {
     const reach = hasGyro ? gyroReach(s, inp) : 0;
     // Outside a walk the CMP is also kept behind the body's own DCM (COM_REF.guardFromM).
     const kp = T.kp * (R.mode === 'recover' && g.phase === 'double' ? T.recoverKp : 1);
-    this.com.step(s, this.vCtl, dt, this.ref, this.state.xiRef, 1 + kp, shrunk, reach, this.cmp, this.cop, this.gyroShare, this.planner.gait !== 'walk' ? this.xiM : undefined);
+    const holding = this.planner.gait === 'hold' && !inp.holdFeet && g.phase === 'double' && g.bothPlanted() && !unloading;
+    // A kick's weight shift too (both soles down, the plan sliding the DCM onto the stance sole): on the
+    // reference's own DCM error the leash let the reference lag with the body, and a shift the body did not
+    // follow stalled short of the lift gate (BALANCE_TUNING.kickBodyFeedback).
+    const shifting = g.phase === 'shift' && g.bothPlanted();
+    this.com.step(s, this.vCtl, dt, this.ref, this.state.xiRef, 1 + kp, shrunk, reach, this.cmp, this.cop, this.gyroShare, this.planner.gait !== 'walk' ? this.xiM : undefined, holding ? COM_REF.bodyFeedback : shifting ? T.kickBodyFeedback : 0);
     this.cmpSoles[0] = this.cop[0];
     this.cmpSoles[1] = this.cop[1];
     this.slewSoles(physical);
@@ -1107,7 +1141,13 @@ export class BalanceEngine {
     if (h > BALANCE_TUNING.liftedM) f.lifted = true;
     const touching = h < BALANCE_TUNING.touchdownM;
     const early = this.planner.gait === 'walk' ? BALANCE_TUNING.earlyTouchWalk : BALANCE_TUNING.earlyTouch;
-    if ((u > early && touching && f.lifted) || (u >= 1 && touching) || s.time > sw.t0 + sw.T + BALANCE_TUNING.lateTouchS) {
+    let near = true;
+    if (this.capturing && u < 1) {
+      const fs = s.feet[side];
+      const left = Math.hypot(sw.target.x - fs.sole[0], sw.target.y - fs.sole[1]);
+      near = left <= BALANCE_TUNING.captureTouchShare * Math.max(0.05, Math.hypot(sw.target.x - sw.from.x, sw.target.y - sw.from.y));
+    }
+    if ((u > early && touching && f.lifted && near) || (u >= 1 && touching) || s.time > sw.t0 + sw.T + BALANCE_TUNING.lateTouchS) {
       g.engineTouchdown(side, s);
       sw.stop();
       // (A lift that was waiting before this step is history: the next plan starts from a landing,
@@ -1128,7 +1168,7 @@ export class BalanceEngine {
     // A capture step already goes as fast as the leg can (hurrying it only lands it short): it
     // follows the DCM instead.
     if (this.capturing) {
-      if (followCapture(this.geo, this.gait, this.swing, side, this.xiM, s.omega0, s.time)) this.gait.retargetSwing(this.swing.target);
+      if (followCapture(this.geo, this.gait, this.swing, side, this.xiM, s.omega0, s.time, s.heading)) this.gait.retargetSwing(this.swing.target);
       return;
     }
     this.dcm.sample(this.swing.t0 + this.swing.T, this.scratch);
@@ -1148,6 +1188,7 @@ export class BalanceEngine {
       time: s.time, omega: w, decay: BALANCE_TUNING.kp * w, hipAt, hipReach: this.hipReach(side),
       xi: this.xiM, xiRef: this.state.xiRef, xiLand: this.scratch.xi, landNom: this.landNom,
       avail: [this.cmpSoles[0] - this.ref.r[0], this.cmpSoles[1] - this.ref.r[1]], short: [this.cmp[0] - this.cmpSoles[0], this.cmp[1] - this.cmpSoles[1]],
+      heading: s.heading,
     });
     if (changed) this.gait.retargetSwing(this.swing.target);
   }
@@ -1188,7 +1229,7 @@ export class BalanceEngine {
     this.waitSince = -1;
     this.mocap?.cancel();
     this.cancelTakeoff();
-    const lift = FOOTWORK_TUNING.walkLift * this.geo.legLength;
+    const lift = STEP_ADJUST.captureLiftL * this.geo.legLength;
     g.engineStep(plan.side, plan.place, plan.swing, lift);
     this.swing.start(s.time, g.feet[plan.side].place, 0, plan.place, plan.swing, lift, BALANCE_TUNING.swingLeadS);
     this.swingSide = plan.side;
@@ -1246,7 +1287,10 @@ export class BalanceEngine {
     const m = this.jm.leg[stance];
     const healthy = [m.hipYaw, m.hipRoll, m.hipPitch, m.knee, m.anklePitch, m.ankleRoll].every((i) => this.r.joints[i].state === 'ok');
     const reserve = this.state.gyroReserve * this.gyroH >= this.kickNeedNms;
-    if (since >= K.minPre * T && err <= K.xiM && stable && flat && healthy && reserve) {
+    // Over the stance foot: the DCM within xiM of the sole's centre, or (soleM > 0) anywhere on the sole
+    // shrunk by soleM (the sole's COP holds a DCM it lies over; soleM is the room left for the kick's own push).
+    const over = err <= K.xiM || (K.soleM > 0 && polygonDistance(footCorners(this.geo, stance, p, K.soleM), this.xiM).d <= 0);
+    if (since >= K.minPre * T && over && stable && flat && healthy && reserve) {
       g.grantSkillLeg();
       this.kickSince = -1;
       return;
@@ -1363,6 +1407,9 @@ export class BalanceEngine {
     const noGyro = inp.gyroHealth <= 0;
     st.steady = planted && stable && !reacting && (noGyro || st.gyroReserve >= T.steadyReserve);
     const reserve = noGyro || st.gyroReserve >= T.strikeReserve;
+    // Recovering, settled enough to counter: two planted feet, no catch step, the DCM well inside, the body slow.
+    const recoveredEnough = mode === 'recover' && planted && !this.capturing && inside >= T.recoverStrikeInsideM && speed < T.recoverStrikeSpeed;
+    const blocked = reacting && !recoveredEnough;
     // Where the DCM is heading: the swing's touchdown, with the CMP held where the stance sole has it.
     const tRem = g.phase === 'single' && g.swingSide && this.swing.active ? Math.max(0, this.swing.t0 + this.swing.T - s.time) : -1;
     st.touchIn = tRem;
@@ -1375,9 +1422,14 @@ export class BalanceEngine {
       st.xiTouch[1] = this.xiM[1];
     }
     const capturing = this.capturing || this.probe.gait === 'capture';
-    const settled = planted && !capturing && inside >= T.strikeInsideM && rate < T.strikeRate && err < T.strikeErrM;
-    st.canStrike = !reacting && (st.steady || (reserve && rate < T.strikeRate && (settled || (tRem >= 0 && tRem <= T.stepStrikeS && !capturing && this.landingCatches()))));
+    // (Recovering, the DCM is judged against the body's support, not the plan it was knocked off.)
+    const settled = planted && !capturing && inside >= T.strikeInsideM && rate < T.strikeRate && (err < T.strikeErrM || recoveredEnough);
+    st.canStrike = !blocked && (st.steady || (reserve && rate < T.strikeRate && (settled || (!reacting && tRem >= 0 && tRem <= T.stepStrikeS && !capturing && this.landingCatches()))));
+    st.strikeBlock = st.canStrike ? '' : blocked ? mode : !reserve ? 'gyro reserve' : rate >= T.strikeRate ? 'torso rate' : capturing ? 'catch step'
+      : !planted ? 'step' : inside < T.strikeInsideM ? 'DCM near edge' : err >= T.strikeErrM ? 'DCM off plan' : 'other';
     st.canKick = st.steady && (inp.gyroHealth <= 0 || st.gyroReserve >= T.kickReserve) && s.feet.l.flat > 0.97 && s.feet.r.flat > 0.97;
+    st.kickBlock = st.canKick ? '' : !planted ? 'step' : reacting ? mode : !(noGyro || st.gyroReserve >= Math.max(T.steadyReserve, T.kickReserve)) ? 'gyro reserve'
+      : speed >= T.stableSpeed ? 'moving' : rate >= T.stableSpeed ? 'torso rate' : inside <= 0 ? 'DCM outside' : err >= T.stableErrM ? 'DCM off plan' : 'feet not flat';
     const p = this.probe;
     p.cop[0] = this.cop[0];
     p.cop[1] = this.cop[1];

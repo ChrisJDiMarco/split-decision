@@ -233,15 +233,25 @@ export function jointLoadStep(ctx: SimContext, st: DamageState): void {
 }
 
 /**
- * Closes the episodes of a part's joints together. Joints of one body (a 3-axis shoulder or hip)
- * share one load path: when several would break on the same channel, the most overloaded one gives
- * way and that relieves the rest, which keep only their wear.
+ * Closes the episodes of a part's joints together. Joints of one body (a 3-axis shoulder or hip, a
+ * 2-axis waist or ankle) share one load path:
+ *   bearing   every joint of the body reads the same wrench through it, so it is one load, booked
+ *             once, on the joint it overloaded most (its weakest bearing); the others are relieved.
+ *             Before this a 3-axis shoulder or hip booked one blow's wear three times.
+ *   gear, stop  each axis has its own gear train and stop and carries its own torque: when several
+ *             would break on the same channel, the most overloaded one gives way and that relieves
+ *             the rest, which keep only their wear.
  */
 function resolvePart(ctx: SimContext, st: DamageState, rd: RobotDamage, info: PartInfo): void {
   const t = DAMAGE_TUNING;
   const breaks = [t.gearBreak, t.stopBreak, t.bearingBreak];
   const closing = info.jointIdx.filter((i) => rd.mech[i].inEpisode);
-  for (let ch = 0; ch < 3; ch++) {
+  if (closing.length > 1) {
+    let worst = closing[0];
+    for (const i of closing) if (rd.mech[i].peak[2] > rd.mech[worst].peak[2]) worst = i;
+    for (const i of closing) if (i !== worst) rd.mech[i].peak[2] = 0;
+  }
+  for (let ch = 0; ch < 2; ch++) {
     let worst = -1;
     for (const i of closing) if (rd.mech[i].peak[ch] >= breaks[ch] && (worst < 0 || rd.mech[i].peak[ch] > rd.mech[worst].peak[ch])) worst = i;
     if (worst < 0) continue;

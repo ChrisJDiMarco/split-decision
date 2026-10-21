@@ -62,7 +62,14 @@ export const PUNCH_TUNING = {
  */
 export const STRIKE_P3 = {
   punchRate: 2.5, // the clip's windup plays this fast at aggression 1 (× the human source) when the motors allow
-  cockM: 0.03, // the striking fist draws back this much in the windup (a real, small telegraph)
+  // The striking fist draws back this much in the windup (a real telegraph). A fist launched from its guard meets
+  // his guard 8-15 cm later, inside the distance it needs to come up to speed: 0.07 against 0.03 raised the
+  // straights' peak in sparring 5.4 → 6.0 m/s (32 fights) and the strike drill's 0.3-1.2 m/s per design.
+  cockM: 0.07,
+  // ...× this on a jab: the lead hand's quick shot barely draws back. A light jab's line drawn back 5-7 cm met his
+  // guard glancing, under the damage model's 4 N·s event floor (FIRECRACKER's jab in the strike drill: 13 of 16
+  // booked impacts at 0.03, 4 at 0.05, 3 at 0.07).
+  jabCock: 0.45,
   loadShare: 0.15, // the hips and chest turn this share of the strike's turn away first (loading)
   turnShare: 1, // × the shapes' hip and chest turns
   // The trunk's turn into the blow accelerates steadily to the contact (its speed peaks as it lands),
@@ -70,6 +77,15 @@ export const STRIKE_P3 = {
   // soles, whose friction holds at most μ·m·g·D/2 of yaw (D the feet's spread). This share of that.
   groundYawShare: 0.7,
   footMu: 0.9,
+  // The kinetic chain's lead: the hips and chest start turning into the blow this long before the fist flies
+  // (the fist waits, cocked), so the trunk has the time to come up to speed within the feet's grip by the
+  // contact (½·α·t² of turn, α·t of speed) instead of only the fist's flight (0: the trunk and fist together).
+  // Off: in the strike drill 0.05-0.1 s doubled the torso's yaw rate at the contact (FIRECRACKER's cross 4.9 →
+  // 9.2 rad/s) but moved the fist's peak by under 0.3 m/s, and in sparring it cost pace and falls (the
+  // FIRECRACKER pairings, 32 fights without the gyro-damage coupling: 31 self-falls with 0.05, 25 without;
+  // landed 40.2 against 44.6 per minute).
+  trunkLeadS: 0,
+  jabLead: 0.5, // × trunkLeadS on a jab (it barely turns)
   overrunMax: 1.25, // after the contact the turn runs on at its speed to at most this × its amplitude
   shiftM: 0.07, // the weight goes this far toward him on a power punch...
   jabShift: 0.45, // ...this share of it on a jab
@@ -112,6 +128,7 @@ export const STRIKE_P3 = {
   // a chained combination its pace, the cross 1.06 s after the jab; 0.1 left FIRECRACKER's walk-in jabs
   // short of the much taller target.)
   stepWaitS: 0.2, // (and a windup never waits longer than its own time + lungeWaitS + this)
+  launchHoldS: 0.2, // a blow whose thrower is not fit to throw at the launch (canStrike) waits cocked at most this long past its windup
   kickRate: 2.2, // as punchRate, for kicks
   kickShiftUpper: 0.5, // the clip's first upper-body frame is blended in this far while the weight goes onto the stance foot
   // The aim warp moves the kicking leg (a quarter of the body) off its clip path, and the COM with it:
@@ -521,6 +538,8 @@ interface DrivenPunch extends ClipPose {
   recArm: ArmAngles;
   recoverS: number;
   windupS: number; // the windup's wall time
+  leadS: number; // the trunk turns this long before the fist flies (the kinetic chain, STRIKE_P3.trunkLeadS)
+  tcTrunk: number; // seconds from the trunk's start to the planned contact (the lead plus the fist's flight)
 }
 
 function drivenBegin(env: SkillEnv, run: SkillRun, label: MoveLabel, side: Side): boolean {
@@ -558,6 +577,7 @@ function drivenBegin(env: SkillEnv, run: SkillRun, label: MoveLabel, side: Side)
     sLanded: -1, vLanded: 0, pressed: false, prevFist: [...env.s.fists[played]] as Vec3, tStrike: -1, tLanded: -1, tRecover: -1, heldEnd: 0, recPelvis: 0, recWaist: 0, recShift: 0, recArm: newArmAngles(),
     recoverS: T.recoverS * (1.3 - 0.6 * env.aggression),
     windupS: (T.windupS[label as keyof typeof T.windupS] ?? 0.1) * (1.3 - 0.6 * env.aggression),
+    leadS: 0, tcTrunk: 0.1,
   } satisfies DrivenPunch;
   run.strikers = [`fist_${played}`, `forearm_${played}`];
   const c = run.scratch.clip as DrivenPunch;
@@ -674,7 +694,8 @@ function drivenStep(env: SkillEnv, run: SkillRun, dt: number): ClipStep {
     const g = guard.fist;
     const dir = normalize(sub(aim, g as Vec3), [1, 0, 0]);
     arm.mode = 'fist';
-    arm.fist = [g[0] - dir[0] * T.cockM * k, g[1] - dir[1] * T.cockM * k, g[2] - dir[2] * T.cockM * k];
+    const cock = T.cockM * (c.label === 'jab' ? T.jabCock : 1);
+    arm.fist = [g[0] - dir[0] * cock * k, g[1] - dir[1] * cock * k, g[2] - dir[2] * cock * k];
     arm.pole = [...guard.pole] as Vec3;
     pelvis = -T.loadShare * c.turnPelvis * k;
     waist = -T.loadShare * c.turnWaist * k;
@@ -685,8 +706,13 @@ function drivenStep(env: SkillEnv, run: SkillRun, dt: number): ClipStep {
     // A cocked blow that rode out a catch step (controller.ts, flyThroughCapture 2) flies only from a
     // settled stance (the engine's canStrike); still unsettled when the windup's time is up, it is dropped.
     const caught = (run.scratch.capSeen as number | undefined) ?? 0;
-    const settled = !caught || !!env.engine?.state.canStrike;
-    if (caught && !settled && c.t >= c.windupS + T.lungeWaitS + T.stepWaitS) return { phase: 'windup', u, progress, done: true };
+    // Any blow waits, cocked, for a body fit to throw at the launch (the engine's canStrike: not knocked off its
+    // plan in the windup, no reaction under way, the gyro with momentum in hand), for at most launchHoldS
+    // past its windup, then flies regardless (the fight-clean pass: launched at once from a body a blow had
+    // just knocked about, punches threw their throwers).
+    const fit = !!env.engine?.state.canStrike;
+    if (caught && !fit && c.t >= c.windupS + T.lungeWaitS + T.stepWaitS) return { phase: 'windup', u, progress, done: true };
+    const settled = caught ? fit : fit || c.t >= c.windupS + T.launchHoldS;
     if (settled && stepReady(env, run, c) && p.tau >= c.strikeAt - 1e-3) drivenStrike(env, run, c, arm.fist, arm.pole);
   }
   if (c.stage === 'strike') {
@@ -698,17 +724,20 @@ function drivenStep(env: SkillEnv, run: SkillRun, dt: number): ClipStep {
       c.vLanded = vFist;
     }
     if (run.landed && !T.pressOn && vFist < T.pressKeep * c.vLanded) c.pressed = true;
-    if (!c.pressed) d.step(env, dt);
+    // The trunk leads: for leadS the hips and chest turn into the blow while the fist waits, cocked (in the
+    // torso frame: it turns with the chest), then the drive takes it (proximal to distal, strike-power §2.5).
+    const tTrunk = c.t - c.tStrike;
+    if (!c.pressed && tTrunk >= c.leadS) d.step(env, dt);
     const reach = Math.max(1e-3, Math.min(1, d.sContact));
     u = clamp(d.s / reach, 0, 1);
     // The clip's impact frame lands on the contact: its time follows the drive.
     p.seek(c.strikeAt + (c.impact - c.strikeAt) * u);
     arm.mode = 'joints';
     Object.assign(arm.angles, d.angles);
-    chainTurn(c, d.t, d.tContact, T, trunkScratch);
+    chainTurn(c, tTrunk, c.tcTrunk, T, trunkScratch);
     pelvis = trunkScratch.pelvisYaw;
     waist = trunkScratch.waistYaw;
-    shift = c.shift * (0.35 + 0.65 * minJerk(d.t / Math.max(0.05, d.tContact)));
+    shift = c.shift * (0.35 + 0.65 * minJerk(tTrunk / Math.max(0.05, c.tcTrunk)));
     // A capture step under way (the fist flies on, controller.ts): the weight stays where the step puts it.
     if (env.engine?.state.mode === 'recover') shift = 0;
     progress = 0.3 + 0.4 * u;
@@ -770,7 +799,9 @@ function drivenStrike(env: SkillEnv, run: SkillRun, c: DrivenPunch, fist: Vec3, 
   const spread = Math.hypot(f.l.place.x - f.r.place.x, f.l.place.y - f.r.place.y);
   const tauGround = T.groundYawShare * T.footMu * env.s.mass * GRAVITY * spread / 2;
   const I = Math.max(0.05, env.dyn?.inertia(env.jm.waistYaw) ?? 1);
-  const tc = Math.max(0.05, c.drive.tContact);
+  c.leadS = T.trunkLeadS * (c.label === 'jab' ? T.jabLead : 1);
+  c.tcTrunk = c.leadS + Math.max(0.05, c.drive.tContact);
+  const tc = c.tcTrunk;
   const reach = 0.5 * (tauGround / I) * tc * tc;
   const total = Math.abs(c.turnPelvis + c.turnWaist) * (1 + T.loadShare);
   c.turnK = total > 1e-3 ? Math.min(1, reach / total) : 1;
@@ -818,9 +849,25 @@ function pickLine(env: SkillEnv, side: Side, from: Vec3, zone: Vec3, offsets: Ar
     const u: Vec3 = [d[0] / len, d[1] / len, d[2] / len];
     // The first point on the line within R of his guard (each forearm a segment, elbow to fist).
     let along = len;
-    for (const [fst, elb] of guard) along = Math.min(along, segmentHit(from, u, len, elb, fst, R));
+    segOut.c = null;
+    let obstacle: Vec3 | null = null;
+    for (const [fst, elb] of guard) {
+      const a = segmentHit(from, u, len, elb, fst, R);
+      if (a < along) {
+        along = a;
+        obstacle = segOut.c;
+      }
+    }
     const clean = along >= len - 1e-6;
-    const hit: Vec3 = clean ? surf : [from[0] + u[0] * along, from[1] + u[1] * along, from[2] + u[2] * along];
+    let hit: Vec3 = clean ? surf : [from[0] + u[0] * along, from[1] + u[1] * along, from[2] + u[2] * along];
+    // A blocked line meets his guard at the edge of the fist's sphere: a glancing touch that passes on little
+    // of the fist's speed. ROUTE.square: a blow that must go into his guard goes into it square, the line
+    // through the part of his forearm or glove it meets (a hard shot to the guard drives it back).
+    if (!clean && obstacle && ROUTE.square) {
+      const q = sub(obstacle, from);
+      const lq = Math.hypot(q[0], q[1], q[2]);
+      if (lq > R + 1e-3) hit = [from[0] + (q[0] * (lq - R)) / lq, from[1] + (q[1] * (lq - R)) / lq, from[2] + (q[2] * (lq - R)) / lq];
+    }
     const reachable = Math.hypot(hit[0] - sh[0], hit[1] - sh[1], hit[2] - sh[2]) <= reach + ROUTE.reachSlackM;
     // Reachable lines first; then clean lines, nearest the centre; then the most room before the guard.
     const score = (reachable ? 100 : 0) + (clean ? 10 - Math.hypot(up, side2) : along);
@@ -881,9 +928,22 @@ export const ROUTE = {
   // the shift and a step-in all add a little more or less): only a target well out of reach (a head far
   // above, as FIRECRACKER's at the 2 m iron-age targets) sends the blow elsewhere.
   reachSlackM: 0.1,
+  // 1: a blow every line of which meets his guard goes into the guard square (pickLine). Aimed at the edge of
+  // his guard the fist met it glancing: in the strike drill the fist came in at 4.2-6.7 m/s and the contact's
+  // closing speed was 1.8-3.6 m/s; square, the straights' contact rose to 4.6-5.9 m/s (p50 per design). Off:
+  // in sparring the square shot's recoil came back on the thrower (own-strike falls after 13-24 N·s hits on
+  // his glove), and on the FIRECRACKER pairings it cost 9 self-falls in 32 fights for no contact speed (4.8
+  // against 5.2 m/s without).
+  square: 0,
 };
 
-/** Distance along the ray from `p` (unit `u`, up to `len`) to the first point within `R` of segment a-b; `len` if none. */
+/** segmentHit's sample point that gave the first hit (torso frame), or null. */
+const segOut: { c: Vec3 | null } = { c: null };
+
+/**
+ * Distance along the ray from `p` (unit `u`, up to `len`) to the first point within `R` of segment a-b; `len` if none.
+ * The segment's point it met is left in segOut.c (unchanged when there is none).
+ */
 function segmentHit(p: Vec3, u: Vec3, len: number, a: Vec3, b: Vec3, R: number): number {
   // Sample the segment (a few points are enough at these sizes) and take the earliest sphere hit.
   let first = len;
@@ -895,7 +955,11 @@ function segmentHit(p: Vec3, u: Vec3, len: number, a: Vec3, b: Vec3, R: number):
     if (t <= 0 || t >= first + R) continue;
     const off2 = rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2] - t * t;
     if (off2 > R * R) continue;
-    first = Math.min(first, Math.max(0, t - Math.sqrt(Math.max(0, R * R - off2))));
+    const at = Math.max(0, t - Math.sqrt(Math.max(0, R * R - off2)));
+    if (at < first) {
+      first = at;
+      segOut.c = c;
+    }
   }
   return first;
 }

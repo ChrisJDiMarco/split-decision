@@ -30,13 +30,13 @@ export interface ShellBuild {
 
 /** Shell builds by design id. Designs without one (the iron age) use the catalog's wall model. */
 export const SHELL_BUILDS: Record<string, ShellBuild> = {
-  firecracker: { armor: 'polycarb', frame: 'al6061', armorMm: 2.5, frameMm: 2, headMm: 2.5, fillKgM3: 100, torsoFillKgM3: 245 },
-  savate: { armor: 'polycarb', frame: 'al7075', armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 140 },
+  firecracker: { armor: 'polycarb', frame: 'al6061', armorMm: 2.5, frameMm: 2, headMm: 2.5, fillKgM3: 100, torsoFillKgM3: 166 },
+  savate: { armor: 'polycarb', frame: 'al7075', armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 272 },
   haymaker: {
-    armor: 'uhmw', frame: 'al7075', armorMm: 7, frameMm: 2.5, headMm: 8, torsoFaceMm: 17, fillKgM3: 100, torsoFillKgM3: 75,
+    armor: 'uhmw', frame: 'al7075', armorMm: 7, frameMm: 2.5, headMm: 8, torsoFaceMm: 17, fillKgM3: 100, torsoFillKgM3: 118,
     note: 'UHMW slabs are 15-20 mm on the chest faces and thinner elsewhere, 7 mm averaged over the shells (designs/index.ts): the faces take 17 mm',
   },
-  pylon: { armor: 'carbon', frame: 'al7075', armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 120 },
+  pylon: { armor: 'carbon', frame: 'al7075', armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 268 },
 };
 
 /**

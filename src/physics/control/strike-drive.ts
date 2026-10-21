@@ -19,13 +19,25 @@ import type { JointDynamics } from './strike-path';
 
 /** Tunables (exported so tools can sweep them; the worker never changes them). */
 export const BURST = {
-  damp: 0.15, // servo damping on the striking chain while the blow is on its way, × as built
+  // Servo damping on the striking chain while the blow is on its way, × as built: the drive tracks the
+  // planned velocity (an MIT-mode drive sets Kd every frame) and the motor runs on its torque-speed line,
+  // not against its own servo's drag (Chris, 2026-10-20: run the limbs at the top of the real curve, never a
+  // cautious fraction). The gantry (tools/motor-variants.ts --gantry) puts the fist's ceiling at 0.02: elbow
+  // snap 6.92 / 8.39 / 7.35 / 8.62 m/s against 6.68 / 8.03 / 7.21 / 8.24 at 0.15 (FIRECRACKER / SAVATE /
+  // HAYMAKER / PYLON). Ringing after the contact is what contactS is for.
+  damp: 0.03,
   // Kicks keep their damping: in the strike drill a kicking leg swung with it cut whipped past its
   // aim and threw the thrower (falls per 10 kicks 2.1-2.5 → 3.8-4.4); a punching arm does not.
   kicks: 0,
   followS: 0.06, // ...kept this long into the recovery (the follow-through through contact)
+  // ...and for a blow that has landed, this long after its contact at most (Infinity: as the phases say). The
+  // burst is for getting the fist up to speed: once it has met him, the as-built damping catches the arm's
+  // recoil off the contact instead of letting it ring at the burst's low damping (sparring, 32 fights without
+  // the gyro-damage coupling: the burst at 0.03 to the end of the follow-through 25 self-falls, cut 10 ms after
+  // the contact 17, as at 0.15).
+  contactS: 0.01,
   inertia: 1, // share of M·q̈ fed forward (0: off)
-  headroom: 0.9, // the feed-forward never asks for more than this share of the torque available
+  headroom: 1, // the feed-forward never asks for more than this share of the torque available (the motor model caps the rest)
   maxShiftRad: 0.35,
   accelTauS: 0.008, // the targets' acceleration is low-passed this much (it is a difference of rates)
   // Through a punch the stance hip yaws hold the pelvis at this gain scale (the balance engine's 0.35
@@ -45,9 +57,10 @@ export function strikeSide(run: SkillRun): Side | null {
   return m ? (m[1] as Side) : run.def.side;
 }
 
-/** Is the blow still on its way (windup, strike, or just into the recovery)? */
-export function burstLive(run: SkillRun | null): boolean {
+/** Is the blow still on its way (windup, strike, or just into the recovery)? `sinceContact`: s since it landed (−1: not yet). */
+export function burstLive(run: SkillRun | null, sinceContact = -1): boolean {
   if (!run || !isStrikeSkill(run.def) || (run.def.kind === 'leg' && !BURST.kicks)) return false;
+  if (sinceContact >= BURST.contactS) return false;
   return run.phase === 'windup' || run.phase === 'strike' || (run.phase === 'recover' && run.t < BURST.followS);
 }
 
@@ -82,6 +95,9 @@ export class StrikeDrive {
   private readonly accel: Float64Array;
   private chain: Int16Array | null = null;
   private primed = false;
+  /** The blow whose contact is being timed, and how long ago it landed (s; −1 before). */
+  private landedRun: SkillRun | null = null;
+  private sinceContact = -1;
   /** Diagnostics: control ticks with the burst on. */
   ticks = 0;
 
@@ -122,13 +138,18 @@ export class StrikeDrive {
    * otherwise; the legs' scales are the engine's, rewritten every tick), and through a punch the
    * stance hips' yaw gain (BURST.hipYawKp) for the `planted` legs.
    */
-  impedance(run: SkillRun | null, planted?: (side: Side) => boolean): void {
+  impedance(run: SkillRun | null, planted?: (side: Side) => boolean, dt = 0): void {
     const kv = this.r.mem.dampScale as Float64Array | undefined;
     const kp = this.r.mem.gainScale as Float64Array | undefined;
     this.chain = null;
+    if (run !== this.landedRun) {
+      this.landedRun = run;
+      this.sinceContact = -1;
+    }
+    if (run?.landed) this.sinceContact = this.sinceContact < 0 ? 0 : this.sinceContact + dt;
     if (!kv) return;
     for (const i of this.upper) kv[i] = 1;
-    if (!burstLive(run)) return;
+    if (!burstLive(run, this.sinceContact)) return;
     const side = strikeSide(run!);
     if (!side) return;
     const chain = this.chainOf(run!.def.kind === 'leg' ? 'leg' : 'arm', side);
@@ -178,5 +199,7 @@ export class StrikeDrive {
     this.primed = false;
     this.accel.fill(0);
     this.chain = null;
+    this.landedRun = null;
+    this.sinceContact = -1;
   }
 }

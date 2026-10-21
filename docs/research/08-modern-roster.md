@@ -2,6 +2,90 @@
 
 All four fighters are all-electric, with no hydraulic circuits. The numbers below come from running the project's own `buildHumanoid()` and `compileRobot()` on these specs from a scratch script. The new motors were added to the catalog object in memory only; no repo file was modified.
 
+### As built after the hardware pass (2026-10-20, night)
+
+Two approved changes (Chris, 2026-10-20): FIRECRACKER's hip pitch and hip roll move from the CubeMars AK10-9 (53 N·m) to the RobStride 04 (`qdd.rs04`, 120 N·m, 20.9 rad/s, 1.42 kg), and the four items of docs/design/robot-realism-pass.md. Where this section and the strike-pass table below differ, this section and the code win.
+
+1. **Armature from the real drive train.** Every modern joint's armature is its drive's reflected rotor inertia, rotor × ratio² (or the published reflected figure), the same value the damage model's joint loads use (`reflectedInertia` in `src/robots/catalog.ts`, `modernArmature` in `src/robots/humanoid.ts`), with a 0.004 kg·m² floor that only lifts the neck drives. Before, every joint had the placeholder 0.02 + 0.01 × motor mass. `src/physics/damage/joint-loads.ts` already subtracts `dof_armature` from the mass matrix and uses the catalog's J, so the damage numbers needed no change.
+
+   | Drive | Before | Now (kg·m²) |
+   |---|---|---|
+   | RobStride 00 / 02 (necks) | 0.023 / 0.024 | 0.004 (floor; real 0.0015 / 0.0021) |
+   | RobStride 06 / 2 × RS06 | 0.026 / 0.033 | 0.0049 / 0.0097 |
+   | CubeMars AK10-9 / RobStride 03 | 0.030 / 0.029 | 0.0081 / 0.0081 |
+   | AKE90-8 / RobStride 04 | 0.034 / 0.034 | 0.0216 / 0.0243 |
+   | 2 × AKE90 / 3 × AKE90 | 0.049 / 0.064 | 0.0432 / 0.0648 |
+   | MyActuator X12 (20:1 planetary; HAYMAKER hip roll, waist pitch) | 0.044 | 0.516 |
+
+2. **Drive mass on the body that carries it** (`JointDef.mount`, modern era only, so the iron-age MJCF stays byte-identical). The stator sits on the parent, or the drive is mounted high on a linkage: shoulder pitch in the chest, elbow in the upper arm, hip yaw in the pelvis, knee in the thigh (linkage), both ankle drives in the shin (parallel linkage, as Unitree G1 / H1-2). The other drives stay in the part they move; the neck drive stays in the head (its mass sets the head's, which the head-pop calibration uses).
+3. **The ankles are their own group** (`motors.ankle`, optional `ankleRoll`), sized about 1.5-2 N·m per kg of body: FIRECRACKER the AK10 (1.4 N·m/kg, as before), SAVATE and PYLON one AKE90-8 (170 N·m, 2.0 N·m/kg; the twin stack's 323 N·m was about twice what these feet can use), HAYMAKER one AKE90-8 (1.5 N·m/kg; it was the 2.37 kg X12 planetary).
+4. **Catalog.** `servo.neck` is now run as the RobStride 02 it names: the sheet's 410 rpm (42.9 rad/s) and the `qdd.rs02` thermal numbers, not the made-up 12 rad/s; its mass stays 0.41 kg (the sheet's 405 g rounded, as before), which keeps the iron-age bodies byte-identical. `drive.wheel` is the RobStride 04 as sold, a 9:1 geared hub drive (120 N·m at the output, 20.9 rad/s, 1.42 kg); a truly direct hub on that motor would make about 13 N·m. No design uses it yet.
+
+| Joint group | FIRECRACKER | SAVATE | HAYMAKER | PYLON |
+|---|---|---|---|---|
+| Hip yaw | `qdd.ak10` | `qdd.ake90x2` | `qdd.ake90x3` | `qdd.ake90x2` |
+| Hip pitch | **`qdd.rs04`** (was `qdd.ak10`) | `qdd.ake90x2` | `qdd.ake90x3` | `qdd.ake90x2` |
+| Hip roll | **`qdd.rs04`** (was `qdd.ak10`) | `qdd.ake90x2` | `plan.x12` | `qdd.ake90x2` |
+| Ankles (pitch, roll) | `qdd.ak10` | **`qdd.ake90`** (was `qdd.ake90x2`) | **`qdd.ake90`** (was `plan.x12`) | **`qdd.ake90`** (was `qdd.ake90x2`) |
+| Knees, arms, waist, neck | as the strike pass | as the strike pass | as the strike pass | as the strike pass |
+
+**Mass budget.** The totals stay on the roster spec (within 0.03%): 39.08 / 85.26 / 113.98 / 83.46 kg. The torso fill (pack, compute, wiring) took up the difference: FIRECRACKER's gave the RS04 hips 1.84 kg (245 → 166 kg/m³, 5.67 → 3.84 kg), and the mass the lighter ankles freed went back into the others' packs (SAVATE 140 → 272 kg/m³, +6.0 kg; HAYMAKER 75 → 118, +3.9 kg; PYLON 120 → 268, +6.0 kg; 10.7-12.4 kg of torso internals is a T800-class 1.4 kWh pack plus compute). `SHELL_BUILDS` in `src/physics/damage/durability.ts` mirrors these fills and must take the new torso values (tests/damage/durability.test.ts checks they match).
+
+What moved (compiled part masses, kg, before → after) and what it does to the legs (MuJoCo's joint-space inertia at the stance pose, armature included, kg·m²; standing COM above the soles):
+
+| | FIRECRACKER | SAVATE | HAYMAKER | PYLON |
+|---|---|---|---|---|
+| Foot | 2.14 → 0.22 | 6.30 → 0.50 | 5.44 → 0.70 | 6.41 → 0.61 |
+| Shin | 1.94 → 2.44 | 3.97 → 3.87 | 6.88 → 5.28 | 4.15 → 4.05 |
+| Thigh | 3.97 → 5.35 | 11.22 → 11.22 | 14.97 → 14.97 | 11.17 → 11.17 |
+| Forearm | 1.01 → 0.39 | 2.09 → 0.75 | 3.32 → 1.92 | 2.22 → 0.88 |
+| Pelvis / torso | 1.30 / 12.06 → 3.22 / 12.15 | 2.92 / 19.51 → 8.72 / 28.30 | 4.68 / 29.30 → 13.48 / 36.01 | 2.79 / 18.86 → 8.59 / 27.63 |
+| Hip pitch inertia | 1.26 → 0.70 | 6.29 → 2.33 | 7.02 → 3.23 | 8.03 → 3.07 |
+| Knee inertia | 0.31 → 0.11 | 1.49 → 0.32 | 1.49 → 0.44 | 1.89 → 0.43 |
+| Elbow inertia | 0.077 → 0.046 | 0.243 → 0.182 | 0.378 → 0.320 | 0.313 → 0.241 |
+| Standing COM | 0.679 → 0.705 m | 0.836 → 0.982 m | 0.909 → 1.014 m | 0.909 → 1.075 m |
+
+The feet had been carrying 2-6 kg of drives each, ballast that held the centre of mass 8-17 cm lower than a real build's and tripled the legs' swing inertia. The COM now sits at 54-57% of height, where a person's does.
+
+**Gantry A/B** (`npx tsx tools/motor-variants.ts --gantry`, new in this pass: each design hung on its gantry, controller off, targets stepped at full power; peak speed of the striking surface's centre, glove or knuckle block, foot box, mid-shin; servo damping as built / at the punch burst's 0.15. Same throws before and after, m/s):
+
+| Design | Throw | Before | After |
+|---|---|---|---|
+| FIRECRACKER | straight arm + waist | 3.64 / 4.68 | 3.95 / 4.85 |
+| | hook arm + waist | 3.49 / 5.36 | 3.68 / 5.95 |
+| | elbow snap | 4.69 / 6.04 | 5.27 / 6.68 |
+| | front snap (hip + knee) | 3.92 / 3.92 | 6.79 / 7.89 |
+| | knee snap (thigh level, 90° → straight) | 3.06 / 2.96 | 6.00 / 6.63 |
+| | hip roll lift | 3.57 / 3.91 | 5.95 / 7.06 |
+| SAVATE | straight arm + waist | 5.75 / 7.49 | 6.07 / 8.22 |
+| | elbow snap | 5.67 / 7.34 | 6.19 / 8.03 |
+| | front snap | 6.19 / 6.32 | 10.04 / 11.24 |
+| | knee snap | 4.72 / 4.83 | 8.51 / 9.92 |
+| | hip roll lift | 5.40 / 6.03 | 7.82 / 9.35 |
+| HAYMAKER | straight arm + waist | 5.12 / 5.93 | 5.43 / 6.64 |
+| | elbow snap | 5.79 / 7.03 | 6.03 / 7.21 |
+| | front snap | 7.67 / 8.20 | 10.40 / 11.71 |
+| | knee snap | 6.05 / 6.51 | 8.81 / 10.29 |
+| | hip roll lift | 4.77 / 5.12 | 6.11 / 6.73 |
+| PYLON | straight arm + waist | 5.48 / 6.82 | 5.84 / 7.43 |
+| | hook arm + waist | 6.03 / 6.95 | 7.01 / 7.88 |
+| | elbow snap | 5.89 / 7.55 | 6.41 / 8.24 |
+| | front snap | 6.10 / 6.10 | 10.82 / 11.78 |
+| | knee snap | 4.58 / 4.56 | 8.97 / 10.44 |
+| | hip roll lift | 5.46 / 6.01 | 8.00 / 9.39 |
+
+Knee snaps reach 90% of the extension in 88-98 ms at the burst damping (was 107-140 ms), the knees now turning at 17.5-20.2 rad/s of their 20.9-22 rad/s no-load (was 14.2-17.4). FIRECRACKER's RS04 hips alone (everything else as before) took its front snap from 3.92 to 5.84 / 6.20 m/s, the knee snap from 3.06 / 2.96 to 4.90 / 5.77 and the hip roll lift from 3.57 / 3.91 to 4.83 / 5.54; with the AK10 hips a knee snap's reaction shoved the thigh down at 5 rad/s, which is exactly the "cannot hold the trunk and carry the swing" failure. Arms gained 4-21% from the lighter forearms and real (lower) armature.
+
+**Balance drills** (`tools/balance-drills.ts`, dcm path, the same seeds before and after; the centroid tables rebuilt for the new masses, see below):
+
+- *Approach and hold* (40 fighter-drills per design): no falls before or after, and steadier on every design. Worst tilt beyond the stance lean 5.8 / 4.3 / 3.3 / 10.3° → 3.0 / 2.2 / 2.2 / 1.9° (FIRECRACKER / SAVATE / HAYMAKER / PYLON); DCM error 1.5 / 2.3 / 2.5 / 3.0 → 1.8 / 1.7 / 2.0 / 1.9 cm; worst planned-COP jump 2.0 / 11.3 / 6.5 / 18.5 → 2.7 / 2.0 / 5.6 / 2.0 cm; gyro peak in footwork 0.19 / 0.22 / 0.38 / 0.92 → 0.12 / 0.13 / 0.24 / 0.14; torso rate above 3 Hz 0.11 / 0.06 / 0.06 / 0.07 → 0.06 / 0.04 / 0.05 / 0.04 rad/s. Closing speed 0.42 / 0.54 / 0.53 / 0.53 → 0.46 / 0.54 / 0.50 / 0.50 m/s.
+- *Pushes* of 1.1 m/s from 8 directions, standing / mid-swing walking: FIRECRACKER 8/8, 5/8 → 8/8, 7/8; SAVATE 8/8, 5/8 → 6/8, 8/8; HAYMAKER 8/8, 7/8 → 8/8, 7/8; PYLON 8/8, 2/8 → 5/8, 7/8. Standing ladders (largest ΔV survived, mean of the 8 directions): 1.23 / 1.24 / 1.44 / 1.23 → 1.30 / 1.29 / 1.46 / 1.20 m/s. Pushes from the front are taken far harder (SAVATE 1.5 → 1.9, HAYMAKER 1.6 → 2.1 m/s), but SAVATE at 90° and 225° and PYLON at 45°, 90° and 225° now hold 1.0 m/s (were 1.1-1.3). Putting the twin-AKE90 ankles back does not restore those directions (A/B: 1.23 / 1.16 mean), nor does leaving the freed mass out of the torso (1.29 / 1.23): it is the higher centre of mass meeting a stance controller tuned on the old one.
+- *Strikes* (16 of each at a standing mirror opponent in its guard, seeds 1-16; peak = striker speed before contact, contact = the damage model's closing speed, p50): every punch got faster. FIRECRACKER peak 3.9-4.4 → 4.4-5.1 m/s, contact jab 2.0 → 2.3, cross 1.7 → 2.2, hook 3.6 → 4.6; SAVATE cross 1.9 → 3.3; HAYMAKER cross 2.4 → 3.1, uppercut 3.3 → 3.8; PYLON jab 2.2 → 3.9, cross 2.0 → 4.0 m/s. Kicks: PYLON's front kick lands 12/16, all clean, at a 9.2 m/s peak (was 4/16 at 3.5, with 2 falls); FIRECRACKER's low kick 16/16 at 5.6 m/s contact (14/16 at 4.2); SAVATE's front kick falls 3 → 0. Losses: FIRECRACKER's uppercut now flies past the guard (contact 11 → 3 of 16, its fist 0.8 m/s faster); HAYMAKER's procedural low kick never starts on 10 of 16 (the weight-shift gate times out; was 4), though the ones that go land at 8.4 m/s off a 9.1 m/s foot; SAVATE's hook falls 0 → 2 of 16 and the head kicks of SAVATE and PYLON fall 2 → 3 and 0 → 3 of 16. Falls per 10 kicks: 0 / 1.04 / 0 / 0.42 → 0 / 0.62 / 0 / 0.62; per 50 punches 0 everywhere except SAVATE 2.08 (the two hooks).
+- *Get-ups* (laid face down, on the back and on each side, 3 drops each; standing within 5 s / at all): FIRECRACKER 10, 12 → 8, 12 of 12 (24-trial check: 20/24 → 16/24 within 5 s, back get-ups 7.6 → 3.0 s median); SAVATE 10, 11 → 2, 10; HAYMAKER 4, 10 → 2, 3; PYLON 9, 12 → 3, 4. **This is the pass's big regression.** The clip get-ups stall in the last rise of `getup_back.140_08` (pelvis 0.3 m below the clip, the centre of mass 12-40 cm behind the feet, then it sits back down): the heavy feet and shins they were tuned on had been rocking the body forward over its feet. A/B to find the part: with no drive mounts (everything else of the pass kept) the get-ups come back to 11-12 of 12 at all (5 / 5 / 6 of 12 within 5 s); without only the knee mount 10 / 7 / 9 of 12; without only the ankle mount 10 / 3 / 6; the armature alone changes nothing; the twin-AKE90 ankles back give 10 / 8 / 10. So the knee drive riding in the thigh costs most of it, and the get-up plans (tests/control/getup-search.ts, GETUP_SPEED, the clip timing) need re-tuning on the new bodies; deferring the mounts is one line (`PARENT_MOUNTED` in `src/robots/humanoid.ts`).
+- *Sparring* (`tools/fight-metrics.ts`, 24 fights: savate:haymaker, firecracker:pylon, haymaker:pylon, savate:firecracker × seeds 1-6, 90 s, the sparring brain, dcm): self-inflicted knockdowns 0.88 → 0.52 per fighter per 2 min (19 → 9; FIRECRACKER 1.82 → 0, PYLON 1.05 → 0.25, HAYMAKER 0.58 → 0.54, SAVATE 0.83 → 0.85), self-falls while stepping or standing 12 → 7, approach 0.22 → 0.34 m/s, foot contact speed p50/p90 2.0 / 2.1 → 2.5 / 4.0 m/s, fist 2.7 / 4.6 → 2.9 / 5.0 m/s. But get-up success fell 96% → 50% (PYLON 0 of 3, HAYMAKER 1 of 4), six fights ended on a fighter who could not rise (none before), and landed strikes fell 37.8 → 32.6 per minute (thrown 54.2 → 45.4). FIRECRACKER still loses its head within seconds in both (the head-pop bug, another stage's).
+
+The centroid tables (`tools/mocap/centroid-tables.ts`) were rebuilt for the four, because they carry each design's masses and motors (COM height 0.70 / 0.86 / 0.94 / 0.94 → 0.73 / 1.01 / 1.04 / 1.11 m); run on the old tables the strike drills came out within noise of the new, so the results above are the hardware's. The motion libraries' speed limits were not rebuilt: the runtime takes them from each robot's own motors (`src/physics/control/mocap/library.ts`), and nothing reads the libraries' snapshot of them.
+
 ### As built after the strike pass (2026-10-20)
 
 Chris approved every actuator swap in docs/design/strike-power.md §2.8 (2026-10-06), each to be A/B-tested on the gantry first. The per-design actuator tables further down are the original concept; where they differ, the code (`src/robots/designs/index.ts`, catalog ids in `src/robots/catalog.ts`) and this table win. Every module is a real, published one, or a parallel stack of catalogued modules under the catalog's stack rule (n × peak × 0.95 load share, the module's speed, +0.1 kg coupling per added module).
@@ -431,14 +515,14 @@ Torque, speed and mass are published. The thermal fields are my estimates, scale
 | `plan.x12` | MyActuator RMD-X12-320 (20:1) | 320 | 13.1 | 2.37 | 800 | 0.6 | 2000 | openelab.io RMD-X12-P20 |
 | `plan.x15` | MyActuator RMD-X15-450 (20.25:1) | 450 | 11.3 | 3.5 | 1100 | 0.5 | 2600 | openelab.io RMD-X15-P20 |
 
-The existing `servo.neck` entry is RobStride 02 at 12 rad/s. RobStride lists 410 rpm (42.9 rad/s). That is harmless for a neck, but it's why `qdd.rs02` is a separate entry.
+The `servo.neck` entry used to be the RobStride 02 at a made-up 12 rad/s; since the hardware pass (2026-10-20) it runs at the sheet's 410 rpm (42.9 rad/s) with the `qdd.rs02` thermal numbers. It stays a separate entry so its 0.41 kg (the 405 g rounded) keeps the iron-age bodies byte-identical.
 
 ### Builder gaps (optional; the specs above run without them)
 
 1. **Glove kit.** Add `fist: 'glove'`: a larger striker (about 1.3× `fistHalf`), a foam/leather material, and a softer contact (solref about 0.015–0.02 s). Today the builder hard-codes the fist as AR500.
 2. **New head kits.** `head.triplet` (with a headgear toggle), `head.blade`, `head.hammer` and `head.lozenge`. The existing four heads belong to the current roster.
 3. **Three new skins.** `tangerine`, `aubergine` and `hivis`. Also a per-design race-number override: skins currently carry one fixed number.
-4. **An `ankle` motor slot.** The `leg` slot now also drives both ankle joints. Real ankles are about 45–60 N·m (H1: 45 N·m). With an RS04 ankle, SAVATE, HAYMAKER and PYLON each shed about 4–9 kg.
+4. **An `ankle` motor slot.** Built in the hardware pass (2026-10-20): `motors.ankle` (and an optional `ankleRoll`), sized about 1.5-2 N·m per kg of body; see the hardware-pass section at the top. Real ankles are about 45–60 N·m (H1: 45 N·m).
 5. **An `armScale` parameter.** Builder arms are about 15% shorter than human arms at every scale.
 6. **Per-design battery.** `gyro.ts` assumes one 1.2 kWh pack. A G1-class pack is about 0.45 kWh; the T800's is 71.4 V × 20 Ah ≈ 1.4 kWh.
 

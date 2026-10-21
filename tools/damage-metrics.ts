@@ -7,6 +7,7 @@
 //              (hurt as the victim, or by its own strike), failures by kind (seize, strip, slip,
 //              bend, hyperextension, fault, seal), joints injured (degraded or worse), channel peaks
 //   shells     dents and cracks, by zone; deepest; plastic work
+//   pops       parts knocked off (heads): when, on whom, the blow that did it against the mount
 //   get-ups    seconds from each fall to its get-up
 // The numbers come from the damage model's own ledger (src/physics/damage/state.ts DamageLedger) and
 // from the events, so before/after runs with the same seeds compare like with like.
@@ -141,6 +142,12 @@ export function damageSummary(fights: Array<{ length: number; fighters: Array<{ 
   }
   const f1 = (v: number) => v.toFixed(1);
   const f3 = (v: number) => v.toFixed(3);
+  // Head pops (any part knocked off): when, on whom, and the blow that did it.
+  const pops = fs.flatMap(({ x, d }) => (d.ledger.detaches ?? []).map((p) => ({ design: x.design, ...p })));
+  const popFights = fights.filter((f) => f.fighters.some((x) => (x.damage?.ledger.detaches?.length ?? 0) > 0)).length;
+  const popBy = new Map<string, number>();
+  for (const p of pops) popBy.set(p.design, (popBy.get(p.design) ?? 0) + 1);
+  const firstPops = fights.map((f) => Math.min(...f.fighters.flatMap((x) => (x.damage?.ledger.detaches ?? []).map((p) => p.t)))).filter(Number.isFinite);
   const surfaces = (['fist', 'foot', 'shin', 'other'] as Surface[]).map((s) => {
     const sp = fs.flatMap(({ d }) => (d.strikes.speedBySurface[s] ? [d.strikes.speedBySurface[s]!] : []));
     if (!sp.length) return null;
@@ -156,7 +163,7 @@ export function damageSummary(fights: Array<{ length: number; fighters: Array<{ 
     return nn ? `${f1(qs.reduce((a, q) => a + q.p50 * q.n, 0) / nn)}/${f1(qs.reduce((a, q) => a + q.p90 * q.n, 0) / nn)}` : '-';
   };
   return [
-    'damage (docs/design/strike-power.md §4-5; thresholds PROVISIONAL until after P3):',
+    'damage (docs/design/strike-power.md §4-5; head pops and injury rates calibrated 2026-10-20, ratings are labelled assumptions):',
     `  strike episodes landed ${landed}, clean ${landed ? ((100 * clean) / landed).toFixed(0) : 0}%, push episodes ${pushes}`,
     `  contact speed by surface p50/p90   ${surfaces || '-'}`,
     `  per strike p50/p90: impulse ${pooled('impulse')} N·s, absorbed work ${pooled('workJ')} J, presentation energy ${pooled('energyJ')} J, peak force ${pooled('peakForceKN')} kN`,
@@ -166,6 +173,9 @@ export function damageSummary(fights: Array<{ length: number; fighters: Array<{ 
     `  fights with a joint injury (degraded or worse) ${injuredFights}/${n} (${((100 * injuredFights) / n).toFixed(0)}%), injured joints ${injured} (${f3(injured / n)} per fight)   target 25-50% of full fights`,
     `  fights with a joint wrecked (seize, strip, bend, seal) ${wrecked}/${n}   target <= 1 per 3 fights`,
     `  failures by joint: ${[...byJoint].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ×${v}`).join(', ') || 'none'}`,
+    `  parts knocked off ${pops.length} in ${popFights}/${n} fights (${((100 * popFights) / n).toFixed(0)}%)   target well under 25%, only from the hardest clean blows; by design: ${[...popBy].map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`,
+    `    first pop at ${firstPops.length ? firstPops.map((t) => `${f1(t)} s`).join(', ') : '-'}`,
+    ...pops.map((p) => `    ${p.design} ${p.part} at ${f1(p.t)} s: ${p.cause} ${p.by ?? '?'}, impact ${f1(p.impactNs)} N·s (window ${f1(p.windowNs)}) at ${f1(p.speed)} m/s, needed ${f1(p.thresholdNs)} (mount ${p.mount.toFixed(2)})`),
     `  dents per fight by design: ${[...dentsBy].map(([k, v]) => `${k} ${f1(v.dents / v.n)}${v.cracks ? ` (${v.cracks} cracks)` : ''}`).join(', ')}`,
     `  get-up seconds median/p90 ${getups.length ? `${f1(pick(getups, 0.5))}/${f1(pick(getups, 0.9))} (${getups.length})` : '-'}`,
   ];

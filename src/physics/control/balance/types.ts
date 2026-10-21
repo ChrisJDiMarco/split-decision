@@ -58,6 +58,14 @@ export interface BalanceState {
   xiTouch: P2;
   /** Seconds to that touchdown (-1 with no swing in the air). */
   touchIn: number;
+  /**
+   * Why an arm strike may not start now ('' when it may): the reaction under way ('absorb', 'recover',
+   * 'brace'), 'gyro reserve', 'torso rate', 'step' (a foot in the air whose landing is not the blow's),
+   * 'catch step', 'DCM near edge', 'DCM off plan' (diagnostics: tests/balance/pace-recorder.ts).
+   */
+  strikeBlock?: string;
+  /** Why a kick may not start now ('' when it may): as strikeBlock, plus 'moving', 'DCM outside', 'feet not flat'. */
+  kickBlock?: string;
 }
 
 /** What the tools read every control tick (both modes fill it). */

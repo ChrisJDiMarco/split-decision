@@ -24,6 +24,19 @@
 //              touched the canvas first (canvas-contact.ts) and when, and the get-up after (first movement, stable)
 //   getups     (strike-power.md §4.6) laid face down, on its back and on each side, dropped three ways: standing
 //              within 5 s, first movement to stable standing against the per-design targets
+//   fight      (the fight-clean pass) fight conditions the other drills lack, every fall dissected by
+//              tests/balance/fall-anatomy.ts (what started it, catch steps, brace, gyro):
+//                exchange  two fighters 1.1 m apart in the drill world (no cage), both on the sparring
+//                          stand-in's intents every 0.5 s: guard on guard, blows both ways, strikes from
+//                          a step, combos of single strikes, absorbs, for --fight-s seconds
+//                press     one fighter walks into the other's guard and ties him up (clinch, aggression 0.9)
+//                          while he holds his guard: body, guard and leg contact, the pushes of the clinch range
+//                replay    a sparring fight in the real arena (cage included), re-run deterministically to
+//                          the recorded falls: each fall's anatomy and a state line every 0.1 s over the
+//                          FIGHT_REPLAY_LEAD_S before it (--pairs savate:haymaker --seeds 1,2)
+//              per trial: falls (self: no blow of his ≥ 20 N·s in the 1.5 s before), catch steps, time in
+//              'recover', time with no sole pressing on the canvas, leg-on-leg contact, strikes, and the
+//              balance metrics (§8) of both fighters
 //
 // usage:
 //   npx tsx tools/balance-drills.ts [--drills approach,push,shuffle,strikes] [--designs firecracker,savate,haymaker,pylon]
@@ -31,6 +44,8 @@
 //                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance] [--ladder-from 0.6]
 //   npx tsx tools/balance-drills.ts --drills hits,falls,getups [--impulses 20,40,73] [--hit-parts torso,head]
 //                                   [--hit-situations stance,walk] [--fall-dvs 2.2] [--getup-seeds 3] [--getup-orients face_down,back]
+//   npx tsx tools/balance-drills.ts --drills fight [--scenarios exchange,press] [--pairs savate:haymaker,...] [--seeds 1,2,...]
+//                                   [--fight-s 12]       fight conditions (replay: --scenarios replay --fight-s 90)
 //   npx tsx tools/balance-drills.ts --summary <saved.json>   re-print a saved run's summary
 //   npx tsx tools/balance-drills.ts --job '<json>'        one drill in this process, JSON on stdout
 //   --tune BALANCE_TUNING.stanceAnkleKp=1,FOOTWORK_TUNING.walkGapM=0.03   A/B a tuning table value
@@ -64,10 +79,12 @@ import { IMPEDANCE } from '../src/physics/control/balance/impedance';
 import { REACTIONS } from '../src/physics/control/balance/reactions';
 import { BEHAVIOURS } from '../src/physics/control/balance/behaviours';
 import { GETUP_SPEED } from '../src/physics/control/getup-speed';
+import { TRUNK_LIMIT } from '../src/physics/control/balance/trunk-limit';
 import { KICK_DRIVE, KICK_RBAL, KICK_SET, ROUTE, STRIKE_P3 } from '../src/physics/control/mocap/strikes';
 import { STRIKE_PATH } from '../src/physics/control/strike-path';
 import { LUNGE } from '../src/physics/control/balance/index';
-import { MOCAP_KICKS } from '../src/physics/control/mocap/skills';
+import { ENGINE_KICK, MOCAP_KICKS } from '../src/physics/control/mocap/skills';
+import { KICK_CONTACT } from '../src/physics/control/skills/kicks';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
 import { BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
@@ -75,6 +92,12 @@ import { CanvasContacts, contactClass } from '../tests/balance/canvas-contact';
 import { polygonDistance } from '../src/physics/control/support';
 import { applyMotorVariants } from './motor-variants';
 import { comPos, intent, isDown, makeSim, type Sim } from '../tests/control/helpers';
+import { FallAnatomy, summarizeAnatomy, type FallAnatomyRec } from '../tests/balance/fall-anatomy';
+import { sparringIntent } from '../src/physics/control';
+import { anyContact } from '../src/physics/control/contacts';
+import { buildContext } from '../src/physics/runtime';
+import { compileWorld } from '../src/physics/world';
+import type { MatchSetup } from '../src/core/types';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(HERE, '..', 'tests', 'balance', '.out');
@@ -97,7 +120,10 @@ export type Job =
   | { kind: 'strike'; design: string; skill: SkillId; trial: number; seed: number }
   | { kind: 'hit'; design: string; part: 'torso' | 'head'; impulse: number; dir: number; situation: Situation; seed: number }
   | { kind: 'fall'; design: string; dir: number; dv: number; seed: number }
-  | { kind: 'getup'; design: string; orient: Orient; seed: number };
+  | { kind: 'getup'; design: string; orient: Orient; seed: number }
+  | { kind: 'fight'; scenario: FightScenario; design: string; opp: string; seed: number; seconds: number };
+
+export type FightScenario = 'exchange' | 'press' | 'replay';
 
 export interface ApproachOut { kind: 'approach'; job: Job; robots: BalanceMetrics[]; controlUs: number; blowup: boolean }
 export interface PushOut { kind: 'push'; job: Job; survived: boolean; steps: number; stableAfter: number; satPeak: number; applied: boolean }
@@ -159,7 +185,23 @@ export interface StrikeOut {
   step?: boolean; // --approach: the blow started from a step
   lunge?: boolean; // the blow stepped in from the stance (BalanceEngine.requestLunge)
 }
-export type DrillOut = ApproachOut | PushOut | ShuffleOut | StrikeOut | ReactOut | GetupOut;
+/** One fighter through a fight drill (the seconds are its time on its feet). */
+export interface FightFighter {
+  design: string;
+  upS: number;
+  recoverS: number; // reactions in 'recover'
+  airS: number; // neither sole pressing on the canvas
+  legContactS: number; // his feet, shins or thighs touching ours
+  captures: number;
+  thrown: number;
+  landed: number; // the runner saw it touch him and the damage model booked an impact from it
+  falls: Array<{ t: number; self: boolean; maxHitNs: number; anatomy: FallAnatomyRec | null }>;
+  metrics: BalanceMetrics;
+  /** replay: state lines before each fall. */
+  narrative?: string[];
+}
+export interface FightOut { kind: 'fight'; job: Job; seconds: number; fighters: [FightFighter, FightFighter]; blowup: boolean }
+export type DrillOut = ApproachOut | PushOut | ShuffleOut | StrikeOut | ReactOut | GetupOut | FightOut;
 
 // ------------------------------------------------------------------ one drill (child process)
 
@@ -771,9 +813,207 @@ async function strikeTrial(job: Extract<Job, { kind: 'strike' }>): Promise<Strik
   return out;
 }
 
-const TABLES: Record<string, Record<string, unknown>> = { REACTIONS, BEHAVIOURS, GETUP_SPEED, BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE, PACE, BURST, STRIKE_P3, MOCAP_KICKS, KICK_GATE, KICK_DRIVE, KICK_RBAL, KICK_SET, ROUTE, STRIKE_PATH, LUNGE, INVERSE_DYNAMICS, IMPEDANCE };
+const TABLES: Record<string, Record<string, unknown>> = { REACTIONS, BEHAVIOURS, GETUP_SPEED, BALANCE_TUNING, FOOTWORK_TUNING, STEP_ADJUST, COM_REF, GYRO_POLICY, INERTIA, COUNTER_YAW, YAW_TUNING, MOCAP_STEPS, MOCAP_STYLE, PACE, BURST, STRIKE_P3, MOCAP_KICKS, KICK_CONTACT, ENGINE_KICK, KICK_GATE, KICK_DRIVE, KICK_RBAL, KICK_SET, ROUTE, STRIKE_PATH, LUNGE, INVERSE_DYNAMICS, IMPEDANCE, TRUNK_LIMIT };
 
 /** SD_TUNE='TABLE.key=value,...': set numeric tunables before a drill (A/B runs). */
+// ------------------------------------------------------------------ fight conditions (the fight-clean pass)
+
+const FIGHT_INTENT_S = 0.5; // the sparring stand-in decides this often (as in tools/fight-metrics.ts)
+const FIGHT_SELF_NS = 20; // a fall with no blow of his this big in the window before is self-inflicted
+const FIGHT_SELF_WINDOW_S = 1.5;
+const FIGHT_REPLAY_LEAD_S = 3; // replay: state lines this long before each fall
+const FIGHT_GAP_M = 1.1; // exchange and press start this far apart (COM to COM, about the edge of range)
+
+function newFighter(design: string): Omit<FightFighter, 'metrics'> {
+  return { design, upS: 0, recoverS: 0, airS: 0, legContactS: 0, captures: 0, thrown: 0, landed: 0, falls: [] };
+}
+
+/** The arena world of a real fight (cage, canvas), both fighters released at their corners. */
+async function arenaContext(red: string, blue: string, seed: number): Promise<SimContext> {
+  const setup: MatchSetup = {
+    fighters: [{ design: red, skin: 'factory', plan: '', temperament: 1 }, { design: blue, skin: 'neon', plan: '', temperament: 1 }],
+    seed, timestep: 0.001, reactionDelayS: 0.3,
+  };
+  const loadMujoco = (await import('@mujoco/mujoco')).default;
+  const ctx = buildContext(await loadMujoco(), compileWorld(setup), setup);
+  for (const sys of SYSTEMS) sys.init?.(ctx);
+  for (const r of ctx.robots) ctx.setEqActive(ctx.eqIndex(r.compiled.gantryWeld), false);
+  ctx.released = true;
+  return ctx;
+}
+
+async function fightTrial(job: Extract<Job, { kind: 'fight' }>): Promise<FightOut> {
+  let ctx: SimContext;
+  let stepOnce: () => void;
+  let dispose = (): void => {};
+  if (job.scenario === 'replay') {
+    ctx = await arenaContext(job.design, job.opp, job.seed);
+    const c0 = ctx;
+    stepOnce = () => {
+      for (const sys of SYSTEMS) sys.pre?.(c0);
+      c0.mj.mj_step(c0.model, c0.data);
+      c0.tick++;
+      c0.time += c0.dt;
+      for (const sys of SYSTEMS) sys.post?.(c0);
+    };
+    dispose = () => {
+      c0.data.delete();
+      c0.model.delete();
+    };
+  } else {
+    const h = FIGHT_GAP_M / 2;
+    const sim = await makeSim({ design: job.design, x: -h, y: 0, yaw: 0 }, { design: job.opp, x: h, y: 0, yaw: Math.PI }, { seed: job.seed, systems: SYSTEMS });
+    sim.seconds(0.5);
+    sim.release(0);
+    sim.release(1);
+    sim.seconds(0.8, () => { sim.ctx.events.length = 0; });
+    ctx = sim.ctx;
+    stepOnce = () => sim.step();
+    dispose = () => sim.dispose();
+
+  }
+  const ctl = ctx.robots.map((r) => controllerOf(r)!);
+  const recs = [new BalanceRecorder(ctx, 0, 0.3), new BalanceRecorder(ctx, 1, 0.3)];
+  const anatomy = new FallAnatomy(ctx);
+  const fighters = [newFighter(job.design), newFighter(job.opp)];
+  const impacts: Array<{ t: number; victim: number; striker: number; n: number }> = [];
+  const runs: Array<{ run: unknown; touched: boolean; impact: boolean } | null> = [null, null];
+  const capt0 = ctl.map((c) => c.gait.captureSteps);
+  const geomOwner = new Map<number, { c: number; part: string }>();
+  for (const r of ctx.robots) for (const [id, part] of r.parts) for (const g of part.geoms) geomOwner.set(g, { c: r.corner, part: id });
+  const feet = ctx.robots.map((r) => ({ l: new Set(r.parts.get('foot_l')!.geoms), r: new Set(r.parts.get('foot_r')!.geoms) }));
+  const ring: string[][] = [[], []];
+  const narrative: string[][] = [[], []];
+  const intentEvery = Math.round(FIGHT_INTENT_S / ctx.dt);
+  const n = Math.round(job.seconds / ctx.dt);
+  const t0 = ctx.time;
+  let blowup = false;
+  for (let i = 0; i < n; i++) {
+    if (i % intentEvery === 0) {
+      for (const r of ctx.robots) {
+        if (job.scenario === 'press') r.intent = r.corner === 0 ? intent('clinch', 'torso', 0.9) : intent('guard', 'head', 0.5);
+        else r.intent = sparringIntent(ctx, r);
+      }
+    }
+    stepOnce();
+    for (const rec of recs) rec.sample(ctx);
+    anatomy.sample(ctx);
+    for (const e of ctx.events as SimEvent[]) {
+      if (e.kind === 'impact' && e.striker !== null && e.victim !== null && e.striker !== e.victim) {
+        impacts.push({ t: ctx.time, victim: e.victim, striker: e.striker, n: e.impulseNs });
+        const cur = runs[e.striker];
+        if (cur && !e.push) cur.impact = true;
+      } else if (e.kind === 'fall') {
+        const c = e.corner;
+        let maxHit = 0;
+        for (const h of impacts) if (h.victim === c && h.t >= ctx.time - FIGHT_SELF_WINDOW_S) maxHit = Math.max(maxHit, h.n);
+        fighters[c].falls.push({ t: ctx.time - t0, self: maxHit <= FIGHT_SELF_NS, maxHitNs: maxHit, anatomy: null });
+        if (job.scenario === 'replay') narrative[c].push(`--- fall at ${(ctx.time - t0).toFixed(2)} s (${maxHit <= FIGHT_SELF_NS ? 'self' : `hit ${maxHit.toFixed(0)} N·s`}):`, ...ring[c]);
+      }
+    }
+    ctx.events.length = 0;
+    if (i % 50 === 0 && blownUp(ctx)) {
+      blowup = true;
+      break;
+    }
+    if (ctx.tick % 2) continue;
+    // Floor pressure under each foot and leg-on-leg contact, one contact scan per control tick.
+    const floor = [{ l: 0, r: 0 }, { l: 0, r: 0 }];
+    let legs = false;
+    const d = ctx.data;
+    const nc = d.ncon as number;
+    if (nc) {
+      const cons = d.contact;
+      const efc = d.efc_force as Float64Array;
+      try {
+        for (let k = 0; k < nc; k++) {
+          const con = cons.get(k);
+          const g1 = con.geom1 as number, g2 = con.geom2 as number, adr = con.efc_address as number;
+          con.delete();
+          const a = geomOwner.get(g1), b = geomOwner.get(g2);
+          if (a && b) {
+            if (a.c !== b.c && /^(foot|shin|thigh)_/.test(a.part) && /^(foot|shin|thigh)_/.test(b.part)) legs = true;
+            continue;
+          }
+          const f = efc[adr];
+          if (!(f > 0)) continue;
+          for (const c of [0, 1]) for (const sd of ['l', 'r'] as const) if (feet[c][sd].has(g1) || feet[c][sd].has(g2)) floor[c][sd] += f;
+        }
+      } finally {
+        cons.delete();
+      }
+    }
+    const dt = ctx.dt * 2;
+    for (const c of [0, 1]) {
+      const k = ctl[c];
+      const r = ctx.robots[c];
+      const f = fighters[c];
+      const run = k.skills.run;
+      if (run !== (runs[c]?.run ?? null)) {
+        if (runs[c]?.touched && runs[c]?.impact) f.landed++; // the runner saw the touch and the damage model an impact
+        runs[c] = run && (run.def.kind === 'arm' || run.def.kind === 'leg') ? { run, touched: false, impact: false } : null;
+        if (runs[c]) f.thrown++;
+      }
+      if (runs[c] && run?.landed) runs[c]!.touched = true;
+      const up = !r.down && !k.getUp.active && !k.rising;
+      if (!up) continue;
+      f.upS += dt;
+      if (k.engine?.reactions.mode === 'recover') f.recoverS += dt;
+      if (floor[c].l <= 0 && floor[c].r <= 0) f.airS += dt;
+      if (legs) f.legContactS += dt;
+      if (job.scenario === 'replay' && ctx.tick % 100 === 0) {
+        const s = k.lastSense, e = k.engine;
+        if (s && e) {
+          const o = ctl[1 - c].lastSense ?? s;
+          const dist = Math.hypot(o.com[0] - s.com[0], o.com[1] - s.com[1]);
+          const ux = (o.com[0] - s.com[0]) / Math.max(1e-6, dist), uy = (o.com[1] - s.com[1]) / Math.max(1e-6, dist);
+          const sup = k.gait.supportPolygon();
+          const out = sup.length >= 3 ? polygonDistance(sup, e.state.xi).d : NaN;
+          ring[c].push(`${(ctx.time - t0).toFixed(2)} ${(run ? `${run.def.id}/${run.phase}` : r.skill).padEnd(16)} ${k.gait.phase.padEnd(6)} ${e.reactions.mode.padEnd(7)} v ${f2(s.comVel[0] * ux + s.comVel[1] * uy)}/${f2(-s.comVel[0] * uy + s.comVel[1] * ux)} ξ err ${f2(Math.hypot(e.state.xi[0] - e.state.xiRef[0], e.state.xi[1] - e.state.xiRef[1]))} out ${f2(out)} gyro ${f2(k.gyro?.saturation ?? 0)}/${f2(r.gyro?.health ?? 0)} dist ${f2(dist)} him ${ctx.robots[1 - c].skill}`);
+          if (ring[c].length > FIGHT_REPLAY_LEAD_S * 10) ring[c].shift();
+        }
+      }
+    }
+    if (job.scenario === 'replay' && ctx.robots.some((r) => r.koReason)) break;
+  }
+  for (const c of [0, 1]) {
+    fighters[c].captures = ctl[c].gait.captureSteps - capt0[c];
+    fighters[c].falls.forEach((fl, i) => { fl.anatomy = anatomy.falls[c][i] ?? null; });
+  }
+  const out: FightOut = {
+    kind: 'fight', job, seconds: ctx.time - t0, blowup,
+    fighters: [0, 1].map((c) => ({ ...fighters[c], metrics: recs[c].result(), ...(job.scenario === 'replay' ? { narrative: narrative[c] } : {}) })) as [FightFighter, FightFighter],
+  };
+  dispose();
+  return out;
+}
+
+export function summarizeFight(outs: FightOut[], scenario: FightScenario): string[] {
+  const rs = outs.filter((o) => (o.job as Extract<Job, { kind: 'fight' }>).scenario === scenario);
+  if (!rs.length) return [];
+  const lines = [`fight drill: ${scenario} (${rs.length} trials${rs.some((o) => o.blowup) ? ', BLOW-UPS' : ''})`];
+  const byDesign = new Map<string, FightFighter[]>();
+  for (const o of rs) for (const f of o.fighters) byDesign.set(f.design, [...(byDesign.get(f.design) ?? []), f]);
+  const all = rs.flatMap((o) => o.fighters);
+  const row = (name: string, fs: FightFighter[]): string => {
+    const up = fs.reduce((a, f) => a + f.upS, 0);
+    const min = Math.max(1e-6, up / 60);
+    const self = fs.reduce((a, f) => a + f.falls.filter((x) => x.self).length, 0);
+    const hit = fs.reduce((a, f) => a + f.falls.filter((x) => !x.self).length, 0);
+    const m = fs.map((f) => f.metrics);
+    const avg = (k: keyof BalanceMetrics) => mean(m.map((x) => x[k] as number).filter(Number.isFinite));
+    return `  ${name.padEnd(11)} self-falls ${f2((self / min) * 2)}/2min (${self}), with a hit ${hit}; catch steps ${f1(fs.reduce((a, f) => a + f.captures, 0) / min)}/min; ` +
+      `recovering ${pct(fs.reduce((a, f) => a + f.recoverS, 0) / Math.max(1e-6, up))}, no sole on the canvas ${pct(fs.reduce((a, f) => a + f.airS, 0) / Math.max(1e-6, up))}, ` +
+      `leg contact ${pct(fs.reduce((a, f) => a + f.legContactS, 0) / Math.max(1e-6, up))}; strikes ${fs.reduce((a, f) => a + f.landed, 0)}/${fs.reduce((a, f) => a + f.thrown, 0)} landed; ` +
+      `torso rate ${f2(avg('torsoRateLow'))}/${f2(avg('torsoRateHigh'))}, tilt peak ${f1(avg('tiltPeakDeg'))}°, DCM err ${f1(avg('dcmErrCm'))} cm, COP jump ${f1(maxOf(m.map((x) => x.copJumpCm)))} cm, gyro ${f2(avg('gyroSatFootwork'))}`;
+  };
+  for (const [d, fs] of byDesign) lines.push(row(d, fs));
+  lines.push(row('all', all));
+  lines.push(...summarizeAnatomy(all.flatMap((f) => f.falls.filter((x) => x.self && x.anatomy).map((x) => x.anatomy!))));
+  if (scenario === 'replay') for (const o of rs) for (const f of o.fighters) if (f.narrative?.length) lines.push(`  ${f.design} in ${(o.job as Extract<Job, { kind: 'fight' }>).design} v ${(o.job as Extract<Job, { kind: 'fight' }>).opp} seed ${o.job.seed}:`, ...f.narrative.map((l) => `    ${l}`));
+  return lines;
+}
+
 function applyTune(spec: string | undefined): void {
   if (!spec) return;
   for (const item of spec.split(',')) {
@@ -797,6 +1037,7 @@ export async function runJob(job: Job): Promise<DrillOut> {
     case 'hit': return hitTrial(job);
     case 'fall': return fallTrial(job);
     case 'getup': return getupTrial(job);
+    case 'fight': return fightTrial(job);
   }
 }
 
@@ -1095,6 +1336,14 @@ async function main(): Promise<void> {
       const orients = arg('getup-orients', 'face_down,back,side_l,side_r').split(',') as Orient[];
       for (const orient of orients) for (let k = 1; k <= n; k++) add({ kind: 'getup', design, orient, seed: k });
     }
+    if (drills.includes('fight')) {
+      // --pairs red:blue,... (default: this design against itself), --scenarios, --seeds, --fight-s.
+      const pairs = arg('pairs', '').split(',').filter(Boolean).map((x) => x.split(':') as [string, string]).filter(([a]) => a === design);
+      const scen = arg('scenarios', 'exchange,press').split(',') as FightScenario[];
+      const seeds = arg('seeds', '1,2,3,4').split(',').map(Number);
+      const secs = Number(arg('fight-s', '12'));
+      for (const [a, b] of pairs.length ? pairs : [[design, design] as [string, string]]) for (const scenario of scen) for (const sd of seeds) add({ kind: 'fight', scenario, design: a, opp: b, seed: sd, seconds: secs });
+    }
     if (drills.includes('push')) {
       // --dvs 1.0,1.1,1.2: every direction at each of these shoves (no ladder): a survival rate around a
       // level, which one ladder (stopped at its first fall) or one level cannot give.
@@ -1136,6 +1385,10 @@ async function main(): Promise<void> {
     lines.push(...summarizeHits(react, design));
     lines.push(...summarizeFalls(react, design));
     lines.push(...summarizeGetups(results.filter((o): o is GetupOut => o.kind === 'getup'), design));
+  }
+  if (drills.includes('fight')) {
+    const fo = results.filter((o): o is FightOut => o.kind === 'fight');
+    for (const sc of ['exchange', 'press', 'replay'] as const) lines.push(...summarizeFight(fo, sc));
   }
   // Phase 4 gate over all designs (§9): recovery steps, time to stable, brace before contact, head first.
   const react = results.filter((o): o is ReactOut => (o.kind === 'hit' || o.kind === 'fall') && o.applied);

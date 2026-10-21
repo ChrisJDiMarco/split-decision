@@ -35,7 +35,10 @@ const FIRECRACKER_SPEC: HumanoidSpec = {
   frame: 'al6061',
   // Strike pass (docs/design/strike-power.md §2.8, approved 2026-10-06; gantry A/B in docs/research/
   // 08-modern-roster.md): the shoulder pitch and elbow were torque-bound through every punch.
-  motors: { leg: 'qdd.ak10', knee: 'qdd.rs04', arm: 'qdd.rs06', elbow: 'qdd.rs06', waist: 'qdd.rs03', neck: 'qdd.rs00', shoulderPitch: 'qdd.ak10' },
+  // Hardware pass (2026-10-20, Chris approved): hip pitch and roll on the RobStride 04 (120 N·m); the
+  // AK10's 53 N·m could not hold the trunk and carry a swing's reaction (on the gantry a knee snap shoved
+  // the thigh down at 5 rad/s). The ankles are their own group, still the AK10 (1.4 N·m per kg of body).
+  motors: { leg: 'qdd.ak10', knee: 'qdd.rs04', arm: 'qdd.rs06', elbow: 'qdd.rs06', waist: 'qdd.rs03', neck: 'qdd.rs00', shoulderPitch: 'qdd.ak10', hipPitch: 'qdd.rs04', hipRoll: 'qdd.rs04', ankle: 'qdd.ak10' },
   fist: 'block',
   head: 'visor',
   gyro: { maxTorqueNm: 70, momentumNms: 24, massKg: 3.1 }, // mgh ≈ 250 N·m: 0.28·mgh, 8% of the body
@@ -49,8 +52,9 @@ const FIRECRACKER_SPEC: HumanoidSpec = {
   palette: { primary: '#f26b1d', secondary: '#2a2826', accent: '#fff1dc', finish: 'gloss' },
   weightClass: 'bantam',
   era: 'modern',
-  // 2.5 mm polycarbonate covers (production-humanoid practice), a dense torso holding the pack.
-  shell: { armorMm: 2.5, frameMm: 2, headMm: 2.5, fillKgM3: 100, torsoFillKgM3: 245, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
+  // 2.5 mm polycarbonate covers (production-humanoid practice), a dense torso holding the pack. The
+  // torso fill (pack, compute, wiring) gave the RS04 hips their 1.84 kg: 245 → 166 kg/m³, 5.67 → 3.84 kg.
+  shell: { armorMm: 2.5, frameMm: 2, headMm: 2.5, fillKgM3: 100, torsoFillKgM3: 166, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
 };
 export const FIRECRACKER = buildHumanoid(FIRECRACKER_SPEC);
 
@@ -66,7 +70,9 @@ const SAVATE_SPEC: HumanoidSpec = {
   frame: 'al7075',
   // Strike pass (strike-power.md §2.8): AKE90 shoulder pitch, a twin-AKE90 waist yaw (the chest
   // turned 6-7 of 21 rad/s on the RS04) and a twin-RS06 elbow (50 rad/s: a human elbow extends at 22-41).
-  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs04', elbow: 'qdd.rs06x2', waist: 'qdd.rs04', neck: 'servo.neck', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2' },
+  // Hardware pass (robot-realism-pass.md §3): the ankles are their own AKE90 (170 N·m, 2.0 N·m per kg of
+  // body; the twin stack's 323 N·m was twice what an ankle can use on this foot).
+  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs04', elbow: 'qdd.rs06x2', waist: 'qdd.rs04', neck: 'servo.neck', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2', ankle: 'qdd.ake90' },
   fist: 'block',
   head: 'slit',
   gyro: { maxTorqueNm: 140, momentumNms: 49, massKg: 6.5 }, // mgh ≈ 695 N·m: 0.2·mgh
@@ -79,7 +85,8 @@ const SAVATE_SPEC: HumanoidSpec = {
   palette: { primary: '#3d1f4f', secondary: '#b9bcc0', accent: '#e9e2d0', finish: 'satin' },
   weightClass: 'middle',
   era: 'modern',
-  shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 140, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
+  // The 6.0 kg the lighter ankles freed went back into the torso fill (a T800-class pack): 140 → 272 kg/m³.
+  shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 272, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
 };
 export const SAVATE = buildHumanoid(SAVATE_SPEC);
 
@@ -97,8 +104,9 @@ const HAYMAKER_SPEC: HumanoidSpec = {
   // waist yaw, triple-AKE90 hip pitch and yaw (the X12 ran kicks at 0.75 of its 13.1 rad/s). Elbow
   // after the gantry A/B: the AKE90 (170 N·m, 22 rad/s) snaps as fast as the twin RS06 on this arm (7.05
   // vs 7.01 m/s) and pushes a 114 kg body up off the canvas (get-ups 7/8 against 5/6 and the RS04's
-  // 5/8). Hip roll, the ankles and the waist pitch stay on the X12.
-  motors: { leg: 'plan.x12', knee: 'qdd.ake90x3', arm: 'qdd.rs04', elbow: 'qdd.ake90', waist: 'plan.x12', neck: 'servo.neck', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2', hipPitch: 'qdd.ake90x3', hipYaw: 'qdd.ake90x3' },
+  // 5/8). Hip roll and the waist pitch stay on the X12. Hardware pass (robot-realism-pass.md §3): the
+  // ankles moved off the X12 to their own AKE90 (170 N·m, 1.5 N·m per kg of body, backdrivable, 22 rad/s).
+  motors: { leg: 'plan.x12', knee: 'qdd.ake90x3', arm: 'qdd.rs04', elbow: 'qdd.ake90', waist: 'plan.x12', neck: 'servo.neck', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2', hipPitch: 'qdd.ake90x3', hipYaw: 'qdd.ake90x3', ankle: 'qdd.ake90' },
   fist: 'block',
   head: 'slit',
   gyro: { maxTorqueNm: 195, momentumNms: 68, massKg: 9.1 }, // mgh ≈ 950 N·m: 0.2·mgh, the biggest core
@@ -113,7 +121,8 @@ const HAYMAKER_SPEC: HumanoidSpec = {
   weightClass: 'heavy',
   era: 'modern',
   // UHMW slabs are 15-20 mm on the chest faces and thinner elsewhere: 7 mm averaged over the shells.
-  shell: { armorMm: 7, frameMm: 2.5, headMm: 8, fillKgM3: 100, torsoFillKgM3: 75, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
+  // The 3.9 kg the AKE90 ankles freed went into the torso fill (pack): 75 → 118 kg/m³.
+  shell: { armorMm: 7, frameMm: 2.5, headMm: 8, fillKgM3: 100, torsoFillKgM3: 118, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
 };
 export const HAYMAKER = buildHumanoid(HAYMAKER_SPEC);
 
@@ -128,8 +137,9 @@ const PYLON_SPEC: HumanoidSpec = {
   armor: 'carbon',
   frame: 'al7075',
   // Strike pass (strike-power.md §2.8): AKE90 shoulder pitch, twin-RS06 elbow (the RS06 ran at
-  // 0.27-0.43 of no-load, torque-bound), twin-AKE90 waist yaw.
-  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs03', elbow: 'qdd.rs06x2', waist: 'qdd.rs04', neck: 'qdd.rs00', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2' },
+  // 0.27-0.43 of no-load, torque-bound), twin-AKE90 waist yaw. Hardware pass (robot-realism-pass.md §3):
+  // the ankles are their own AKE90 (170 N·m, 2.0 N·m per kg of body).
+  motors: { leg: 'qdd.ake90x2', knee: 'qdd.ake90x2', arm: 'qdd.rs03', elbow: 'qdd.rs06x2', waist: 'qdd.rs04', neck: 'qdd.rs00', shoulderPitch: 'qdd.ake90', waistYaw: 'qdd.ake90x2', ankle: 'qdd.ake90' },
   fist: 'block',
   head: 'twin',
   gyro: { maxTorqueNm: 150, momentumNms: 51, massKg: 6.8 }, // mgh ≈ 745 N·m: 0.2·mgh (it saturates first: narrow hips, high COM)
@@ -142,7 +152,8 @@ const PYLON_SPEC: HumanoidSpec = {
   palette: { primary: '#c6f000', secondary: '#1c1d1f', accent: '#c9ccd1', finish: 'satin' },
   weightClass: 'middle',
   era: 'modern',
-  shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 120, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
+  // The 6.0 kg the lighter ankles freed went back into the torso fill (pack): 120 → 268 kg/m³.
+  shell: { armorMm: 2.5, frameMm: 2.5, headMm: 3, fillKgM3: 110, torsoFillKgM3: 268, footFill: 0.22, handFill: 0.14, knucklePlateMm: 6 },
 };
 export const PYLON = buildHumanoid(PYLON_SPEC);
 

@@ -35,7 +35,17 @@ export const STEP_ADJUST = {
   captureDriveShare: 0.9, // a capture swing may use this share of the hip's stall torque and speed
   captureMaxW: 1.1, // ...but never lasts longer than this × 1/ω₀ (a weak hip lands a short step
   //                   early rather than a full one too late: the DCM grows e^{ωT} meanwhile)
-  captureOvershootM: 0.05,
+  // The catch step lands this far past where the DCM will be (0.05 measured: a quarter of the catch steps
+  // in sparring left the DCM outside the new support, and chains of them ran the body down; at 0.10 the
+  // self-falls in 32 sparring fights went 29 → 20).
+  captureOvershootM: 0.1,
+  captureLiftL: 0.03, // a catch step's swing apex, × leg length (0.055 lost standing side shoves on FIRECRACKER; early scuffs are captureTouchShare's)
+  // Catch steps and landing adjustments keep the feet from crossing in the stance sole's frame, as tuned, unless
+  // that sole has spun more than this off the pelvis (a pivot, a whipped strike, a blow): then in the
+  // pelvis's frame, where the legs actually cross (0: always the sole's). A sole spun 75° turned "behind the
+  // body" into "across the stance foot" and a catch step for a body falling backward went in front of it;
+  // the pelvis's frame for every stance (no spin) lost standing side shoves on FIRECRACKER (8/8 → 7/8).
+  pelvisFrameRad: 0.7,
   captureMaxL: 0.7, // × leg length from the stance sole
   saturatedM: 0.005, // the soles fall this far short of the feedback CMP: saturated
   hurryMissM: 0.03, // the reach set misses the wanted landing by this much: land sooner
@@ -59,6 +69,14 @@ export interface AdjustInput {
   avail: P2;
   /** What the soles fall short of the feedback CMP by (commanded CMP − COP). */
   short: P2;
+  /** The pelvis's yaw: the frame the feet must not cross in (constrainFrom). */
+  heading: number;
+}
+
+/** The frame the feet must not cross in for a stance sole at `soleYaw` under a pelvis at `pelvisYaw` (STEP_ADJUST.pelvisFrameRad). */
+function crossFrame(soleYaw: number, pelvisYaw: number): number {
+  const d = Math.atan2(Math.sin(soleYaw - pelvisYaw), Math.cos(soleYaw - pelvisYaw));
+  return STEP_ADJUST.pelvisFrameRad > 0 && Math.abs(d) > STEP_ADJUST.pelvisFrameRad ? pelvisYaw : soleYaw;
 }
 
 /** Keeps a landing inside the cage. */
@@ -104,7 +122,7 @@ export function adjustSwing(geo: HumanoidGeometry, gait: Gait, swing: Swing, sid
   const reach = FOOTWORK_TUNING.maxSepL * geo.legLength;
   const land = (t: number, e: P2, shortfall: P2): FootPlace => insideFence(withinHip(constrainFrom(geo, st, side, {
     x: a.landNom.x + e[0] - shortfall[0], y: a.landNom.y + e[1] - shortfall[1], yaw: a.landNom.yaw,
-  }, reach), a.hipAt(t), a.hipReach));
+  }, reach, crossFrame(st.yaw, a.heading)), a.hipAt(t), a.hipReach));
   const e = predict(tRem);
   let target = land(tRem, e, [0, 0]);
   const miss = Math.hypot(a.landNom.x + e[0] - target.x, a.landNom.y + e[1] - target.y);
@@ -146,7 +164,7 @@ export function adjustSwing(geo: HumanoidGeometry, gait: Gait, swing: Swing, sid
  * stance sole) will be at touchdown, plus the overshoot, within the leg's reach. It is never
  * hurried: it was already timed as fast as the leg can fly. Returns true when it moved.
  */
-export function followCapture(geo: HumanoidGeometry, gait: Gait, swing: Swing, side: Side, xi: P2, omega: number, time: number): boolean {
+export function followCapture(geo: HumanoidGeometry, gait: Gait, swing: Swing, side: Side, xi: P2, omega: number, time: number, heading: number): boolean {
   if (!swing.adjustable(time)) return false;
   const stance = other(side);
   const st = gait.feet[stance].place;
@@ -158,7 +176,7 @@ export function followCapture(geo: HumanoidGeometry, gait: Gait, swing: Swing, s
   const n = Math.hypot(dx, dy) || 1e-6;
   const reach = Math.min(n + STEP_ADJUST.captureOvershootM, STEP_ADJUST.captureMaxL * geo.legLength);
   const want: FootPlace = { x: closest[0] + (dx / n) * reach, y: closest[1] + (dy / n) * reach, yaw: swing.target.yaw };
-  const place = insideFence(constrainFrom(geo, st, side, want, STEP_ADJUST.captureMaxL * geo.legLength));
+  const place = insideFence(constrainFrom(geo, st, side, want, STEP_ADJUST.captureMaxL * geo.legLength, crossFrame(st.yaw, heading)));
   if (Math.hypot(place.x - swing.target.x, place.y - swing.target.y) < 2 * STEP_ADJUST.deadbandM) return false;
   swing.retarget(time, place);
   return true;
@@ -204,7 +222,7 @@ export function captureStep(geo: HumanoidGeometry, gait: Gait, s: Sense, gyroRea
       const n = Math.hypot(dx, dy) || 1e-6;
       const reach = Math.min(n + STEP_ADJUST.captureOvershootM, STEP_ADJUST.captureMaxL * geo.legLength);
       const want: FootPlace = { x: closest[0] + (dx / n) * reach, y: closest[1] + (dy / n) * reach, yaw: from.yaw };
-      place = insideFence(constrainFrom(geo, gait.feet[stance].place, side, want, STEP_ADJUST.captureMaxL * geo.legLength));
+      place = insideFence(constrainFrom(geo, gait.feet[stance].place, side, want, STEP_ADJUST.captureMaxL * geo.legLength, crossFrame(gait.feet[stance].place.yaw, s.heading)));
       const need = minSwingTime(drive, Math.hypot(place.x - from.x, place.y - from.y), geo.legLength, STEP_ADJUST.captureDriveShare);
       const next = clamp(Math.max(T0, need), STEP_ADJUST.minSwingS, STEP_ADJUST.captureMaxW / w);
       if (Math.abs(next - T) < 0.005) break;

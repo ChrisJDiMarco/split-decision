@@ -63,20 +63,21 @@ describe('joint loads', () => {
 
   it('gear failures follow the gear type: a planetary jams, then strips; a QDD sheds teeth and slips', () => {
     const t = DAMAGE_TUNING;
-    // HAYMAKER's hips are MyActuator X12 20:1 planetaries.
+    // HAYMAKER's hip rolls are MyActuator X12 20:1 planetaries (its hip pitch and yaw went to AKE90 QDD
+    // stacks in the strike pass).
     const ctx = makeRig({ designs: ['haymaker', 'savate'] });
-    const hip = resolveWith(ctx, 0, 'hip_pitch_l', [t.gearBreak + 0.1, 0, 0]);
+    const hip = resolveWith(ctx, 0, 'hip_roll_l', [t.gearBreak + 0.1, 0, 0]);
     expect(hip.m.drive.gearType).toBe('planetary');
     expect(hip.j.state).toBe('seized');
-    const seize = jointEvents(drain(ctx), 'hip_pitch_l');
+    const seize = jointEvents(drain(ctx), 'hip_roll_l');
     expect(seize).toHaveLength(1);
     expect(seize[0]).toMatchObject({ state: 'seized', cause: 'gear', failure: 'seize', role: 'victim' });
     expect(seize[0].pos).toHaveLength(3);
-    const hip2 = resolveWith(ctx, 0, 'hip_pitch_r', [t.gearStrip + 0.1, 0, 0]);
+    const hip2 = resolveWith(ctx, 0, 'hip_roll_r', [t.gearStrip + 0.1, 0, 0]);
     expect(hip2.j.state).toBe('limp');
-    expect(jointEvents(drain(ctx), 'hip_pitch_r')[0]).toMatchObject({ failure: 'strip', state: 'limp' });
+    expect(jointEvents(drain(ctx), 'hip_roll_r')[0]).toMatchObject({ failure: 'strip', state: 'limp' });
 
-    // SAVATE's elbows are RobStride 03 QDDs: a shed tooth caps the torque, the drive keeps working.
+    // SAVATE's elbows are twin RobStride 06 QDDs: a shed tooth caps the torque, the drive keeps working.
     const elbow = resolveWith(ctx, 1, 'elbow_l', [t.gearBreak + 0.1, 0, 0]);
     expect(elbow.m.drive.gearType).toBe('qdd');
     expect(elbow.m.slipCapNm).toBeCloseTo(t.slipCapFraction * elbow.j.motor.stallTorqueNm, 6);
@@ -177,8 +178,11 @@ describe('joint loads', () => {
   });
 
   it('a hard hit on a drive housing faults it: no torque for a moment, then it re-enables', () => {
-    // SAVATE's knee (two AKE90-8s) struck right at the joint by a heavy ram: the drive faults out.
-    const ctx = makeRig({ designs: ['firecracker', 'savate'], rams: [{ name: 'ram', massKg: 15, halfSize: 0.05 }] });
+    // SAVATE's knee (two AKE90-8s) struck right at the joint by a heavy ram: the drive faults out. The
+    // ram is 25 kg at 9 m/s: since the hardware pass the knee and ankle drives ride on the thigh and the
+    // shin, not the shin and the foot, so the leg's side-on effective mass and the peak force it takes
+    // fell, and 15 kg at 8 m/s (just over the housing rating before) no longer reaches it.
+    const ctx = makeRig({ designs: ['firecracker', 'savate'], rams: [{ name: 'ram', massKg: 25, halfSize: 0.05 }] });
     step(ctx, 300);
     drain(ctx);
     const st = damageState(ctx);
@@ -186,7 +190,7 @@ describe('joint loads', () => {
     const xa = ctx.data.xanchor as Float64Array;
     const anchor: [number, number, number] = [xa[x.m.mjJoint * 3], xa[x.m.mjJoint * 3 + 1], xa[x.m.mjJoint * 3 + 2]];
     // Robot 1 faces −x, so its left leg is on the −y side: fire in from there.
-    expect(fireRamAt(ctx, 'ram', anchor, [0, 1, 0], 8)).toBe(true);
+    expect(fireRamAt(ctx, 'ram', anchor, [0, 1, 0], 9)).toBe(true);
     let faulted = false;
     let torqueDuringFault = Infinity;
     step(ctx, 120, () => {

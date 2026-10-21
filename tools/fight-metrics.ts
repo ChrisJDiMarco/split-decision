@@ -43,7 +43,8 @@
 //   any of the above with --balance legacy|dcm (the balance path the fights run on)
 //   and --mocap steps|1|0|style (mocap footwork on the dcm path: clip steps (the default), with the
 //   style layer, neither, style only)
-//   SD_TUNE='MOCAP_STYLE.arms=0,BALANCE_TUNING.kp=1.8' sets tuning-table values in every fight
+//   SD_TUNE='MOCAP_STYLE.arms=0,BALANCE_TUNING.kp=1.8' sets tuning-table values in every fight (damage
+//   thresholds too: SD_TUNE='DAMAGE_TUNING.mountScale=2.2'; the damage summary lists every head pop)
 //   --mind sparring|house   who decides: the sparring stand-in (default; an intent every 0.5 s) or
 //                           the real Brain with the House Mind (src/brain, no network: combos, setups,
 //                           feints, reflexes), fed 60 Hz telemetry with the game's 0.3 s reaction delay
@@ -69,7 +70,10 @@ import { BALANCE_TUNING, KICK_GATE, LUNGE } from '../src/physics/control/balance
 import { MOCAP_STEPS } from '../src/physics/control/balance/mocap-steps';
 import { MOCAP_STYLE } from '../src/physics/control/balance/mocap-style';
 import { anyContact } from '../src/physics/control/contacts';
-import { KICK_RBAL, ROUTE, STRIKE_P3 } from '../src/physics/control/mocap/strikes';
+import { KICK_DRIVE, KICK_RBAL, KICK_SET, PUNCH_TUNING, ROUTE, STRIKE_P3 } from '../src/physics/control/mocap/strikes';
+import { BURST } from '../src/physics/control/strike-drive';
+import { ENGINE_KICK, MOCAP_KICKS } from '../src/physics/control/mocap/skills';
+import { KICK_CONTACT } from '../src/physics/control/skills/kicks';
 import { STRIKE_PATH } from '../src/physics/control/strike-path';
 import { INVERSE_DYNAMICS } from '../src/physics/control/feedforward';
 import { IMPEDANCE } from '../src/physics/control/balance/impedance';
@@ -78,8 +82,11 @@ import { STEP_ADJUST } from '../src/physics/control/balance/step-adjust';
 import { REACTIONS } from '../src/physics/control/balance/reactions';
 import { BEHAVIOURS } from '../src/physics/control/balance/behaviours';
 import { GETUP_SPEED } from '../src/physics/control/getup-speed';
+import { TRUNK_LIMIT } from '../src/physics/control/balance/trunk-limit';
+import { PACE } from '../src/physics/control/tactics';
 import { RingIq, type Zone } from '../src/physics/control/ring-iq';
 import type { SkillRun } from '../src/physics/control/skills/types';
+import { DAMAGE_TUNING } from '../src/physics/damage/constants';
 import { buildContext } from '../src/physics/runtime';
 import type { SimContext, SimSystem } from '../src/physics/sim-context';
 import { SYSTEMS } from '../src/physics/systems';
@@ -88,6 +95,7 @@ import { compileWorld } from '../src/physics/world';
 import { exchanges, PaceRecorder, type PaceReport } from '../tests/balance/pace-recorder';
 import { activityOf, BalanceRecorder, type BalanceMetrics } from '../tests/balance/recorder';
 import { ReactionRecorder, summarizeReactions, type ReactionMetrics } from '../tests/balance/reaction-recorder';
+import { FallAnatomy, summarizeAnatomy, type FallAnatomyRec } from '../tests/balance/fall-anatomy';
 import { DamageRecorder, damageSummary, type FighterDamage } from './damage-metrics';
 
 const INTENT_EVERY_S = 0.5;
@@ -103,6 +111,9 @@ const BLOWUP_QVEL = 400;
 const IMPACT_TAIL_S = 0.1; // an impact event this soon after a strike ends still belongs to it
 const MIN_LANDED_IMPULSE_NS = 4; // the damage model's own event floor
 const ENTRY_STRIKE_S = 0.3; // a strike starting this soon after a pocket entry counts as entering with it
+const TIP_PART = /^(fist|foot|shin)_/; // the striking surfaces whose speed the strike speed lines report
+const STRAIGHTS = ['jab', 'cross'];
+const KICKS = ['front_kick', 'low_kick', 'head_kick'];
 const FRAME_S = 1 / 60; // House Mind runs: telemetry frames to the brains at this rate
 const HOUSE_TEMPERAMENT = 1.2; // the game's corners default to 1.1 and 1.3
 
@@ -126,6 +137,8 @@ interface FallRec {
   refellAt: number | null;
   outcome: 'up' | 'late' | 'refell' | 'ko' | 'censored';
   solid: boolean | null;
+  /** How the loss of balance began and went (tests/balance/fall-anatomy.ts). */
+  anatomy?: FallAnatomyRec;
 }
 
 interface StrikeRec {
@@ -141,6 +154,19 @@ interface StrikeRec {
   landed: boolean;
   /** The footing it started from: 'step' (a foot in the air), 'moving' (two feet, COM over 0.3 m/s), 'set'. */
   footing?: 'step' | 'moving' | 'set';
+  /** Fastest striking-surface body (fist, foot, shin) from the start to its first contact (or its end), m/s. */
+  vPeak?: number;
+  /** Closing speed of its first impact made with a striking surface (the damage model's event), m/s; null if none. */
+  vContact?: number | null;
+  /** ...and the part of his it met (his guard: fist or forearm; head; torso...). */
+  contactPart?: string | null;
+  /** COM to COM at the start, m. */
+  d0?: number;
+  /** A kick its balance gate called off (the engine's kick cancels went up while it ran). */
+  gated?: boolean;
+  kickCancels0?: number;
+  /** How the runner let it go: done, cancelled (by choice: a defensive call, a reflex), forced (a catch step, a brace, a fall), chained. */
+  endReason?: string;
 }
 
 interface RingReport {
@@ -174,6 +200,8 @@ interface FighterReport {
   reactions?: ReactionMetrics;
   /** Strikes delivered and what the damage model did (tools/damage-metrics.ts). */
   damage?: FighterDamage;
+  /** Each strike's striking-surface speeds: the fastest before its first contact, and the contact's closing speed. */
+  strikeSpeeds?: Array<{ id: string; vPeak: number; vContact: number | null; landed: boolean; committed: boolean; part: string | null; d0: number; gated: boolean; end: string }>;
 }
 
 export interface FightReport {
@@ -204,7 +232,7 @@ export interface FightReport {
 
 const now = () => performance.now();
 
-const TUNABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, COM_REF, MOCAP_STEPS, MOCAP_STYLE, STRIKE_P3, STRIKE_PATH, LUNGE, ROUTE, KICK_GATE, KICK_RBAL, INVERSE_DYNAMICS, IMPEDANCE, GYRO_POLICY, STEP_ADJUST, REACTIONS, BEHAVIOURS, GETUP_SPEED };
+const TUNABLES: Record<string, Record<string, unknown>> = { BALANCE_TUNING, FOOTWORK_TUNING, COM_REF, MOCAP_STEPS, MOCAP_STYLE, STRIKE_P3, STRIKE_PATH, LUNGE, ROUTE, KICK_GATE, KICK_RBAL, KICK_SET, KICK_DRIVE, PUNCH_TUNING, BURST, ENGINE_KICK, MOCAP_KICKS, KICK_CONTACT, INVERSE_DYNAMICS, IMPEDANCE, GYRO_POLICY, STEP_ADJUST, REACTIONS, BEHAVIOURS, GETUP_SPEED, DAMAGE_TUNING, TRUNK_LIMIT, PACE };
 
 /** SD_TUNE='TABLE.key=value,...': set numeric tunables before a fight (A/B runs, as balance-drills --tune). */
 function applyTune(spec: string | undefined): void {
@@ -252,6 +280,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   const recorders = [new BalanceRecorder(ctx, 0, 0.3), new BalanceRecorder(ctx, 1, 0.3)];
   const reactRecs = ctx.robots.map((r) => (ctl[r.corner].engine ? new ReactionRecorder(ctx, r) : null));
   const pace = new PaceRecorder(ctl);
+  const anatomy = new FallAnatomy(ctx);
   // House Mind: the real Brain (src/brain), no network, fed telemetry frames; its intents land after
   // the game's reaction delay, as in the worker.
   const delayTicks = Math.round(setup.reactionDelayS / ctx.dt);
@@ -277,6 +306,8 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   const falls: FallRec[][] = [[], []];
   const strikes: StrikeRec[][] = [[], []];
   const current: Array<{ run: SkillRun; rec: StrikeRec } | null> = [null, null];
+  /** The striking surfaces of each fighter's strike under way (bodies) and their last positions. */
+  const tips: Array<Array<{ body: number; prev: [number, number, number] | null }>> = [[], []];
   const history: Array<Array<{ t: number; skill: string; sat: number }>> = [[], []];
   const approach = [{ m: 0, s: 0 }, { m: 0, s: 0 }];
   const downS = [0, 0];
@@ -297,6 +328,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
     const cur = current[c];
     if (!cur) return;
     cur.rec.end = ctx.time;
+    cur.rec.endReason = ctl[c].skills.run === cur.run ? 'open' : ctl[c].skills.lastEnd;
     strikes[c].push(cur.rec);
     current[c] = null;
   };
@@ -317,6 +349,10 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
         if (rec) {
           rec.maxImpulse = Math.max(rec.maxImpulse, e.impulseNs);
           if (e.part === 'head') rec.headImpulse = Math.max(rec.headImpulse, e.impulseNs);
+          if (rec.vContact === null && !e.push && TIP_PART.test(e.strikerPart ?? '')) {
+            rec.vContact = e.speed;
+            rec.contactPart = e.part;
+          }
         }
         if (log && e.impulseNs >= SELF_KD_IMPULSE_NS) timeline.push(`${stamp()}s  ${name(e.striker)} hits ${name(e.victim)} ${e.part ?? '?'} ${e.impulseNs.toFixed(0)} N·s`);
         return;
@@ -375,6 +411,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
     for (const s of systems) s.post?.(ctx);
     for (const rec of recorders) rec.sample(ctx);
     for (const rec of reactRecs) rec?.sample(ctx);
+    anatomy.sample(ctx);
     for (const e of ctx.events) {
       onEvent(e);
       damageRec.onEvent(e, ctx.time);
@@ -414,12 +451,31 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
           rec: {
             id: run.def.id, zone: run.zone, start: ctx.time, end: ctx.time, committed: false, runnerLanded: false, landedAt: null, maxImpulse: 0, headImpulse: 0, landed: false,
             footing: ctl[c].gait.phase === 'single' ? 'step' : Math.hypot((ctx.data.subtree_linvel as Float64Array)[me.rootBody * 3], (ctx.data.subtree_linvel as Float64Array)[me.rootBody * 3 + 1]) > 0.3 ? 'moving' : 'set',
+            vPeak: 0, vContact: null, contactPart: null, d0: +d.toFixed(3), gated: false, kickCancels0: ctl[c].engine?.kickCancels ?? 0,
           },
         };
+        tips[c].length = 0;
       }
       const cur = current[c];
       if (cur) {
         if (run!.phase !== 'windup') cur.rec.committed = true;
+        if ((ctl[c].engine?.kickCancels ?? 0) !== cur.rec.kickCancels0) cur.rec.gated = true;
+        // The striking surface's speed up to the contact (the bodies' world positions, 1 ms apart).
+        if (!cur.rec.runnerLanded) {
+          const me = ctx.robots[c];
+          if (!tips[c].length) {
+            for (const p of run!.strikers ?? run!.def.strikers) {
+              const b = TIP_PART.test(p) ? me.parts.get(p)?.body : undefined;
+              if (b !== undefined) tips[c].push({ body: b, prev: null });
+            }
+          }
+          const xp = ctx.data.xpos as Float64Array;
+          for (const tp of tips[c]) {
+            const x = xp[tp.body * 3], y = xp[tp.body * 3 + 1], z = xp[tp.body * 3 + 2];
+            if (tp.prev) cur.rec.vPeak = Math.max(cur.rec.vPeak ?? 0, Math.hypot(x - tp.prev[0], y - tp.prev[1], z - tp.prev[2]) / ctx.dt);
+            tp.prev = [x, y, z];
+          }
+        }
         if (run!.landed && !cur.rec.runnerLanded) {
           cur.rec.runnerLanded = true;
           cur.rec.landedAt = ctx.time;
@@ -490,6 +546,8 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
   for (const c of [0, 1]) closeStrike(c);
   const length = ctx.time;
 
+  // Each fall's anatomy (the same fall events, in order).
+  for (const c of [0, 1]) falls[c].forEach((f, i) => { f.anatomy = anatomy.falls[c][i]; });
   // Get-up outcomes.
   for (const c of [0, 1]) {
     for (const f of falls[c]) {
@@ -554,6 +612,7 @@ export async function runFight(red: string, blue: string, seconds: number, seed:
       balance: recorders[c].result(),
       reactions: reactRecs[c]?.result(),
       damage: damageRec.fighter(c as 0 | 1),
+      strikeSpeeds: list.map((s) => ({ id: s.id, vPeak: +(s.vPeak ?? 0).toFixed(2), vContact: s.vContact == null ? null : +s.vContact.toFixed(2), landed: s.landed, committed: s.committed, part: s.contactPart ?? null, d0: s.d0 ?? 0, gated: !!s.gated, end: s.endReason ?? '' })),
     };
   });
   const landedAll = strikes.flat().filter((s) => s.landed);
@@ -699,6 +758,8 @@ export function summarize(fights: FightReport[]): string {
     'balance (docs/design/balance-engine.md §8):',
     `  self-falls by activity (strict, per fighter per 2 min): ${[...byActivity].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${perTwoMin(v).toFixed(2)} (${v})`).join(', ') || 'none'}`,
     `  self-falls while stepping or standing   ${stepStand}   target 0   ${ok(stepStand === 0)}`,
+    `  ...standing with no blow at all (no robot-on-robot impact on him in ${SELF_KD_WINDOW_S} s)   ${fs.reduce((a, { x }) => a + x.falls.filter((fl) => fl.selfStrict && fl.activity === 'standing' && fl.maxHitNs <= 0).length, 0)}`,
+    ...summarizeAnatomy(fs.flatMap(({ x }) => x.falls.filter((fl) => fl.selfStrict && fl.anatomy).map((fl) => fl.anatomy!))),
     `  falls per 50 punches / per 10 kicks      ${((50 * punchFalls) / Math.max(1, punches)).toFixed(1)} (${punchFalls}/${punches}) / ${((10 * kickFalls) / Math.max(1, kicks)).toFixed(1)} (${kickFalls}/${kicks})   target <= 1 / <= 1`,
     `  torso rate below / above 3 Hz            ${avg('torsoRateLow').toFixed(2)} / ${avg('torsoRateHigh').toFixed(2)} rad/s RMS`,
     `  tilt peak beyond lean                    mean ${avg('tiltPeakDeg').toFixed(1)}°, worst ${worst('tiltPeakDeg').toFixed(1)}°`,
@@ -708,6 +769,7 @@ export function summarize(fights: FightReport[]): string {
     `  planted-leg servo at limit (no skill)    ${pct(avg('servoLimitShare'))}`,
     `  gyro saturation (no skill) / at touchdown free   ${avg('gyroSatFootwork').toFixed(2)} / ${avg('reserveAtTouchdown').toFixed(2)}`,
     `  single support inside 2 m                ${pct(avg('singleInside2'))}`,
+    ...speedLines(fs),
     ...damageSummary(fights),
     ...(fs.some(({ x }) => x.reactions) ? summarizeReactions(fs.flatMap(({ x }) => (x.reactions ? [x.reactions] : [])), perTwoMin) : []),
     'mocap footwork (Phase 5):',
@@ -716,6 +778,66 @@ export function summarize(fights: FightReport[]): string {
     ...paceLines(fights, minutes),
   ];
   return lines.join('\n');
+}
+
+/** Strike speed (the striking surface's, m/s) by kind and design, and how often kicks are thrown and land. */
+function speedLines(fs: Array<{ f: FightReport; x: FighterReport }>): string[] {
+  const rows = fs.flatMap(({ x }) => (x.strikeSpeeds ?? []).map((r) => ({ ...r, design: x.design })));
+  const fighterMin = fs.reduce((a, { f }) => a + f.length / 60, 0);
+  if (!rows.length) return [];
+  const q = (xs: number[], p: number) => {
+    if (!xs.length) return NaN;
+    const s = [...xs].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1) + 0.5))];
+  };
+  const f = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : '-');
+  const group = (name: string, pick: (id: string) => boolean) => {
+    const g = rows.filter((r) => pick(r.id));
+    const pk = g.map((r) => r.vPeak).filter((v) => v > 0);
+    const ct = g.filter((r) => r.landed && r.vContact !== null).map((r) => r.vContact!);
+    return `  ${name.padEnd(26)} peak p50/p90/max ${f(q(pk, 0.5))}/${f(q(pk, 0.9))}/${f(Math.max(0, ...pk))}   contact (landed) p50/p90 ${f(q(ct, 0.5))}/${f(q(ct, 0.9))} (${ct.length} of ${g.length})`;
+  };
+  const designs = [...new Set(rows.map((r) => r.design))].sort();
+  const minBy = new Map<string, number>();
+  for (const { f, x } of fs) minBy.set(x.design, (minBy.get(x.design) ?? 0) + f.length / 60);
+  return [
+    'strike speed (striking surface, m/s; strike-power.md §5.2):',
+    group('straights (jab, cross)', (id) => STRAIGHTS.includes(id)),
+    group('hooks, uppercuts, overhands', (id) => !STRAIGHTS.includes(id) && !KICKS.includes(id)),
+    group('kicks', (id) => KICKS.includes(id)),
+    ...designs.map((d) => {
+      const st = rows.filter((r) => r.design === d && STRAIGHTS.includes(r.id));
+      const pk = st.map((r) => r.vPeak).filter((v) => v > 0);
+      const ct = st.filter((r) => r.landed && r.vContact !== null).map((r) => r.vContact!);
+      const kk = rows.filter((r) => r.design === d && KICKS.includes(r.id));
+      const kl = kk.filter((r) => r.landed).length;
+      const m = Math.max(1e-6, minBy.get(d) ?? 0);
+      return `  ${d.padEnd(12)} straights peak p50/p90 ${f(q(pk, 0.5))}/${f(q(pk, 0.9))}, contact p50 ${f(q(ct, 0.5))}; kicks ${(kk.length / m).toFixed(2)}/min thrown, ${kl}/${kk.length} landed`;
+    }),
+    `  kicks thrown per fighter per minute ${(rows.filter((r) => KICKS.includes(r.id)).length / Math.max(1e-6, fighterMin)).toFixed(2)}, landed ${pct(rows.filter((r) => KICKS.includes(r.id) && r.landed).length / Math.max(1, rows.filter((r) => KICKS.includes(r.id)).length))}`,
+    ...KICKS.map((id) => {
+      const k = rows.filter((r) => r.id === id);
+      if (!k.length) return '';
+      const gated = k.filter((r) => r.gated).length, lifted = k.filter((r) => r.committed).length, landed = k.filter((r) => r.landed).length;
+      const other = k.filter((r) => !r.gated && !r.committed);
+      const why = new Map<string, number>();
+      for (const r of other) why.set(r.end || '?', (why.get(r.end || '?') ?? 0) + 1);
+      return `    ${id.padEnd(11)} ${k.length} thrown: gate called off ${gated}, ended in the windup otherwise ${other.length} (${[...why].map(([w, n]) => `${w} ${n}`).join(', ')}), struck ${lifted}, landed ${landed}`;
+    }).filter(Boolean),
+    `  straights' first contact by part: ${partLine(rows.filter((r) => STRAIGHTS.includes(r.id) && r.part))}`,
+  ];
+}
+
+function partLine(rows: Array<{ part: string | null; vContact: number | null }>): string {
+  const m = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = /^(fist|forearm|upperarm)/.test(r.part ?? '') ? 'guard (arm)' : (r.part ?? '?').replace(/_[lr]$/, '');
+    const a = m.get(k) ?? [];
+    if (r.vContact !== null) a.push(r.vContact);
+    m.set(k, a);
+  }
+  const med = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : NaN);
+  return [...m].sort((a, b) => b[1].length - a[1].length).map(([k, v]) => `${k} ${v.length} (p50 ${med(v).toFixed(1)} m/s)`).join(', ') || '-';
 }
 
 function ringLines(fs: FighterReport[], minutes: number): string[] {
@@ -743,6 +865,12 @@ function footingLine(fights: FightReport[]): string {
     by.set(k, b);
   }
   return [...by].map(([k, v]) => `${k} ${v.committed} (${pct(v.landed / Math.max(1, v.committed))})`).join(', ') || '-';
+}
+
+function gateLine(fs: PaceReport['fighters'][number][], idle: number): string {
+  const m = new Map<string, number>();
+  for (const x of fs) for (const [k, v] of Object.entries(x.gateBy ?? {})) m.set(k, (m.get(k) ?? 0) + v);
+  return [...m].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v / Math.max(1e-6, idle))}`).join(', ') || '-';
 }
 
 function outLine(fs: PaceReport['fighters'][number][]): string {
@@ -781,6 +909,7 @@ function paceLines(fights: FightReport[], minutes: number): string[] {
     `    by footing (committed, landed share): ${footingLine(ps)}`,
     `  idle in range                            ${pct(idle / inRange)} of ${inRange.toFixed(0)} fighter-s in range   target <= 20%`,
     `    why: ${[...by].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v / Math.max(1e-6, idle))}`).join(', ') || '-'}`,
+    `    balance gate by blocker (share of all idle): ${gateLine(fs, idle)}`,
     `    out of its range by: ${outLine(fs)}`,
     `  first two-way exchange                   median ${median(firstEx).toFixed(1)} s; strikes traded within 1 s of one of his ${pct(twoWay / Math.max(1, committed))}`,
     `  combos                                   ${cs.started} started, ${pct(cs.completed / Math.max(1, cs.started))} complete, steps thrown ${pct(cs.thrown / Math.max(1, cs.steps))} (${[...closed].map(([k, v]) => `${k} ${v}`).join(', ') || '-'})`,

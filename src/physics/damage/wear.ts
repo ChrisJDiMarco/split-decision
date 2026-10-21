@@ -54,6 +54,7 @@ function updateSlop(rd: RobotDamage | null, robot: RobotRuntime, index: number):
 function book(ctx: SimContext, rd: RobotDamage | null, robot: RobotRuntime, index: number, loss: number, injury: Injury): void {
   if (!rd) return;
   rd.ledger.jointLoss[injury.cause][injury.role] += loss;
+  if (injury.cause === 'bearing') rd.mech[index].bearingLoss += loss;
   rd.ledger.failures[injury.failure]++;
   const a = injury.arm;
   rd.ledger.log.push({

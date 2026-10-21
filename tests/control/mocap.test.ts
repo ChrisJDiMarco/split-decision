@@ -8,7 +8,7 @@ import { controllerOf } from '../../src/physics/control';
 import { GETUP_PLAN } from '../../src/physics/control/mocap/getup-plan';
 import { mocapSet, SPEED_FRACTION } from '../../src/physics/control/mocap/library';
 import { MotionPlayer } from '../../src/physics/control/mocap/player';
-import { ENGINE_PROCEDURAL_KICKS, MOCAP_KICKS, mocapSkill } from '../../src/physics/control/mocap/skills';
+import { ENGINE_KICK, ENGINE_PROCEDURAL_KICKS, MOCAP_KICKS, mocapSkill } from '../../src/physics/control/mocap/skills';
 import { SKILLS } from '../../src/physics/control/skills';
 import type { RobotRuntime } from '../../src/physics/sim-context';
 import { SYSTEMS } from '../../src/physics/systems';
@@ -111,11 +111,26 @@ describe('mocap playback and tables', () => {
     }
     for (const id of ['front_kick', 'low_kick', 'head_kick'] as const) {
       expect(mocapSkill(set, id)).toBeNull();
-      // On the balance engine the mocap kicks play where they pass the kick drill (MOCAP_KICKS.engine,
-      // ENGINE_PROCEDURAL_KICKS); the legacy path keeps the procedural kicks.
-      const engineKick = c.engine && MOCAP_KICKS.engine && !ENGINE_PROCEDURAL_KICKS.savate?.includes(id) ? mocapSkill(set, id, true) : null;
-      if (engineKick) expect(c.skillFor(id)).toBe(engineKick);
-      else expect(c.skillFor(id)).toBe(SKILLS[id]);
+      // The legacy path keeps the procedural kicks. On the balance engine the mocap kicks play only with
+      // MOCAP_KICKS.engine (and not where ENGINE_PROCEDURAL_KICKS keeps the procedural one); otherwise the
+      // procedural kick, its rear-leg kicks reaching what the weight shift onto the front foot adds.
+      if (!c.engine) {
+        expect(c.skillFor(id)).toBe(SKILLS[id]);
+        continue;
+      }
+      const def = c.skillFor(id)!;
+      expect(def).toBe(mocapSkill(set, id, true));
+      if (MOCAP_KICKS.engine && !ENGINE_PROCEDURAL_KICKS.savate?.includes(id)) {
+        expect(def.clip).toBeDefined();
+        continue;
+      }
+      expect(def.clip).toBeUndefined();
+      expect(def.pose).toBe(SKILLS[id]!.pose);
+      const [lo0, hi0] = SKILLS[id]!.range(c.geo);
+      const [lo, hi] = def.range(c.geo);
+      const d = id === 'front_kick' ? 0 : ENGINE_KICK.shiftReachL * c.geo.legLength;
+      expect(lo).toBeCloseTo(lo0 + d, 6);
+      expect(hi).toBeCloseTo(hi0 + d, 6);
     }
     sim.dispose();
   }, 60_000);

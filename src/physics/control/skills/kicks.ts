@@ -27,6 +27,20 @@ const RETURN_AT = 0.65; // recovery progress at which the leg is handed back to 
 /** Driving kicks want margin: a leg that only just reaches has nothing left to hit with. */
 const CLOSE_KICK = { sweet: 0.45, throwAt: 0.7 };
 
+/**
+ * Balance engine: after a kick's contact the ankle goes back toward the chamber, `share` of the way over
+ * `retractS` (the follow-through; the recovery then takes it the rest of the way), instead of holding the
+ * contact point (exported so tools can sweep it; retractS 0: it holds, as on the legacy path). Held there,
+ * the leg pushed on him from one foot through the follow-through, and the reaction pushed the kicker back
+ * off his stance foot.
+ */
+export const KICK_CONTACT = {
+  // With the kick timing rules (tactics.ts PACE.kickCrampedM, kickThreatWindup): sparring, 64 fights without the
+  // gyro-damage coupling, 49 self-falls without both, 36 with (the kick pass's own baseline: 33).
+  retractS: 0.06,
+  share: 0.5,
+};
+
 // Vectors are in the heading frame as (forward, outward, up): outward is toward the kicking
 // leg's own side, so the same numbers describe either leg.
 interface KickShape {
@@ -107,9 +121,14 @@ function kickPose(shape: KickShape) {
     if (run.phase === 'strike') {
       const k = minJerk(Math.min(1, u * 1.2));
       // On contact the leg stops extending: it has delivered the blow, and driving on into a
-      // braced target only launches the kicker backward off one foot.
+      // braced target only launches the kicker backward off one foot. Balance engine: it goes back toward
+      // the chamber at once (KICK_CONTACT), so the blow is the leg's momentum, not a push from one foot.
       if (run.landed && !run.scratch.contact) run.scratch.contact = [...env.s.feet[side].ankle];
-      const ankle = (run.scratch.contact as Vec3 | undefined) ?? mix(chamber, target, k);
+      let ankle = (run.scratch.contact as Vec3 | undefined) ?? mix(chamber, target, k);
+      if (run.scratch.contact && env.engine && KICK_CONTACT.retractS > 0) {
+        const since = run.t - ((run.scratch.landedAt as number | undefined) ?? run.t);
+        ankle = mix(ankle, chamber, KICK_CONTACT.share * minJerk(clamp(since / KICK_CONTACT.retractS, 0, 1)));
+      }
       setKickLeg(env, side, ankle, pole, shape.anklePitch * k);
       env.pose.waistPitch = env.stance.waistPitch + shape.lean * (0.4 + 0.6 * k);
       env.pose.pelvisYaw = turn * (0.3 + 0.7 * k);

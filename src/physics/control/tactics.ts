@@ -77,6 +77,20 @@ export const PACE = {
   stepInMinM: 0.13, // walking in to strike, the stance goal is at least this much nearer (a real step)
   stepInReachM: 0.02, // a step whose touchdown DCM is within the throw edge plus this carries the blow...
   stepInLeadS: 0.2, // ...started this close to the touchdown (the blow lands with the foot, not short of him)
+  // Just past the throw edge on two settled feet, an arm strike goes now and steps in itself (the punch's
+  // own lunge, mocap/strikes.ts stepIn: the lead foot plants as the fist lands) instead of waiting for the
+  // footwork to bring the stance a few centimetres in. × leg length: the lunge's stride (LUNGE.maxStride,
+  // 0.3 L) brings the shoulder about half of it forward by the contact. In sparring 64% of the idle time
+  // with a strike out of its range was within 10 cm of its edge.
+  lungeSlackL: 0.12,
+  kickRoomM: 0.04, // balance engine: a rear-leg kick is thrown from no closer than the guards' standoff less this (Infinity: off)...
+  kickRoomWindowM: 0.06, // ...nor that close to its throw edge
+  // ...a head kick's: from outside the standoff (its leg climbs past his hips and thighs on the way up, and from
+  // closer it struck his pelvis and thighs and tangled with his legs). Sparring, 64 fights without the gyro-damage
+  // coupling: head-kick self-falls 8 at 0.04, 2 at −0.06 (47 of 184 head kicks landed against 96 of 258).
+  headKickRoomM: -0.06,
+  kickCrampedM: 0.08, // ...and is pulled in its weight shift once he is this much further inside that (Infinity: off)
+  kickThreatWindup: 0.35, // ...and not started while his windup is past this inside threat range (Infinity: off)
   edgeJabAggression: 0.45, // close_distance at the edge of range is a step-in jab from this aggression
   pressureAggression: 0.7, // from here footwork presses: the pocket, the cage cut, no step out after combos
   pressInM: 0.04, // pressing, hold_range keeps the lead weapon's throw edge less this
@@ -167,6 +181,7 @@ export class TacticRunner {
     this.trackCooldown(ctx, aggression);
     this.trackIntent(ctx, intent);
     this.pullFeint(ctx, env);
+    this.crampedKick(env, dist);
     if (!this.reflex(ctx, s, env, intent, dist)) {
       if (this.combo) this.runCombo(ctx, s, env, intent, dist);
       else if (ctx.time < this.exitUntil) this.exit(s, dist);
@@ -269,6 +284,24 @@ export class TacticRunner {
     if (done) this.comboStats.completed++;
     else this.comboStats.aborted++;
     this.combo = null;
+  }
+
+  /**
+   * Balance engine: a rear-leg kick still shifting its weight when he has come inside its room (the guards'
+   * standoff less PACE.kickRoomM, less PACE.kickCrampedM more) is pulled, by choice: the leg rising that
+   * close went up through his hips and thighs, and the legs tangled with the kicker on one foot.
+   */
+  private crampedKick(env: SkillEnv, dist: number): void {
+    const run = this.c.skills.run;
+    if (!run || !this.c.engine || run.def.kind !== 'leg' || run.phase !== 'windup' || this.c.gait.skillLegActive()) return;
+    if (!run.def.clip && run.def.side === this.c.stance.lead) return; // a lead-leg kick shifts away from him
+    if (dist >= this.standoff() - this.kickRoom(run.def) - PACE.kickCrampedM) return;
+    this.c.skills.cancel(env);
+  }
+
+  /** How far inside the guards' standoff a rear-leg kick may start (PACE.kickRoomM; a head kick's leg climbs past his hips: headKickRoomM). */
+  private kickRoom(def: SkillDef): number {
+    return def.id === 'head_kick' ? PACE.headKickRoomM : PACE.kickRoomM;
   }
 
   /** Pull a feint on show once its sold share of the windup is out (by choice: the physics reads it). */
@@ -420,19 +453,31 @@ export class TacticRunner {
     const edge = lo + throwAt * (hi - lo);
     // A player's strike goes from where he stands (docs/design/player-mode-integration.md §6): a whiff is his.
     const player = this.c.r.intent?.source === 'player';
-    if (!player && (dist > edge || dist < lo)) {
+    // Balance engine: a rear-leg kick wants room. Its weight shift carries the body toward him first (onto
+    // the front foot), and with the two guards already touching his pushed it back off the stance foot until
+    // the lift gate called the kick off: from closer than the guards' standoff (less PACE.kickRoomM) the feet
+    // first make room, as long as that leaves the kick a window (PACE.kickRoomWindowM) short of its edge.
+    // (A lead-leg kick shifts back onto the rear foot, away from him.)
+    const rearKick = !!e && def.kind === 'leg' && (!!def.clip || def.side !== this.c.stance.lead);
+    const room = rearKick ? Math.min(edge - PACE.kickRoomWindowM, this.standoff() - this.kickRoom(def)) : -Infinity;
+    if (!player && (dist > edge || dist < Math.max(lo, room))) {
       this.pendingSince = -1;
-      const want = this.strikeRange(lo + sweet * (hi - lo), edge);
+      const want = Math.max(room, this.strikeRange(lo + sweet * (hi - lo), edge));
       // Walking in, the goal is always a real step nearer for the feet (a goal inside their hold
       // tolerance stalls the body just short of range, leaning in on planted feet); the step that
       // brings an arm strike in range carries it.
       // (A kick keeps its own approach: it wants a set stance at its distance, not a step through it.)
       this.goalAt(s, e && dist > edge && def.kind === 'arm' ? Math.min(want, this.stepInRange(dist)) : want, 0, false);
       if (e && def.kind === 'arm' && dist > edge && (now || ctx.time >= this.nextStrikeAt) && this.stepInReady(edge)) return this.start(def, zone, aggression);
+      if (e && def.kind === 'arm' && def.clip && dist > edge && dist <= edge + PACE.lungeSlackL * this.c.geo.legLength && (now || ctx.time >= this.nextStrikeAt)
+        && this.c.gait.phase === 'double' && this.c.gait.bothPlanted() && this.c.canStrikeNow()) return this.start(def, zone, aggression);
       return false;
     }
     this.still();
     if (!now && ctx.time < this.nextStrikeAt) return false;
+    // Balance engine: a kick is not started into his blow (his windup past PACE.kickThreatWindup inside
+    // threat range): on one foot through his punch, kickers were hit off their stance leg.
+    if (e && def.kind === 'leg' && !now && this.c.opp!.windup >= PACE.kickThreatWindup && dist < THREAT_RANGE_M) return false;
     const ready = def.kind === 'leg' ? this.c.readyToKick() : this.c.canStrikeNow();
     if (ready && (e || (this.c.gait.phase === 'double' && this.c.gait.bothPlanted()))) return this.start(def, zone, aggression);
     // Not yet: the step in the air lands, then the blow (no new step meanwhile, for a while). A kick

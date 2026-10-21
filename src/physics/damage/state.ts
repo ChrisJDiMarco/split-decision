@@ -50,6 +50,8 @@ export interface PartInfo {
   arm: ArmContext | null;
   /** Cracks per zone: a cracked panel keeps DAMAGE_TUNING.crackWeakening of its strength per crack. */
   weakening: Partial<Record<ZoneId, number>>;
+  /** Last tick one of its geoms touched the canvas (feet: a leg standing on it carries trunk blows). */
+  groundTick: number;
 }
 
 export interface GeomInfo {
@@ -78,8 +80,9 @@ export interface JointMech {
    */
   housingReachM: number;
   /**
-   * Permissible side moment of this joint: the module's output bearing, or what the subtree it
-   * carries demands (DAMAGE_TUNING.structuralG), whichever is larger.
+   * Permissible side moment of this joint: the module's output bearing, what the subtree it carries
+   * demands (DAMAGE_TUNING.structuralG), or, under a part that can be knocked off, what its mount
+   * holds (DAMAGE_TUNING.mountBendShare), whichever is largest.
    */
   bearingMomentNm: number;
   // ---- the current load episode (armed ticks)
@@ -102,6 +105,8 @@ export interface JointMech {
   bendAxisP: Vec3 | null; // bend axis in the parent body frame
   baseQuat: [number, number, number, number]; // the body's design quaternion
   hyperRad: number; // how far its stop gave way
+  /** Health lost through the bearing channel (wear and bends): under a detachable part, its mount's wear. */
+  bearingLoss: number;
 }
 
 export interface Limb {
@@ -142,6 +147,21 @@ export interface InjuryRecord {
 /** Injury records kept per robot. */
 export const LEDGER_LOG = 64;
 
+/** One part knocked off, and the blow that did it (src/physics/damage/detach.ts). */
+export interface DetachRecord {
+  t: number;
+  part: string;
+  /** Only these can pop a part: a clean strike by the other robot, or a thrown prop. */
+  cause: 'strike' | 'prop';
+  byCorner: Corner | null;
+  by: string | null; // the striking part and what that body was doing, e.g. 'fist_l (jab)'
+  impactNs: number; // the blow's impact impulse (first DAMAGE_TUNING.impactWindowS)
+  windowNs: number; // everything the part took in the strike window
+  speed: number; // closing speed at first touch, m/s
+  thresholdNs: number; // what it needed: rating × mountScale × mount
+  mount: number; // the mount's wear factor at the time (1 = intact)
+}
+
 export interface DamageLedger {
   jointLoss: Record<JointCause, LossByRole>;
   failures: Record<JointFailure, number>;
@@ -153,6 +173,8 @@ export interface DamageLedger {
   overloads: Record<'gear' | 'stop' | 'bearing', { onset: number; broke: number; peak: number }>;
   dents: { count: number; cracks: number; byZone: Partial<Record<ZoneId, number>>; maxDepthM: number; plasticJ: number };
   partPoints: number;
+  /** Parts knocked off this fight, with the blow that did it. */
+  detaches: DetachRecord[];
 }
 
 export interface RobotDamage {
@@ -224,6 +246,11 @@ export interface Tally {
   striking: boolean; // it is on the striking side of its pair
   /** Fastest first-touch closing speed among the pairs that landed on this part (clean-hit test). */
   speed: number;
+  /** Tick of its first contact force (−1 before), and the surface that made it. */
+  t0: number;
+  firstOther: GeomInfo | null;
+  /** Impulse in the first DAMAGE_TUNING.impactWindowS from t0: the blow, not the lean after it. */
+  jImpact: number;
 }
 
 /**
@@ -332,6 +359,7 @@ export function emptyLedger(): DamageLedger {
     overloads: { gear: { onset: 0, broke: 0, peak: 0 }, stop: { onset: 0, broke: 0, peak: 0 }, bearing: { onset: 0, broke: 0, peak: 0 } },
     dents: { count: 0, cracks: 0, byZone: {}, maxDepthM: 0, plasticJ: 0 },
     partPoints: 0,
+    detaches: [],
   };
 }
 
@@ -357,6 +385,19 @@ function limbRadius(def: PartDef | undefined): number {
   return r;
 }
 
+/** How far a part reaches from a joint's anchor: the farthest point of its geoms (centre + bounding radius). */
+function partReach(ctx: SimContext, robot: RobotRuntime, partId: string, mjJoint: number): number {
+  const gx = ctx.data.geom_xpos as Float64Array;
+  const rb = ctx.model.geom_rbound as Float64Array;
+  const xa = ctx.data.xanchor as Float64Array;
+  let reach = 0;
+  for (const g of robot.parts.get(partId)?.geoms ?? []) {
+    const d = Math.hypot(gx[g * 3] - xa[mjJoint * 3], gx[g * 3 + 1] - xa[mjJoint * 3 + 1], gx[g * 3 + 2] - xa[mjJoint * 3 + 2]);
+    reach = Math.max(reach, d + rb[g]);
+  }
+  return reach;
+}
+
 function jointMech(ctx: SimContext, robot: RobotRuntime, i: number): JointMech {
   const { model } = ctx;
   const j = robot.joints[i];
@@ -371,14 +412,22 @@ function jointMech(ctx: SimContext, robot: RobotRuntime, i: number): JointMech {
   const sc = ctx.data.subtree_com as Float64Array;
   const xa = ctx.data.xanchor as Float64Array;
   const lever = Math.hypot(sc[bodyId * 3] - xa[mjJoint * 3], sc[bodyId * 3 + 1] - xa[mjJoint * 3 + 1], sc[bodyId * 3 + 2] - xa[mjJoint * 3 + 2]);
-  const structural = DAMAGE_TUNING.structuralG * subMass * 9.81 * lever;
+  const t = DAMAGE_TUNING;
+  const structural = t.structuralG * subMass * 9.81 * lever;
+  // The joint under a part that can be knocked off (the neck under the head) is that part's mount, rated
+  // for its pop load landing anywhere on the part (the lever is the part's reach from the joint: a jab on
+  // the crown of a short robot's head levers the neck twice as hard as one at its centre of mass). It
+  // yields (bends) at mountBendShare of that, not at the neck module's own bearing rating, which folded
+  // under routine jabs.
+  const spec = part?.detachable;
+  const mount = spec ? (t.mountBendShare * ((spec.impulseNs * t.mountScale) / t.mountPulseS) * partReach(ctx, robot, j.part, mjJoint)) / (t.bearingBreak * t.bearingStaticFactor) : 0;
   return {
     drive,
     mjJoint,
     bodyId,
     singleHinge: (model.body_jntnum[bodyId] as number) === 1,
-    housingReachM: drive.housingRadiusM + Math.max(limbRadius(part), limbRadius(parent)) + DAMAGE_TUNING.housingMarginM,
-    bearingMomentNm: Math.max(drive.bearingMomentNm, structural),
+    housingReachM: drive.housingRadiusM + Math.max(limbRadius(part), limbRadius(parent)) + t.housingMarginM,
+    bearingMomentNm: Math.max(drive.bearingMomentNm, structural, mount),
     inEpisode: false,
     role: 'none',
     arm: null,
@@ -397,6 +446,7 @@ function jointMech(ctx: SimContext, robot: RobotRuntime, i: number): JointMech {
     bendAxisP: null,
     baseQuat: [bq[bodyId * 4], bq[bodyId * 4 + 1], bq[bodyId * 4 + 2], bq[bodyId * 4 + 3]],
     hyperRad: 0,
+    bearingLoss: 0,
   };
 }
 
@@ -419,6 +469,7 @@ function buildRobotDamage(ctx: SimContext, robot: RobotRuntime, geoms: Array<Geo
       armedUntil: -1,
       arm: null,
       weakening: {},
+      groundTick: -1,
     });
   }
   for (const info of parts.values()) {

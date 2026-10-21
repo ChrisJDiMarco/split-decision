@@ -45,6 +45,13 @@ export interface PaceFighter {
   idleBy: Partial<Record<IdleCause, number>>;
   /** Idle with a strike that does not reach: seconds by kind and by how far out (m past its throw edge, 5 cm bins). */
   outOfRange: Record<string, number>;
+  /**
+   * The 'balance gate' idle split by what the balance engine says blocks an arm strike now (its
+   * strikeBlock: a reaction, the gyro reserve, the torso rate, a step, the DCM), or 'ready (cooldown)'
+   * when the engine would let it go (the gate test above is the stricter readyToStrike) and only the
+   * pause between strikes holds it, 'kick gate' for a kick.
+   */
+  gateBy?: Record<string, number>;
   combos: { started: number; completed: number; steps: number; stepsThrown: number; closedBy: Record<string, number> };
   feints: { asked: number; windups: number; reads: number; bites: number; byLevel: Record<string, { reads: number; bites: number }>; reactions: Record<string, number> };
   baseline: { windows: number; bites: number };
@@ -58,7 +65,7 @@ interface ComboRec { list: string; steps: number; thrown: number; until: number 
 interface BaseWatch { w: FeintWatch; end: number }
 
 const newFighter = (): PaceFighter => ({
-  inRangeS: 0, idleS: 0, idleBy: {}, outOfRange: {},
+  inRangeS: 0, idleS: 0, idleBy: {}, outOfRange: {}, gateBy: {},
   combos: { started: 0, completed: 0, steps: 0, stepsThrown: 0, closedBy: {} },
   feints: { asked: 0, windups: 0, reads: 0, bites: 0, byLevel: {}, reactions: {} },
   baseline: { windows: 0, bites: 0 },
@@ -77,6 +84,7 @@ export class PaceRecorder {
   private readonly nextBase = [0, 0];
   private readonly torso: Array<{ p: Vec3; t: number; avg: Vec3 } | null> = [null, null];
   private lastOut = '';
+  private lastKick = false;
 
   constructor(private readonly ctl: HumanoidController[]) {
     this.rings = ctl.map((c) => new RingIq(c));
@@ -185,6 +193,12 @@ export class PaceRecorder {
     const why = this.cause(ctx, c, d);
     f.idleBy[why] = (f.idleBy[why] ?? 0) + dt;
     if (why === 'strike out of its range' && this.lastOut) f.outOfRange[this.lastOut] = (f.outOfRange[this.lastOut] ?? 0) + dt;
+    if (why === 'balance gate') {
+      const g = (f.gateBy ??= {});
+      const st = me.engine?.state;
+      const k = !st ? 'legacy' : this.lastKick ? `kick gate: ${st.kickBlock || 'ready (cooldown)'}` : st.strikeBlock || 'ready (cooldown)';
+      g[k] = (g[k] ?? 0) + dt;
+    }
   }
 
   private cause(ctx: SimContext, c: 0 | 1, d: number): IdleCause {
@@ -208,6 +222,7 @@ export class PaceRecorder {
     }
     if (d < lo) return 'strike too close';
     if (!(me.gait.phase === 'double' && me.gait.bothPlanted())) return 'mid-step';
+    this.lastKick = def.kind === 'leg';
     if (!(def.kind === 'leg' ? me.readyToKick() : me.readyToStrike())) return 'balance gate';
     return 'cooldown or other';
   }

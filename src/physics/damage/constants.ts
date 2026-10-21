@@ -48,14 +48,16 @@ export const WORLD_SURFACES = {
 // ---------------------------------------------------------------- detachment
 
 /**
- * Only a strike from the other robot can pop a part off in one blow. Falls into the canvas, the cage
- * and flying debris still dent it (at this share of the damage points) and count toward the
- * accumulated-damage break, but a stumble can't decapitate anyone.
+ * Falls into the canvas, the cage and flying debris dent a part at this share of the damage points.
+ * They never pop it: only a clean strike from the other robot (or a thrown prop) can, see
+ * DAMAGE_TUNING.mountScale and src/physics/damage/detach.ts.
  */
 export const NON_STRIKE_DAMAGE_SCALE = 0.35;
 /**
- * A one-blow knockoff also needs a clean, committed shot: a fist, glove, foot or shin landing at
- * least this fast. Pushes, clinch bumps and slow shots only add accumulated damage.
+ * The impact event's `clean` flag (presentation, metrics, the openings detector): a fist, glove, foot
+ * or shin landing at least this fast. It no longer decides a head pop (that is the blow's impact
+ * impulse, DAMAGE_TUNING.mountScale), so the punch-speed stage can raise speeds without every fast
+ * jab qualifying.
  */
 export const CLEAN_HIT_MIN_SPEED = 4.5;
 
@@ -119,6 +121,47 @@ export const DAMAGE_TUNING = {
   pushTailS: 0.35,
   /** ...unless a fresh pair arrives at least this fast. */
   newStrikeSpeed: 1.5,
+
+  // ---- one-blow breaks (heads): only a really nice hard solid clean hit (src/physics/damage/detach.ts)
+  /**
+   * The blow itself: the impulse a part takes in this long from its first contact force. The stiff
+   * contact delivers a clean blow in 2-5 ms (in 24 traced fights a clean head strike's impulse was
+   * all in its first 5 ms); what comes after is the arm and body leaning in, which loads no mount.
+   */
+  impactWindowS: 0.008,
+  /**
+   * Mount strength: a part pops when one clean blow's impact impulse reaches its design rating
+   * (BreakSpec.impulseNs: head mass × 10 m/s × its mount factor) × this, × its mount's wear factor.
+   * The ×10 m/s ratings were set when strikes landed at 2-4.5 m/s; at 1 they sat at the median clean
+   * head strike (FIRECRACKER's 13 N·s against jabs of 13-16 N·s) and a routine jab popped heads.
+   * Calibrated 2026-10-20 (docs/design/strike-power.md §8) on the impact impulses of every clean
+   * head blow in House Mind fights: at 2.0 only the top 0.6% of 343 reach it (2 of 32 fights, from
+   * 33-35 N·s blows on FIRECRACKER's 26 N·s mount), with room for the punch-speed stage (blows ×1.35
+   * would pop heads in about 19% of fights). Labelled assumption: no vendor publishes a head mount
+   * rating. The iron-age heads (55-90 N·s ratings) stay out of reach of their blows (at most 44 N·s
+   * on a head in 4 traced fights). Never lower it to fake pops (strike-power.md §6 rule 7).
+   */
+  mountScale: 2.0,
+  /**
+   * A worn mount holds less: × (1 − mountWear × min(1, health its joint lost to the bearing channel)).
+   * The neck's bearing channel reads the side loads the mount itself carries, so its wear and bends
+   * are the mount's; gear-tooth slips and encoder faults are the drive's, not the mount's. Accumulated
+   * shell damage does not count either: the cover is not the mount, and a fall, the cage or the floor
+   * never pops a part.
+   */
+  mountWear: 0.4,
+  /** The striking limb met the guard (an arm or leg of the struck robot) first with this much impulse: a blocked blow, no pop. */
+  guardMinNs: 1,
+  /**
+   * The mount joint (the neck) is the same structure as the mount: its side-moment rating is at least
+   * what mountBendShare of a pop load demands landing anywhere on the part (its reach from the joint),
+   * so it bends (yields) only from blows near a pop and wears from blows above bearingOnset /
+   * bearingBreak of that, instead of folding under routine jabs on the neck module's own bearing. A
+   * clean blow's filtered peak force is about its impact impulse / mountPulseS (median of the traced
+   * clean head strikes: 3.1 ms).
+   */
+  mountBendShare: 0.8,
+  mountPulseS: 0.003,
 
   // ---- shells (§4.1-4.2; src/physics/damage/shell.ts)
   /** Unsupported panel span of a shell zone (clamped circular plate, diameter). Assumed. */
@@ -206,6 +249,12 @@ export const DAMAGE_TUNING = {
   /** Striker arming: its own load path counts when it lands off-axis or into its own stop. */
   strikerOffAxisDeg: 65,
   stopMarginDeg: 5,
+  /**
+   * A blow on the trunk (torso, head, pelvis) goes to the ground through the legs standing on the
+   * canvas, so it arms their hips, knees and ankles too (their channels then read what they really
+   * carried). 0 turns it off (A/B).
+   */
+  trunkArmsLegs: 1,
   /**
    * Housing hits: a striking surface (fist, foot, shin; or a thrown prop) landing within the drive's
    * housing reach of its anchor with this much (filtered) force faults it.

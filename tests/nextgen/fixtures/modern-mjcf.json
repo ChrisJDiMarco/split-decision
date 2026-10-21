@@ -1,59 +1,59 @@
 {
   "meta": {
-    "writtenAt": "2026-10-20T18:15:53.977Z",
-    "gitHead": "92a0259",
+    "writtenAt": "2026-10-21T10:36:16.162Z",
+    "gitHead": "b2db543+worktree",
     "source": {
-      "sha256": "4dddc86892d4b68fa39d699229d43ad42c475a7675f4b0e0e43b8158020f448f",
-      "files": 133
+      "sha256": "d2a02698de97f673ca698d5ea343a48b3659a0f6dcca55df335d03bc3045e384",
+      "files": 173
     }
   },
   "designs": {
     "firecracker/0": {
-      "sha256": "98266bad2c99321c03234c3af0afbcd440c56a045f4494e5150f190d45d1330a",
-      "length": 12342,
-      "totalMassKg": 37.95555759402934,
+      "sha256": "b537b0a9291bf1acebe1c36f6493574b23c79fccd121074cde4c97946d48a6c2",
+      "length": 12357,
+      "totalMassKg": 39.07831357625155,
       "runtimeSha256": "2cab067eff26ab8666f07b7b38db636b57f883de3813a85b42b4e5b02c7f2935"
     },
     "firecracker/1": {
-      "sha256": "9efacebaec969db3d5f0d7a5a42f13891a547e0a22c0767ec327db46c005acc5",
-      "length": 12341,
-      "totalMassKg": 37.95555759402934,
+      "sha256": "36660e7f44e6e256933412ff4c13bf5a8d703cefc1ba1d4a40c5b311ab95b626",
+      "length": 12356,
+      "totalMassKg": 39.07831357625155,
       "runtimeSha256": "2cab067eff26ab8666f07b7b38db636b57f883de3813a85b42b4e5b02c7f2935"
     },
     "savate/0": {
-      "sha256": "32a46cc9d3a8fbfca78e8a8992c71c6df4b95ed32ce1386b08d20abc5793c523",
-      "length": 12450,
-      "totalMassKg": 82.93849524855389,
+      "sha256": "96ad5c8d21755421a0b96e704ce8404837eb1d3b9ac7df42129595f7fdd829d6",
+      "length": 12484,
+      "totalMassKg": 85.25517595917759,
       "runtimeSha256": "d115af9d448179ebfb1a3a0c43cb39223489bfa0cf83a169b55ed28d7c81b048"
     },
     "savate/1": {
-      "sha256": "df04bb5ec51b39f08d76eb3d671b6c793351de1b91eae17be3956da72f01957b",
-      "length": 12449,
-      "totalMassKg": 82.93849524855389,
+      "sha256": "42677b566e8a75cf7fb8cc8be4dd6aec668cfc024d7ddf26b99c5ef4f9572fd6",
+      "length": 12483,
+      "totalMassKg": 85.25517595917759,
       "runtimeSha256": "d115af9d448179ebfb1a3a0c43cb39223489bfa0cf83a169b55ed28d7c81b048"
     },
     "haymaker/0": {
-      "sha256": "6886891d5123a732073f9a7e276dbd365be7512d80d1a86c70867cd44fd2121f",
-      "length": 12466,
-      "totalMassKg": 105.37732672112149,
+      "sha256": "4ecd8abed62e6742dc77e6b4e1b17b4d8d2c28fb5f31ff364ce04bfbb30cd824",
+      "length": 12509,
+      "totalMassKg": 113.97983241683076,
       "runtimeSha256": "bcf99fdf0bd30e82378035a5fde66bb27ed1402ec8bbb753ea6e871f1d556377"
     },
     "haymaker/1": {
-      "sha256": "147fc35fcebe9ab30251a07036a2f4634f2565ca749fbad4cb72987e8b322887",
-      "length": 12465,
-      "totalMassKg": 105.37732672112149,
+      "sha256": "42ec4b30c4500bfabac9a10914e66b8fa8d87ac498d15ddb610383a67eff5632",
+      "length": 12508,
+      "totalMassKg": 113.97983241683076,
       "runtimeSha256": "bcf99fdf0bd30e82378035a5fde66bb27ed1402ec8bbb753ea6e871f1d556377"
     },
     "pylon/0": {
-      "sha256": "da7c6a1e369331b9d5af8fa6bfdc9229c1bc2542b04ebfffc02de3ba0ba26fcb",
-      "length": 12405,
-      "totalMassKg": 79.56211052902492,
+      "sha256": "83627ba39ba1ebec184ece93b2f6e1a86efdc8c2e89f8d798c2e7e10267dffa9",
+      "length": 12446,
+      "totalMassKg": 83.45823293600466,
       "runtimeSha256": "1602794e7f5a83845eb9a58e32429207fce55eb1c95765a8fa270c3cbb1dafef"
     },
     "pylon/1": {
-      "sha256": "3505471365574b81cf58dc5f0fbc6a0606b2cc525102898fada60017f4b5f79a",
-      "length": 12404,
-      "totalMassKg": 79.56211052902492,
+      "sha256": "6d96c8fe482ac0d469b4ba4b4fbf37171b9d4b067bb5bd2eefa48a0f553dab6d",
+      "length": 12445,
+      "totalMassKg": 83.45823293600466,
       "runtimeSha256": "1602794e7f5a83845eb9a58e32429207fce55eb1c95765a8fa270c3cbb1dafef"
     }
   }
