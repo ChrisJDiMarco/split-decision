@@ -1,4 +1,12 @@
-# >>> RESUMED 2026-10-20 ~14:00 (Chris: "lets just get on with it") <<<
+# >>> PAUSED 2026-10-21 11:14 by Chris ("pause everything") <<<
+The getup-repair-pass workflow (run wf_ca820abb-b94, script in the 2026-10-20 session scratchpad wf/getup-repair-pass.js) is stopped, and its leftover sims were stopped by PID. Only the dev server is still running.
+- DONE but uncommitted, unjudged: damage unit fixes (src/physics/damage/**, src/ui/scorecard.ts, the RS04 bearing in src/robots/catalog.ts, tools/damage-metrics.ts). Measured on dcm: FIRECRACKER gyro deaths 8/16 -> 0/16, self-falls 0.39 -> 0.29, get-ups 84% -> 89%, striker self-damage 33% -> 12%, wrecked-joint fights 12/32 -> 1/32, result card shows real strikes.
+- PARTIAL, unreviewed: the get-up retune on the new bodies (src/physics/control/getup*.ts, mocap/getup*.ts, roll-keys.ts, controller.ts, tests/control/getup-search.ts, tools/balance-drills.ts). It had been iterating ~4.5 h (tuck stage, roll keys, trunk-attitude compensation) and hadn't reported numbers yet.
+- NOT STARTED: legacy regressions + published QDD torque-speed curves + punch speed, then the judge.
+- The whole working diff is backed up in tests/balance/.out/paused3-wip-20261021-1114.patch.
+Resume: from the same session, rerun the script with resumeFromRunId wf_ca820abb-b94 (the damage stage replays from cache; the get-up stage restarts on top of its files on disk). From a new session, adapt the script. Restart only when Chris says so.
+
+# (earlier) RESUMED 2026-10-20 ~14:00 (Chris: "lets just get on with it") <<<
 All four tracks restarted at once (no overnight wait). The old run ids can't be resumed from this session, so the scripts were adapted to skip the stages already committed. Scripts are in this session's scratchpad: /private/tmp/claude-501/-Users-chrisdimarco-Projects-split-decision/c64b6736-843f-4512-80ed-963cc7602daa/scratchpad/wf/
 - Balance engine from P3 (P1/P5/pace are committed): balance-engine-resume.js, run wf_3659ed53-de6.
 - Move polish proof: move-polish-proof.js, run wf_79f16240-ae0, args {runProof: true}.
