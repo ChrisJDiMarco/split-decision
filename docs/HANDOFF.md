@@ -10,6 +10,8 @@ DONE 2026-10-20 evening, all four committed: brain aggression (03a2148), NEXT GE
 
 RUNNING 2026-10-20 night: fight-ready-pass (scratchpad wf/fight-ready-pass.js, run wf_4ab0827e-382). Stages: FIRECRACKER RS04 hips (Chris approved) + docs/design/robot-realism-pass.md, in parallel with the head-pop bug + damage calibration; then fight-clean balance; then punch speed to the motor limit + kicks after a walk-in; then an independent judge (also regenerates the tests/nextgen lock).
 
+DONE 2026-10-21: fight-ready pass committed (f2ae969). Head pops fixed, self-falls 1.0 -> 0.39 (dcm), kicks land 32%. REGRESSION: get-ups broke on the new realistic bodies (legacy 97% -> 72%). RUNNING: getup-repair-pass (scratchpad wf/getup-repair-pass.js, run wf_ca820abb-b94): get-ups on both paths + damage unit fixes (GYRO_HP_POINTS, RS04 bearing, result card), then legacy regressions + published QDD torque-speed curves + punch speed, then a judge that also recommends whether dcm should become the default.
+
 If a run dies, resume it from THIS session with its scriptPath + resumeFromRunId. From a new session, adapt the scripts again.
 
 # (superseded) PAUSED 2026-10-07 13:50 by Chris ("pause everything") <<<
@@ -138,13 +140,22 @@ Uncommitted work in progress: src/physics/control/** + src/physics/control/balan
 
 - Damage overhaul APPROVED and running (`damage-overhaul`, task wfqk054jv; to resume: script damage-overhaul-wf_3264ae7f-e60.js with resumeFromRunId wf_3264ae7f-e60): joint loads by channel, physical dents (+ ~2x labelled visual boost), per-design durability, events with a position, VFX/audio by cause. Contact recoil and threshold calibration come after P3 makes strikes fast.
 
-- Damage overhaul DONE (f96f924, reviewed). CALIBRATION AFTER P3 (stage 5b, via `tools/strike-bench.ts --tune DAMAGE_TUNING.*`):
-  - Head pops are too frequent (3-4 in 8 fights, mostly FIRECRACKER's 13 N·s head).
-  - Fights with an injury: 63% (target 25-50%).
-  - On 3-axis shoulders and hips, wear is counted on all three joints.
-  - The rs04 bearing rating's source is inconsistent.
-  - HAYMAKER's forearms gouge from blocking; thicker guards would be a designs change.
-  - Hits to the torso and head never arm the hips or knees.
+- Damage overhaul DONE (f96f924, reviewed). CALIBRATION AFTER P3 (stage 5b) done 2026-10-20 in the fight-ready pass; details and numbers in docs/design/strike-power.md §8. Measured on 32 House Mind dcm fights with the same seeds before and after:
+  - Head pops: 20 of 32 fights ended by a head pop before, 2 of 32 after.
+    - Root cause: the ×10 m/s head ratings sat at the median clean blow (FIRECRACKER 13 N·s), so a routine jab popped them.
+    - Also, the 30 ms window counted the lean after the blow, and a latent accumulated-damage break, still in pre-overhaul points, could have finished a battered head in a fall.
+    - Now a head pops only from one clean, unblocked fist, foot or shin blow (or a thrown prop) whose 8 ms impact impulse reaches rating × mountScale 2.0, lowered only by the neck's bearing wear. Never from falls, floor, cage, pushes, blocks or accumulated damage.
+    - The neck is rated as the mount.
+  - Fights with an injury: 75% before, 38% after. With the sparring mind: 0 pops in 16 fights and 44% with an injury. With the hardware stage's robot edits as they stood at 23:20: 0 pops in 16 fights and 25% with an injury.
+  - Canvas and cage blows of up to 137 N·s on a head now leave it on, by rule.
+  - On 3-axis shoulders and hips, the bearing channel now books one blow once.
+  - Trunk blows now arm the legs standing on the canvas.
+  - Still open:
+    - RS04 bearing: `src/robots/catalog.ts` uses bearing(110), but the published housing is 120 × 120 × 56 mm. Make it bearing(120).
+    - HAYMAKER's forearm gouges (1.5-2.9 per fight) need thicker guards (a designs change).
+    - Striker self-damage is 15-24% (target ≤ 10%; shoulder bends on hooks and downward jabs), so wrecked joints run about 1 in 3 fights.
+    - The result card's "significant strike" uses presentation energy ≥ 60 J (`src/ui/scorecard.ts`), so a head-popping jab (15-40 J of it) shows "0 strikes, 0 J".
+  - For the punch-speed stage: impulses ×1.35 would pop heads in about 19% of fights. Re-check, and re-tune with `SD_TUNE='DAMAGE_TUNING.mountScale=…'` in tools/fight-metrics.ts if needed.
 - Balance build: p1:reverify DONE; P5 mocap footwork (+ ring IQ) is RUNNING.
 
 ## Next steps, in order
