@@ -82,6 +82,13 @@ export interface BalanceMetrics {
   copJumpP99Cm: number;
   dcmErrCm: number; // RMS
   servoLimitShare: number; // control ticks with a planted-leg servo at its limit (no skill running)
+  // Reserve metrics (Phase 2): the most-loaded planted-leg servo's share of its available torque each tick
+  // (no skill running), median and 95th percentile (reserve = 1 − share); the ticks whose inverse-dynamics
+  // feed-forward a planted leg's headroom clamp cut; and by joint group, the share of ticks at the limit.
+  torqueShareP50: number;
+  torqueShareP95: number;
+  ffClampShare: number;
+  limitByGroup: Record<string, number>;
   gyroSatFootwork: number; // mean while stepping or standing
   gyroSatPeak: number;
   reserveAtTouchdown: number; // mean free momentum at touchdown (1 = empty rotor)
@@ -124,6 +131,9 @@ export class BalanceRecorder {
   private dcmN = 0;
   private limitTicks = 0;
   private limitN = 0;
+  private readonly shares: number[] = [];
+  private ffClamp = 0;
+  private readonly groupLimit: Record<string, number> = { ankle: 0, knee: 0, hip: 0 };
   private satSum = 0;
   private satN = 0;
   private satPeak = 0;
@@ -211,12 +221,22 @@ export class BalanceRecorder {
     if (!skill) {
       const force = d.actuator_force as Float64Array;
       let limit = false;
+      let worst = 0;
+      const hit = { ankle: false, knee: false, hip: false };
       for (const { i, side } of this.legIdx) {
         if (!c.gait.planted(side)) continue;
         const j = this.r.joints[i];
-        if (Math.abs(force[j.act]) >= LIMIT_FRAC * j.availableTorque) { limit = true; break; }
+        const u = Math.abs(force[j.act]) / Math.max(1e-6, j.availableTorque);
+        worst = Math.max(worst, u);
+        if (u >= LIMIT_FRAC) {
+          limit = true;
+          hit[j.name.startsWith('ankle') ? 'ankle' : j.name.startsWith('knee') ? 'knee' : 'hip'] = true;
+        }
       }
       if (limit) this.limitTicks++;
+      for (const g of ['ankle', 'knee', 'hip'] as const) if (hit[g]) this.groupLimit[g]++;
+      this.shares.push(Math.min(1, worst));
+      if ((c.idyn?.probe.clampedLegs ?? 0) > 0) this.ffClamp++;
       this.limitN++;
       const sat = c.gyro?.saturation ?? 0;
       this.satSum += sat;
@@ -289,11 +309,24 @@ export class BalanceRecorder {
       copJumpP99Cm: 100 * (jumps.length ? jumps[Math.floor(0.99 * (jumps.length - 1))] : 0),
       dcmErrCm: 100 * Math.sqrt(this.dcm2 / Math.max(1, this.dcmN)),
       servoLimitShare: this.limitN ? this.limitTicks / this.limitN : 0,
+      ...this.reserve(),
       gyroSatFootwork: this.satN ? this.satSum / this.satN : 0,
       gyroSatPeak: this.satPeak,
       reserveAtTouchdown: rates.length ? rates.reduce((s, x) => s + x, 0) / rates.length : 1,
       reserveAtTouchdownMin: rates.length ? Math.min(...rates) : 1,
       ...this.mocapShares(),
+    };
+  }
+
+  private reserve(): Pick<BalanceMetrics, 'torqueShareP50' | 'torqueShareP95' | 'ffClampShare' | 'limitByGroup'> {
+    const v = [...this.shares].sort((a, b) => a - b);
+    const q = (k: number) => (v.length ? v[Math.min(v.length - 1, Math.floor(k * v.length))] : 0);
+    const n = Math.max(1, this.limitN);
+    return {
+      torqueShareP50: q(0.5),
+      torqueShareP95: q(0.95),
+      ffClampShare: this.ffClamp / n,
+      limitByGroup: { ankle: this.groupLimit.ankle / n, knee: this.groupLimit.knee / n, hip: this.groupLimit.hip / n },
     };
   }
 
