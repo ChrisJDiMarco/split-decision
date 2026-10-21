@@ -1,4 +1,16 @@
-# >>> PAUSED 2026-10-07 13:50 by Chris ("pause everything") <<<
+# >>> RESUMED 2026-10-20 ~14:00 (Chris: "lets just get on with it") <<<
+All four tracks restarted at once (no overnight wait). The old run ids can't be resumed from this session, so the scripts were adapted to skip the stages already committed. Scripts are in this session's scratchpad: /private/tmp/claude-501/-Users-chrisdimarco-Projects-split-decision/c64b6736-843f-4512-80ed-963cc7602daa/scratchpad/wf/
+- Balance engine from P3 (P1/P5/pace are committed): balance-engine-resume.js, run wf_3659ed53-de6.
+- Move polish proof: move-polish-proof.js, run wf_79f16240-ae0, args {runProof: true}.
+- NEXT GEN Phase 0: nextgen-phase0.js, run wf_acbb1868-c1b.
+- Brain aggression: brain-aggression.js, run wf_adfab87f-520.
+Chris decided: MINDS defaults to cloud JEV (src/core/settings.ts; LOCAL first, switched back because a LOCAL decision takes ~3.5-4 s), and the player can still switch to JEV/HOUSE/per corner. Local model download approved (hf.co/Mapika/decider-4b-GGUF:Q4_K_M).
+CHRIS (2026-10-20, for every control/strike/motor stage): "the actuators that power the rotating of limbs are VERY powerful in real life so they can really whip around." Run limbs at the top of each real module's published peak torque-speed curve (burst ratings, low damping during strikes), not a cautious fraction. Only stall torque, thermal derate and battery may hold them back.
+DONE 2026-10-20 evening, all four committed: brain aggression (03a2148), NEXT GEN Phase 0 (eb7e90f), move polish PoC (7493c35, NO-GO for the full library; only HAYMAKER hook kept), balance P3+P2+P4 (e97fe26, b07378d), LOCAL bridge 2x faster (14235d5, still over the 3 s timeout). Balance judge: FAIL overall, default stays legacy. Landed 37.5/min (from 13), get-ups 97% in fights, self-falls 1.0 per fighter per 2 min (target 0.5, mostly PYLON/HAYMAKER with the gyro saturated, no hit), fists peak 4-5.7 m/s vs 6-7.7 available on the gantry, kicks land 1/137 in sparring, FIRECRACKER heads pop within seconds. NEXT: head-pop calibration, fight-clean balance (falls with no hit), punch speed to the motors' limit, kicks after a walk-in, FIRECRACKER RS04 hips (awaiting Chris), regenerate tests/nextgen lock.
+
+If a run dies, resume it from THIS session with its scriptPath + resumeFromRunId. From a new session, adapt the scripts again.
+
+# (superseded) PAUSED 2026-10-07 13:50 by Chris ("pause everything") <<<
 All four tracks were stopped minutes after launch. No sim processes are left (only the dev server). Nothing new was written. The only uncommitted work is still the early P3 edits (catalog.ts qdd.rs06x2, humanoid.ts per-joint motor overrides, protocol.ts, balance-drills.ts), backed up in tests/balance/.out/paused2-wip-20261007-1350.patch.
 Resume any track with its script plus resumeFromRunId (the speed-mode caps are already in the scripts):
 - Balance (P3 strikes, then P2, P4 and the judge): balance-engine-wf_38bd1af8-d17.js, run wf_38bd1af8-d17.
