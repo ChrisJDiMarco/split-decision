@@ -30,6 +30,36 @@ let keyframe: Float64Array | null = null;
 let keyBuf: { GetView(): Float64Array; delete(): void } | null = null;
 let blowups = 0;
 
+/** Weapon pushes in flight (src/render/weapons → 'weapon_force'): a force + torque on one body for a few ticks. */
+interface WeaponPush { body: number; f: [number, number, number]; point: [number, number, number]; ticks: number }
+let weaponPushes: WeaponPush[] = [];
+const appliedPush: { body: number; w: number[] }[] = [];
+
+function applyWeaponPushes(c: SimContext) {
+  appliedPush.length = 0;
+  if (!weaponPushes.length) return;
+  const xfrc = c.data.xfrc_applied as Float64Array;
+  const xipos = c.data.xipos as Float64Array;
+  for (const p of weaponPushes) {
+    const b = p.body;
+    const rx = p.point[0] - xipos[b * 3], ry = p.point[1] - xipos[b * 3 + 1], rz = p.point[2] - xipos[b * 3 + 2];
+    const [fx, fy, fz] = p.f;
+    const w = [fx, fy, fz, ry * fz - rz * fy, rz * fx - rx * fz, rx * fy - ry * fx];
+    for (let i = 0; i < 6; i++) xfrc[b * 6 + i] += w[i];
+    appliedPush.push({ body: b, w });
+    p.ticks--;
+  }
+  weaponPushes = weaponPushes.filter((p) => p.ticks > 0);
+}
+
+/** Take this tick's weapon pushes back out so the systems that own xfrc_applied (the gyro) see only their own. */
+function removeWeaponPushes(c: SimContext) {
+  if (!appliedPush.length) return;
+  const xfrc = c.data.xfrc_applied as Float64Array;
+  for (const a of appliedPush) for (let i = 0; i < 6; i++) xfrc[a.body * 6 + i] -= a.w[i];
+  appliedPush.length = 0;
+}
+
 const post = (msg: WorkerToMain, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(msg, transfer);
 
 function meta(c: SimContext): WorldMeta {
@@ -70,7 +100,9 @@ function exploded(c: SimContext): boolean {
 
 function stepOnce(c: SimContext) {
   for (const s of SYSTEMS) s.pre?.(c);
+  applyWeaponPushes(c);
   c.mj.mj_step(c.model, c.data);
+  removeWeaponPushes(c);
   c.tick++;
   c.time += c.dt;
   if (exploded(c) && keyframe) {
@@ -145,6 +177,7 @@ async function init(s: MatchSetup) {
   keyBuf = null;
   keyframe = null;
   blowups = 0;
+  weaponPushes = [];
   paused = false;
   timescale = 1;
   setup = s;
@@ -185,6 +218,15 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       case 'timescale':
         timescale = Math.max(0.02, Math.min(2, msg.scale));
         break;
+      case 'weapon_force': {
+        if (!ctx || !ctx.released) return;
+        const part = ctx.robots[msg.victim].parts.get(msg.part) ?? ctx.robots[msg.victim].parts.get('torso');
+        if (!part || !part.attached) return;
+        const ticks = Math.max(1, Math.round(msg.durationS / ctx.dt));
+        const k = 1 / (ticks * ctx.dt);
+        weaponPushes.push({ body: part.body, f: [msg.impulse[0] * k, msg.impulse[1] * k, msg.impulse[2] * k], point: [...msg.point], ticks });
+        break;
+      }
       case 'intent': {
         if (!ctx || !setup) return;
         const delayTicks = Math.round((setup.fighters[msg.corner].reactionDelayS ?? setup.reactionDelayS) / ctx.dt);

@@ -389,7 +389,12 @@ export type MainToWorker =
   | { type: 'release' } // drop the robots from the gantry: fight starts
   | { type: 'pause'; paused: boolean }
   | { type: 'timescale'; scale: number } // 1 = real time, 0.1 = 10x slow motion
-  | { type: 'reset' };
+  | { type: 'reset' }
+  /**
+   * A weapon round landed (src/render/weapons): push `part` of `victim` with `impulse` (N·s, world)
+   * at `point` (world), spread over `durationS`. Presentation-driven; the push itself is real physics.
+   */
+  | { type: 'weapon_force'; victim: Corner; part: string; impulse: Vec3; point: Vec3; durationS: number };
 
 export type WorkerToMain =
   | { type: 'ready'; meta: WorldMeta }

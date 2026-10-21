@@ -15,6 +15,7 @@ import { TimeWarp } from './render/camera/time-warp';
 import { applyPoses } from './render/robot-view';
 import { createStage } from './render/stage';
 import { createVfx, VFX_REQUIRED_LIMITS } from './render/vfx';
+import { Weapons } from './render/weapons';
 import { HIT, strikeStrength } from './render/vfx/scaling';
 import { design } from './robots/designs';
 import { applyLoadout } from './robots/loadout';
@@ -55,6 +56,15 @@ arena.excludeFromContactShadows(vfx.root);
 
 const worker = new Worker(new URL('./physics/worker.ts', import.meta.url), { type: 'module' });
 const send = (m: MainToWorker) => worker.postMessage(m);
+
+// Hidden shoulder weapons (src/render/weapons): pop out, track him, fire bursts.
+const weapons = new Weapons({
+  physicsRoot: stage.physicsRoot,
+  camera: stage.camera,
+  send,
+  sparks: (events) => vfx.onEvents(events, broadcast.displayFrame()?.telemetry ?? null),
+  pulse: (amount) => post.pulse(amount),
+});
 
 // ?balance=dcm previews the in-progress balance engine (docs/design/balance-engine.md); the default stays legacy.
 const BALANCE_PREVIEW = new URLSearchParams(location.search).get('balance') === 'dcm' ? 'dcm' : undefined;
@@ -206,6 +216,7 @@ const broadcast = createBroadcast(stage, {
     warp.cancel();
     sentScale = 1; // init resets the worker to real time
     vfx.clear();
+    weapons.clear();
     send({ type: 'init', setup: s, ...(BALANCE_PREVIEW ? { balance: BALANCE_PREVIEW } : {}) });
   },
   onRelease() {
@@ -262,6 +273,7 @@ function onReady(m: WorldMeta) {
   meta = m;
   ({ views, bodyGroups } = buildRobotKitViews(m, stage.physicsRoot, [setup.fighters[0].skin, setup.fighters[1].skin]));
   vfx.setWorld(m);
+  weapons.setViews(views);
   pendingImpacts = [];
   buildBrains(m);
   broadcast.setWorld(m, setup);
@@ -348,6 +360,7 @@ function frame(now: number) {
   vfx.setReplay(replaying);
   const simDt = workerPaused && !replaying ? 0 : dt * (replaying ? 0.25 : scale);
   vfx.update(simDt);
+  weapons.update(simDt, shown?.telemetry ?? null, liveFight());
   arena.update(dt);
   player?.update(dt); // the chase camera is the last to write the lens before rendering
   post.render();
@@ -356,4 +369,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Debug handle for the console and automated checks.
-Object.assign(window, { splitDecision: { stage, broadcast, vfx, arena, link, get brains() { return brains; }, get player() { return player; }, get setup() { return setup; }, send, hitFeel: { warp, post } } });
+Object.assign(window, { splitDecision: { stage, broadcast, vfx, arena, link, get brains() { return brains; }, get player() { return player; }, get setup() { return setup; }, send, weapons, hitFeel: { warp, post } } });
