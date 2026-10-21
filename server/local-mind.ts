@@ -27,9 +27,11 @@ export interface LocalMindConfig {
   maxConcurrent: number; // requests running on the runtime at once
   maxQueue: number; // requests waiting beyond that; more get 429
   isolatedLevels: boolean; // decider's released configs judge each score level on its own row
+  primeContext: boolean; // run the rows' shared state prefix once first, so every row resumes from it
   temperatures: Temperatures;
   topLogprobs: number; // Ollama allows 0..20
   healthCacheMs: number;
+  answerCache: number; // recent decisions kept by exact request (0: off); the model is deterministic here
   fetchImpl?: typeof fetch;
 }
 
@@ -55,13 +57,15 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): LocalMindCo
     backend,
     url: (env.LOCAL_JEV_URL?.trim() || (backend === 'ollama' ? DEFAULT_OLLAMA_URL : DEFAULT_SYSTEMONE_URL)).replace(/\/+$/, ''),
     model,
-    timeoutMs: int(env.LOCAL_JEV_TIMEOUT_MS, 3000),
+    timeoutMs: int(env.LOCAL_JEV_TIMEOUT_MS, 3400), // just under the brain's LOCAL_TIMEOUT_MS (3500), so the 504 still arrives first
     maxConcurrent: int(env.LOCAL_JEV_MAX_CONCURRENT, 1),
     maxQueue: int(env.LOCAL_JEV_MAX_QUEUE, 4),
     isolatedLevels: env.LOCAL_JEV_ISOLATED_LEVELS !== '0',
+    primeContext: env.LOCAL_JEV_PRIME !== '0',
     temperatures: temperaturesFor(model, env.LOCAL_JEV_TEMPERATURES),
     topLogprobs: Math.min(20, int(env.LOCAL_JEV_TOP_LOGPROBS, 20)),
     healthCacheMs: int(env.LOCAL_JEV_HEALTH_CACHE_MS, 1500),
+    answerCache: env.LOCAL_JEV_ANSWER_CACHE === '0' ? 0 : int(env.LOCAL_JEV_ANSWER_CACHE, 64),
   };
 }
 
@@ -128,6 +132,7 @@ export class LocalMind {
   private readonly gate: Gate;
   private readonly fetch: typeof fetch;
   private healthCache: { at: number; value: Promise<Health> } | null = null;
+  private readonly answers = new Map<string, SystemOneResponse>(); // insertion order = least recently used first
 
   constructor(cfg: LocalMindConfig) {
     this.cfg = cfg;
@@ -145,10 +150,23 @@ export class LocalMind {
   async decide(body: SystemOneRequest, signal: AbortSignal): Promise<{ res: SystemOneResponse; backendMs: number }> {
     this.checkUrl();
     const plan = this.cfg.backend === 'ollama' ? planRows(body, this.cfg.isolatedLevels) : null; // validate before queueing
+    // The serializer speaks in coarse words, so a fighter often asks about the very same state twice:
+    // temperature-0 letter probabilities make the earlier answer the answer.
+    const key = this.cfg.answerCache > 0 ? JSON.stringify([body.state, body.questions]) : '';
+    const hit = key ? this.answers.get(key) : undefined;
+    if (hit) {
+      this.answers.delete(key);
+      this.answers.set(key, hit);
+      return { res: hit, backendMs: 0 };
+    }
     const release = await this.gate.acquire(signal);
     const t0 = performance.now();
     try {
       const res = plan ? await this.runOllama(plan.rows, plan.rendered, signal) : await this.runSystemOne(body, signal);
+      if (key) {
+        this.answers.set(key, res);
+        if (this.answers.size > this.cfg.answerCache) this.answers.delete(this.answers.keys().next().value as string);
+      }
       return { res, backendMs: performance.now() - t0 };
     } catch (e) {
       if (signal.aborted) throw new BridgeError('local mind timed out', 504);
@@ -175,16 +193,31 @@ export class LocalMind {
     return { status: r.status, json, text };
   }
 
-  /** Rows run one after another: they share the state prefix, which Ollama keeps in its KV cache. */
+  private generate(prompt: string, logprobs: boolean, signal: AbortSignal) {
+    return this.post('/api/generate', {
+      model: this.cfg.model, prompt, raw: true, stream: false, keep_alive: OLLAMA_KEEP_ALIVE,
+      ...(logprobs ? { logprobs: true, top_logprobs: this.cfg.topLogprobs } : {}),
+      options: { num_predict: 1, temperature: 0, num_ctx: OLLAMA_NUM_CTX }, // same options every call: a change reloads the model
+    }, signal);
+  }
+
+  /**
+   * Rows run one after another on Ollama's single slot. decider is Qwen3.5, whose DeltaNet layers keep
+   * a recurrent state that llama.cpp cannot rewind: a row can only resume from a context checkpoint,
+   * and llama.cpp saves those just before the end of each prompt it runs. Row after row therefore
+   * re-reads the whole state (~350 tokens each, ~5,200 per decision). Running the shared prefix on its
+   * own first puts a checkpoint at the end of the state, and every row then pays only for its question.
+   */
   private async runOllama(rows: Row[], rendered: ReturnType<typeof planRows>['rendered'], signal: AbortSignal): Promise<SystemOneResponse> {
     const probs: number[][] = [];
     let inputTokens = 0;
+    const prefix = this.cfg.primeContext ? sharedPrefix(rows.map((r) => r.prompt)) : '';
+    if (prefix) {
+      const { status, json } = await this.generate(prefix, false, signal);
+      if (status !== 200) throw new BridgeError(`ollama ${status}: ${(json as OllamaGenerate | null)?.error ?? 'error'}`, status === 404 ? 503 : 502);
+    }
     for (const row of rows) {
-      const { status, json } = await this.post('/api/generate', {
-        model: this.cfg.model, prompt: row.prompt, raw: true, stream: false, keep_alive: OLLAMA_KEEP_ALIVE,
-        logprobs: true, top_logprobs: this.cfg.topLogprobs,
-        options: { num_predict: 1, temperature: 0, num_ctx: OLLAMA_NUM_CTX },
-      }, signal);
+      const { status, json } = await this.generate(row.prompt, true, signal);
       const g = json as OllamaGenerate | null;
       if (status !== 200) throw new BridgeError(`ollama ${status}: ${g?.error ?? 'error'}`, status === 404 ? 503 : 502);
       const top = g?.logprobs?.[0]?.top_logprobs;
@@ -245,6 +278,25 @@ export class LocalMind {
   }
 }
 
+/** Shortest prefix worth a priming call (characters; the state is ~1,300). */
+const MIN_PRIME_CHARS = 256;
+
+/**
+ * The rows' common prefix, cut back to its last line break so it ends on the same tokens as in every
+ * row ("...}\n\n" before "Question: "), or '' when there is one row or too little shared to pay off.
+ */
+export function sharedPrefix(prompts: readonly string[]): string {
+  if (prompts.length < 2) return '';
+  let n = prompts[0].length;
+  for (const p of prompts.slice(1)) {
+    let i = 0;
+    while (i < n && i < p.length && p.charCodeAt(i) === prompts[0].charCodeAt(i)) i++;
+    n = i;
+  }
+  const cut = prompts[0].lastIndexOf('\n', n - 1) + 1;
+  return cut >= MIN_PRIME_CHARS ? prompts[0].slice(0, cut) : '';
+}
+
 const txtErr = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -286,7 +338,11 @@ export function localMindHandler(mind: LocalMind) {
       send(res, 400, { error: 'invalid JSON body' });
       return;
     }
-    const signal = AbortSignal.timeout(mind.cfg.timeoutMs);
+    // Give up at the timeout, or as soon as the brain hangs up (it has fallen back to the House Mind),
+    // so a stale decision does not hold the runtime while the next one waits.
+    const gone = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) gone.abort(); });
+    const signal = AbortSignal.any([AbortSignal.timeout(mind.cfg.timeoutMs), gone.signal]);
     try {
       const { res: out, backendMs } = await mind.decide(body, signal);
       const total = performance.now() - t0;

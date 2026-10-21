@@ -81,6 +81,10 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
       if (mock.opts.delayMs) await new Promise((r) => setTimeout(r, mock.opts.delayMs));
       if (b.model !== model) { json(res, 404, { error: `model '${String(b.model)}' not found` }); return; }
       if (mock.opts.status) { json(res, mock.opts.status, { error: 'mock failure' }); return; }
+      if (!b.logprobs) { // a priming call: runs the prompt, nobody reads the token
+        json(res, 200, { model, response: ' ', done: true, prompt_eval_count: Math.ceil(String(b.prompt).length / 4), eval_count: 1 });
+        return;
+      }
       const p = parsePrompt(String(b.prompt));
       const favourite = mock.opts.pick?.(p)
         ?? Math.max(0, mock.opts.favour ? p.options.findIndex((o) => o.startsWith(mock.opts.favour as string)) : 0);
@@ -130,8 +134,8 @@ export async function startBridge(cfg: LocalMindConfig): Promise<Listening & { m
 export function config(over: Partial<LocalMindConfig> = {}): LocalMindConfig {
   return {
     backend: 'ollama', url: 'http://127.0.0.1:1', model: 'hf.co/Mapika/decider-4b-GGUF:Q4_K_M',
-    timeoutMs: 3000, maxConcurrent: 1, maxQueue: 4, isolatedLevels: true,
-    temperatures: { choice: 1.11, noul: 1.56, score: 1.287 }, topLogprobs: 20, healthCacheMs: 0,
+    timeoutMs: 3000, maxConcurrent: 1, maxQueue: 4, isolatedLevels: true, primeContext: true,
+    temperatures: { choice: 1.11, noul: 1.56, score: 1.287 }, topLogprobs: 20, healthCacheMs: 0, answerCache: 0,
     ...over,
   };
 }

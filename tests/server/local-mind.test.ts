@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs';
 import { afterEach, describe, expect, test } from 'vitest';
-import { configFromEnv, isLoopbackUrl, LocalMind } from '../../server/local-mind';
+import { configFromEnv, isLoopbackUrl, LocalMind, sharedPrefix } from '../../server/local-mind';
 import {
   assemble, choiceConfidence, labelProbabilities, optionLabel, planRows, promptFor, renderQuestion, renderState,
   scoreConfidence, shortModelName, temperaturesFor,
@@ -129,14 +129,71 @@ describe('bridge /api/local-jev (ollama backend)', () => {
       }
     }
     expect(json.answers.tactic.choice).toBe('jab');
-    // One Ollama call per row: 4 list questions + 2 score questions × 5 isolated levels.
-    expect(ollama.requests).toHaveLength(4 + 2 * 5);
-    for (const r of ollama.requests) {
-      expect(r).toMatchObject({ raw: true, stream: false, logprobs: true, top_logprobs: 20, options: { num_predict: 1, temperature: 0 } });
-      // Every row starts with the same state, so Ollama's prefix cache pays for it once.
-      expect(String(r.prompt).startsWith(`Context:\n${JSON.stringify(req.state)}`)).toBe(true);
+    // One priming call for the shared state, then one call per row: 4 list questions + 2 score questions × 5 isolated levels.
+    expect(ollama.requests).toHaveLength(1 + 4 + 2 * 5);
+    const [prime, ...rows] = ollama.requests;
+    expect(prime).toMatchObject({ raw: true, stream: false, options: { num_predict: 1, temperature: 0, num_ctx: 4096 } });
+    expect(prime.logprobs).toBeUndefined();
+    // The prime is exactly the state block every row starts with, cut at a line break.
+    expect(prime.prompt).toBe(`Context:\n${JSON.stringify(req.state)}\n\n`);
+    for (const r of rows) {
+      expect(r).toMatchObject({ raw: true, stream: false, logprobs: true, top_logprobs: 20, options: { num_predict: 1, temperature: 0, num_ctx: 4096 } });
+      expect(String(r.prompt).startsWith(String(prime.prompt))).toBe(true);
     }
     expect(Number(headers.get('x-local-jev-latency-ms'))).toBeGreaterThanOrEqual(0);
+  });
+
+  test('LOCAL_JEV_PRIME=0 (or a single row) sends no priming call', async () => {
+    const ollama = keep(await startMockOllama());
+    const off = keep(await startBridge(config({ url: ollama.url, primeContext: false })));
+    expect((await post(off.url, brainRequest())).status).toBe(200);
+    expect(ollama.requests).toHaveLength(4 + 2 * 5);
+    expect(ollama.requests.every((r) => r.logprobs === true)).toBe(true);
+    ollama.requests.length = 0;
+    const on = keep(await startBridge(config({ url: ollama.url })));
+    expect((await post(on.url, { state: { x: 1 }, questions: { q: { type: 'noul', instructions: 'ok?' } } })).status).toBe(200);
+    expect(ollama.requests).toHaveLength(1);
+  });
+
+  test('sharedPrefix: the common state block, cut at a line break, only when it is worth a call', () => {
+    const ctx = `{"s":"${'x'.repeat(300)}"}`;
+    const a = promptFor(ctx, 'Pick?', ['a', 'b']);
+    const b = promptFor(ctx, 'Pick again?', ['c', 'd']);
+    expect(sharedPrefix([a, b])).toBe(`Context:\n${ctx}\n\n`);
+    expect(sharedPrefix([a])).toBe('');
+    expect(sharedPrefix([promptFor('{}', 'x?', ['a', 'b']), promptFor('{}', 'y?', ['a', 'b'])])).toBe('');
+  });
+
+  test('the same request again is answered from the answer cache, least recently used evicted', async () => {
+    const ollama = keep(await startMockOllama({ favour: 'jab' }));
+    const bridge = keep(await startBridge(config({ url: ollama.url, answerCache: 2 })));
+    const req = brainRequest();
+    const first = await post(bridge.url, req);
+    const calls = ollama.requests.length;
+    const again = await post(bridge.url, req);
+    expect(again.status).toBe(200);
+    expect(again.json).toEqual(first.json);
+    expect(again.headers.get('x-local-jev-latency-ms')).toBe('0');
+    expect(ollama.requests).toHaveLength(calls);
+    const other = (x: number) => ({ state: { x }, questions: { q: { type: 'noul', instructions: 'ok?' } } });
+    await post(bridge.url, other(1));
+    await post(bridge.url, other(2)); // evicts the brain request (least recently used)
+    const n = ollama.requests.length;
+    await post(bridge.url, req);
+    expect(ollama.requests.length).toBe(n + calls);
+  });
+
+  test('the brain hanging up stops the decision', async () => {
+    const ollama = keep(await startMockOllama({ delayMs: 150 }));
+    const bridge = keep(await startBridge(config({ url: ollama.url })));
+    const ctl = new AbortController();
+    const gone = fetch(`${bridge.url}/api/local-jev`, { method: 'POST', body: JSON.stringify(brainRequest()), signal: ctl.signal }).catch(() => null);
+    setTimeout(() => ctl.abort(), 60);
+    await gone;
+    await new Promise((r) => setTimeout(r, 600));
+    expect(ollama.requests.length).toBeLessThanOrEqual(2); // not the 15 calls of a whole decision
+    const next = await post(bridge.url, { state: 's', questions: { q: { type: 'noul', instructions: 'ok?' } } });
+    expect(next.status).toBe(200);
   });
 
   test('a choice with more options than top_logprobs still answers every option', async () => {
@@ -257,7 +314,10 @@ describe('bridge /api/local-jev (systemone passthrough backend)', () => {
 describe('config', () => {
   test('defaults to Ollama on loopback with decider-4b; env overrides', () => {
     const d = configFromEnv({});
-    expect(d).toMatchObject({ backend: 'ollama', url: 'http://127.0.0.1:11434', model: 'hf.co/Mapika/decider-4b-GGUF:Q4_K_M', timeoutMs: 3000, isolatedLevels: true });
+    expect(d).toMatchObject({ backend: 'ollama', url: 'http://127.0.0.1:11434', model: 'hf.co/Mapika/decider-4b-GGUF:Q4_K_M', timeoutMs: 3400, isolatedLevels: true, primeContext: true });
+    expect(configFromEnv({ LOCAL_JEV_PRIME: '0' }).primeContext).toBe(false);
+    expect(d.answerCache).toBe(64);
+    expect(configFromEnv({ LOCAL_JEV_ANSWER_CACHE: '0' }).answerCache).toBe(0);
     const s = configFromEnv({ LOCAL_JEV_BACKEND: 'systemone', LOCAL_JEV_URL: 'http://127.0.0.1:8009/', LOCAL_JEV_MODEL: 'jaredpalmer/kev-4b', LOCAL_JEV_TIMEOUT_MS: '5000', LOCAL_JEV_ISOLATED_LEVELS: '0' });
     expect(s).toMatchObject({ backend: 'systemone', url: 'http://127.0.0.1:8009', model: 'jaredpalmer/kev-4b', timeoutMs: 5000, isolatedLevels: false });
   });
