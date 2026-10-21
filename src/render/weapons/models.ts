@@ -1,18 +1,29 @@
-// Procedural weapon models and their hidden compartments. Each mount is built in the torso's own
-// frame (x forward, y left, z up, metres) and scaled to the robot. A mount is:
-//   slot (fixed on the torso) → hatch doors (flip open) + lift (rises out) → yaw → pitch → the gun.
+// Procedural weapon models and the armoured back sheaths they hide in. Each mount is built in the
+// torso's own frame (x forward, y left, z up, metres) and scaled to the robot:
+//   slot (on the torso's back) → sheath (painted in the robot's own livery, with a sliding cap)
+//                              → hinge (swings the gun from hanging down inside the sheath, back,
+//                                       up and over the shoulder) → lift → yaw → pitch → the gun.
 // The barrel points along +x of the pitch node; `muzzles` are the points rounds leave from.
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as THREE from 'three/webgpu';
+import { ensureAttributes } from '../robot-kit/geom/attrs';
+import { newObjState } from '../robot-kit/geom/part-builder';
+import type { KitMaterials } from '../robot-kit/types';
 
 export type WeaponKind = 'cannon' | 'gatling' | 'flamer' | 'missiles';
 
 export interface WeaponModel {
   kind: WeaponKind;
   slot: THREE.Group;
+  /** Swings the stowed gun out of the sheath and over the shoulder (rotation about y). */
+  hinge: THREE.Group;
+  /** The sheath's sliding top cap. */
+  cap: THREE.Group;
+  /** Sheath length below the hinge (m, before scale). */
+  length: number;
   lift: THREE.Group;
   yaw: THREE.Group;
   pitch: THREE.Group;
-  doors: { pivot: THREE.Group; openAngle: number; axis: 'x' | 'y' }[];
   muzzles: THREE.Object3D[];
   /** Spinning barrel cluster (gatling). */
   spinner?: THREE.Group;
@@ -99,35 +110,49 @@ function box(x: number, y: number, z: number): THREE.BoxGeometry {
   return new THREE.BoxGeometry(x, y, z);
 }
 
-/** Two hatch doors over the slot, hinged on their outer edges along y (or x). */
-function hatch(slot: THREE.Group, w: number, d: number, axis: 'x' | 'y'): WeaponModel['doors'] {
-  const doors: WeaponModel['doors'] = [];
-  for (const s of [-1, 1]) {
-    const pivot = new THREE.Group();
-    if (axis === 'x') pivot.position.set(0, s * w / 2, 0);
-    else pivot.position.set(s * d / 2, 0, 0);
-    slot.add(pivot);
-    const plate = axis === 'x' ? box(d, w / 2, 0.012) : box(d / 2, w, 0.012);
-    const m = mesh(plate, mats.hazard(), pivot);
-    if (axis === 'x') m.position.set(0, -s * w / 4, 0.006);
-    else m.position.set(-s * d / 4, 0, 0.006);
-    doors.push({ pivot, openAngle: (axis === 'x' ? -s : s) * 1.9, axis });
-  }
-  // The dark compartment floor visible when the doors are open.
-  mesh(box(d * 0.95, w * 0.95, 0.01), mats.dark(), slot, 0, 0, -0.004);
-  return doors;
-}
-
-function base(kind: WeaponKind, travel: number): WeaponModel {
+function base(kind: WeaponKind, travel: number, length: number): WeaponModel {
   const slot = new THREE.Group();
+  const hinge = new THREE.Group();
+  const cap = new THREE.Group();
   const lift = new THREE.Group();
   const yaw = new THREE.Group();
   const pitch = new THREE.Group();
-  slot.add(lift);
+  slot.add(hinge, cap);
+  hinge.add(lift);
   lift.add(yaw);
   yaw.add(pitch);
   slot.name = `weapon.${kind}`;
-  return { kind, slot, lift, yaw, pitch, doors: [], muzzles: [], heatMats: [], rounds: [], travel, lamps: [] };
+  return { kind, slot, hinge, cap, length, lift, yaw, pitch, muzzles: [], heatMats: [], rounds: [], travel, lamps: [] };
+}
+
+/** A mesh in the robot's own livery (the kit shader needs its attribute set and object state). */
+function kitMesh(geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D, x = 0, y = 0, z = 0): THREE.Mesh {
+  const m = mesh(ensureAttributes(geo), mat, parent, x, y, z);
+  m.userData.kit = newObjState(Math.random());
+  return m;
+}
+
+/**
+ * The armoured sheath on the robot's back the gun hangs in: a rounded shell in the robot's paint,
+ * a trim stripe, cooling vents, a mounting saddle against the back plate, a status light and a
+ * cap that slides back to let the gun out.
+ */
+function sheath(w: WeaponModel, kit: KitMaterials, side: 1 | -1) {
+  const len = w.length, wid = 0.15, dep = 0.13;
+  const shell = kitMesh(new RoundedBoxGeometry(dep, wid, len, 3, 0.03), kit.paint, w.slot, -0.01, 0, -len / 2);
+  shell.castShadow = true;
+  // Trim stripe down the outer face and a band at the mouth.
+  kitMesh(new RoundedBoxGeometry(dep * 0.7, 0.012, len * 0.8, 2, 0.004), kit.trim, w.slot, -0.01, side * (wid / 2 + 0.004), -len * 0.5);
+  kitMesh(new RoundedBoxGeometry(dep + 0.012, wid + 0.012, 0.03, 2, 0.008), kit.trim, w.slot, -0.01, 0, -0.03);
+  // Vents on the back face.
+  for (let i = 0; i < 4; i++) kitMesh(new THREE.BoxGeometry(0.012, wid * 0.6, 0.014), kit.mech, w.slot, -0.01 - dep / 2 - 0.002, 0, -len * 0.35 - i * 0.03);
+  // Saddle bolting the sheath to the back plate.
+  kitMesh(new RoundedBoxGeometry(0.06, wid * 0.8, len * 0.5, 2, 0.01), kit.mech, w.slot, dep / 2 + 0.01, 0, -len * 0.45);
+  // Sliding cap.
+  kitMesh(new RoundedBoxGeometry(dep * 0.9, wid * 0.9, 0.02, 2, 0.006), kit.paint, w.cap, 0, 0, 0.004);
+  const l = lamp(0xff2a10);
+  w.lamps.push(l);
+  mesh(new THREE.SphereGeometry(0.009, 8, 6), l, w.slot, -0.01 - dep / 2 - 0.004, side * wid * 0.3, -0.06);
 }
 
 /** The telescoping post and turret ring every weapon rides on. */
@@ -135,17 +160,16 @@ function turret(w: WeaponModel, r: number, h: number) {
   const steel = mats.steel(), gun = mats.gun();
   mesh(new THREE.CylinderGeometry(r * 0.35, r * 0.4, h, 16).rotateX(Math.PI / 2), steel, w.lift, 0, 0, -h / 2);
   mesh(new THREE.CylinderGeometry(r, r * 1.1, r * 0.35, 24).rotateX(Math.PI / 2), gun, w.yaw, 0, 0, r * 0.17);
-  const l = lamp(0xff2a10);
-  w.lamps.push(l);
-  mesh(new THREE.SphereGeometry(r * 0.12, 10, 8), l, w.yaw, -r * 0.7, 0, r * 0.3);
+  // Hinge knuckle at the sheath mouth.
+  mesh(new THREE.CylinderGeometry(r * 0.45, r * 0.45, r * 1.6, 16), steel, w.hinge, 0, 0, 0);
 }
 
 // ---------------------------------------------------------------- the guns
 
-function cannon(): WeaponModel {
-  const w = base('cannon', 0.2);
-  w.doors = hatch(w.slot, 0.18, 0.22, 'x');
-  turret(w, 0.075, 0.2);
+function cannon(kit: KitMaterials, side: 1 | -1): WeaponModel {
+  const w = base('cannon', 0.06, 0.66);
+  sheath(w, kit, side);
+  turret(w, 0.06, 0.06);
   w.pitch.position.z = 0.08;
   const gun = mats.gun(), dark = mats.dark(), steel = mats.steel(), barrel = mats.barrel();
   w.heatMats.push(barrel);
@@ -172,10 +196,10 @@ function cannon(): WeaponModel {
   return w;
 }
 
-function gatling(): WeaponModel {
-  const w = base('gatling', 0.18);
-  w.doors = hatch(w.slot, 0.18, 0.2, 'x');
-  turret(w, 0.07, 0.18);
+function gatling(kit: KitMaterials, side: 1 | -1): WeaponModel {
+  const w = base('gatling', 0.06, 0.5);
+  sheath(w, kit, side);
+  turret(w, 0.055, 0.06);
   w.pitch.position.z = 0.075;
   const gun = mats.gun(), dark = mats.dark(), steel = mats.steel();
   // Motor housing and ammo box with a brass belt.
@@ -202,10 +226,10 @@ function gatling(): WeaponModel {
   return w;
 }
 
-function flamer(): WeaponModel {
-  const w = base('flamer', 0.17);
-  w.doors = hatch(w.slot, 0.17, 0.2, 'x');
-  turret(w, 0.065, 0.17);
+function flamer(kit: KitMaterials, side: 1 | -1): WeaponModel {
+  const w = base('flamer', 0.06, 0.5);
+  sheath(w, kit, side);
+  turret(w, 0.05, 0.06);
   w.pitch.position.z = 0.07;
   const gun = mats.gun(), steel = mats.steel(), tank = mats.tank(), dark = mats.dark();
   // Twin fuel tanks with steel bands, a feed line and a long nozzle with a cooling shroud.
@@ -231,10 +255,10 @@ function flamer(): WeaponModel {
   return w;
 }
 
-function missiles(): WeaponModel {
-  const w = base('missiles', 0.22);
-  w.doors = hatch(w.slot, 0.22, 0.22, 'x');
-  turret(w, 0.07, 0.22);
+function missiles(kit: KitMaterials, side: 1 | -1): WeaponModel {
+  const w = base('missiles', 0.08, 0.36);
+  sheath(w, kit, side);
+  turret(w, 0.055, 0.08);
   w.pitch.position.z = 0.1;
   const gun = mats.gun(), dark = mats.dark(), wh = mats.warhead(), tip = mats.tip();
   // A 2×3 pod with an armoured cowl.
@@ -262,7 +286,7 @@ function missiles(): WeaponModel {
   return w;
 }
 
-export const BUILD: Record<WeaponKind, () => WeaponModel> = { cannon, gatling, flamer, missiles };
+export const BUILD: Record<WeaponKind, (kit: KitMaterials, side: 1 | -1) => WeaponModel> = { cannon, gatling, flamer, missiles };
 
 /** A small missile body for flight (the round that leaves the tube). */
 export function missileMesh(): THREE.Group {

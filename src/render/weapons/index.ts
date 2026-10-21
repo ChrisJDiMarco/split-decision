@@ -12,6 +12,7 @@ import type { MainToWorker, RobotTelemetry, SimEvent } from '../../core/protocol
 import type { Corner } from '../../core/types';
 import { applyImpact, type RobotKitView } from '../robot-kit';
 import type { KitPart } from '../robot-kit/types';
+import { Armor, localBox } from './armor';
 import { C, rand3, WeaponFx, type V3 } from './fx';
 import { BUILD, missileMesh, shellMesh, type WeaponKind, type WeaponModel } from './models';
 import { sfx } from './sounds';
@@ -35,9 +36,8 @@ const SPEC: Record<WeaponKind, Spec> = {
   missiles: { min: 2, max: 10, cool: [8, 13] },
 };
 
-const DEPLOY_S = 0.7;
+const DEPLOY_S = 0.85;
 const YAW_RATE = 7;
-const FOLD_PITCH = 1.35; // folded nose-down in the compartment
 
 type Phase = 'hidden' | 'deploying' | 'aiming' | 'firing' | 'holding' | 'retracting';
 
@@ -101,9 +101,18 @@ export class Weapons {
   private readonly shells: THREE.Mesh[] = [];
   private readonly missiles: THREE.Group[] = [];
   private time = 0;
+  private readonly armor: Armor;
 
   constructor(private readonly host: WeaponsHost) {
     this.fx = new WeaponFx(host.camera);
+    this.armor = new Armor({
+      physicsRoot: host.physicsRoot,
+      onShear: (pos, dir) => {
+        for (let i = 0; i < 8; i++) this.fx.glow.spawn({ pos, vel: rand3(3).addScaledVector(dir, 0.5), life: 0.4 + Math.random() * 0.3, size: [0.03, 0.01], colors: [C.fireHot, C.fire], drag: 1.5, gravity: 9.81 });
+        this.fx.smoke.spawn({ pos, vel: dir.clone().multiplyScalar(0.3).setZ(0.5), life: 1.2, size: [0.06, 0.35], colors: [C.smokeDark], alpha: [0.45, 0], drag: 2, gravity: -0.4 });
+        if (Math.random() < 0.5) sfx.ricochet();
+      },
+    });
     host.physicsRoot.add(this.fx.root);
     for (let i = 0; i < 6; i++) {
       const s = shellMesh();
@@ -124,18 +133,20 @@ export class Weapons {
     for (const a of this.arsenals) for (const mt of a.mounts) mt.m.slot.removeFromParent();
     this.arsenals = [];
     this.clear();
+    this.armor.setViews(views);
     for (const view of views) {
       const torso = view.parts.get('torso');
       if (!torso) continue;
       const box = localBox(torso);
       const size = box.getSize(new THREE.Vector3());
-      const scale = THREE.MathUtils.clamp(size.z / 0.42, 0.65, 1.45);
+      const scale = THREE.MathUtils.clamp(size.z / 0.6, 0.55, 1.25);
       const kinds = LOADOUT[view.design.id] ?? ['cannon', 'gatling'];
       const mounts: Mount[] = [];
       kinds.forEach((kind, i) => {
         const side = (i === 0 ? -1 : 1) as 1 | -1; // right shoulder first (y is left)
-        const m = BUILD[kind]();
-        m.slot.position.set(box.min.x + size.x * 0.42, side * Math.max(0.09, size.y * 0.3), box.max.z - 0.004);
+        const m = BUILD[kind](view.materials, side);
+        // On the back, either side of the spine, mouth level with the shoulders.
+        m.slot.position.set(box.min.x - 0.075 * scale, side * Math.max(0.08, size.y * 0.3), box.max.z - 0.01);
         m.slot.scale.setScalar(scale);
         torso.attached.add(m.slot);
         mounts.push({ m, side, phase: 'hidden', deploy: 0, timer: 0, shots: 0, nextShot: 0, spin: 0, heat: 0, recoil: 0, aimPitch: 0, ready: 0, flameSound: 0 });
@@ -145,8 +156,14 @@ export class Weapons {
     }
   }
 
+  /** A melee hit landed (from the worker's impact events): chip his armour around it. */
+  impact(victim: Corner, pos: V3, energyJ: number, dir: V3 | null): void {
+    this.armor.hit(victim, pos, energyJ, dir);
+  }
+
   clear(): void {
     this.fx.clear();
+    this.armor.clear();
     for (const f of this.flights) if (f.obj) f.obj.visible = false;
     this.flights = [];
     for (const a of this.arsenals) {
@@ -170,6 +187,7 @@ export class Weapons {
     for (const a of this.arsenals) this.updateArsenal(a, dt, tel, live);
     this.updateFlights(dt, tel);
     this.fx.update(dt);
+    this.armor.update(dt);
   }
 
   // ---------------------------------------------------------------- per robot
@@ -245,7 +263,7 @@ export class Weapons {
         mt.spin += (want - mt.spin) * Math.min(1, dt * (want > mt.spin ? 3.2 : 1.2));
         if (mt.m.spinner) mt.m.spinner.rotation.x += mt.spin * dt;
       }
-      if (target && mt.deploy > 0) this.aim(mt, target, dt);
+      if (target && mt.deploy > 0.85) this.aim(mt, target, dt);
       pose(mt);
       for (const hm of mt.m.heatMats) hm.emissiveIntensity = mt.heat * mt.heat * 4;
       const blink = mt.deploy > 0 && Math.sin(this.time * 14) > 0 ? 6 : 0.3;
@@ -405,6 +423,7 @@ export class Weapons {
           if (n2 >= 4) {
             o.burnUntil = this.time + 2.2;
             this.push(o.corner, 'torso', aimDir.clone().multiplyScalar(9), o.torso.attached.position.clone(), 0.1);
+            this.armor.hit(o.corner, o.torso.attached.position.clone().addScaledVector(aimDir, -0.15).add(rand3(0.15)), 22, aimDir);
             if (Math.random() < 0.3) this.dent(o, 'torso', o.torso.attached.position.clone().addScaledVector(aimDir, -0.15), aimDir, 40);
           }
         }
@@ -484,6 +503,7 @@ export class Weapons {
           this.push(victim.corner, part, dir.clone().multiplyScalar(5), p, 0.01);
           if (Math.random() < 0.3) this.host.sparks([impact(p, dir, f.owner, victim.corner, part, 12, 5)]);
           for (let i = 0; i < 2; i++) this.fx.glow.spawn({ pos: p, vel: rand3(3).addScaledVector(dir, -2), life: 0.2, size: [0.025, 0.01], colors: [C.fireHot], drag: 2, gravity: 9.81 });
+          this.armor.hit(victim.corner, p, 32, dir);
           if (Math.random() < 0.25) this.dent(victim, part, p, dir, 70);
           if (Math.random() < 0.15) sfx.ricochet();
         } else if (dir.z < -0.02) {
@@ -515,6 +535,7 @@ export class Weapons {
     const push = dir.clone().setZ(Math.max(0.15, dir.z + 0.25)).normalize().multiplyScalar(impulseNs > 0 ? impulseNs * falloff : 30 * falloff);
     this.push(victim.corner, 'torso', push, p, 0.02);
     this.host.sparks([impact(p, dir, f.owner, victim.corner, 'torso', 260 * falloff, 9)]);
+    this.armor.hit(victim.corner, p, 420 * falloff, dir);
     if (direct) this.dent(victim, 'torso', p, dir, 650);
     void tel;
   }
@@ -536,19 +557,22 @@ export class Weapons {
 function pose(mt: Mount) {
   const m = mt.m;
   const d = mt.deploy;
-  const doors = THREE.MathUtils.smoothstep(d, 0, 0.35);
-  for (const door of m.doors) {
-    if (door.axis === 'x') door.pivot.rotation.x = door.openAngle * doors;
-    else door.pivot.rotation.y = door.openAngle * doors;
-  }
-  const rise = easeOutBack(THREE.MathUtils.clamp((d - 0.25) / 0.75, 0, 1));
-  m.lift.position.z = -m.travel * (1 - rise);
-  m.lift.visible = d > 0.2;
-  m.lift.scale.setScalar(0.5 + 0.5 * Math.min(1, rise));
-  const unfold = THREE.MathUtils.smoothstep(d, 0.65, 1);
-  m.pitch.rotation.y = THREE.MathUtils.lerp(FOLD_PITCH, -mt.aimPitch, unfold);
-  if (d <= 0) m.yaw.rotation.z = 0;
+  // The cap slides back off the sheath mouth first.
+  m.cap.position.x = -0.13 * THREE.MathUtils.smoothstep(d, 0, 0.18);
+  // Then the gun swings out of the sheath: hanging down → back → up over the shoulder → forward.
+  const swing = easeInOut(THREE.MathUtils.clamp((d - 0.12) / 0.66, 0, 1));
+  m.hinge.rotation.y = Math.PI / 2 + swing * Math.PI * 1.5;
+  // Locks in and rises clear of the shoulder with a little overshoot.
+  const rise = easeOutBack(THREE.MathUtils.clamp((d - 0.74) / 0.26, 0, 1));
+  m.lift.position.z = m.travel * rise;
+  const unfold = THREE.MathUtils.smoothstep(d, 0.85, 1);
+  m.pitch.rotation.y = -mt.aimPitch * unfold;
+  if (d < 0.85) m.yaw.rotation.z *= 0.8;
   if (m.recoil) m.recoil.position.x = -0.13 * Math.pow(mt.recoil, 2);
+}
+
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 function easeOutBack(t: number): number {
@@ -559,23 +583,6 @@ function easeOutBack(t: number): number {
 /** Physics-frame position of an object under the physics root. */
 function physPos(o: THREE.Object3D, root: THREE.Object3D): THREE.Vector3 {
   return root.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
-}
-
-/** The torso's visual bounds in its own frame. */
-function localBox(part: KitPart): THREE.Box3 {
-  part.attached.updateMatrixWorld(true);
-  const inv = part.attached.matrixWorld.clone().invert();
-  const box = new THREE.Box3();
-  const bb = new THREE.Box3();
-  part.content.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.geometry) return;
-    mesh.geometry.computeBoundingBox();
-    bb.copy(mesh.geometry.boundingBox!).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, mesh.matrixWorld));
-    box.union(bb);
-  });
-  if (box.isEmpty()) box.set(new THREE.Vector3(-0.12, -0.18, -0.2), new THREE.Vector3(0.12, 0.18, 0.2));
-  return box;
 }
 
 function impact(pos: THREE.Vector3, dir: THREE.Vector3, striker: Corner, victim: Corner, part: string, energyJ: number, speed: number): SimEvent {

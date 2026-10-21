@@ -289,6 +289,12 @@ function onFrame(msg: FrameMsg) {
   pulseFor(msg.events, 1, msg.telemetry);
   vfx.onEvents(msg.events, msg.telemetry);
   vfx.onTelemetry(msg.telemetry, msg.poses);
+  for (const e of msg.events) {
+    // Melee hits chip the outer armour plates too.
+    if (e.kind === 'impact' && e.victim !== null && e.striker !== null && !e.push) {
+      weapons.impact(e.victim, new THREE.Vector3(...e.pos), e.energyJ, new THREE.Vector3(-e.normal[0], -e.normal[1], -e.normal[2]));
+    }
+  }
   queueImpacts(msg.events);
 }
 
