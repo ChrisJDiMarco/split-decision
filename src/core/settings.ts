@@ -8,7 +8,7 @@ export interface Settings {
   /** Master sound. Off by default while Chris watches other things during test runs. */
   soundOn: boolean;
   /**
-   * The global MINDS override: 'corner' (default) fights each corner's own pick; 'jev', 'local' or
+   * The global MINDS override, 'jev' (cloud) by default (Chris, 2026-10-20; LOCAL is still too slow): 'corner' fights each corner's own pick; 'jev', 'local' or
    * 'house' puts every corner that is not the human player on that mind. Changing it mid-fight hot
    * swaps the minds (Brain.setSource).
    */
@@ -27,7 +27,7 @@ export type GlobalMinds = 'corner' | 'jev' | 'local' | 'house';
 export const GLOBAL_MINDS: readonly GlobalMinds[] = ['corner', 'jev', 'local', 'house'];
 
 const STORAGE_KEY = 'split-decision.settings.v1';
-const DEFAULTS: Settings = { oilEffects: false, soundOn: false, minds: 'corner', fairMode: false, dentBoost: true };
+const DEFAULTS: Settings = { oilEffects: false, soundOn: false, minds: 'jev', fairMode: false, dentBoost: true };
 
 type Listener = (s: Readonly<Settings>) => void;
 const listeners = new Set<Listener>();
