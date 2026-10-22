@@ -6,7 +6,7 @@ import type { JointCause, JointFailure, JointRole, JointState, SimEvent } from '
 import type { Vec3 } from '../../core/types';
 import type { RobotRuntime, SimContext } from '../sim-context';
 import { jointStateFor } from '../systems/motors';
-import { GYRO_HP_POINTS, MAX_SLOP_RAD } from './constants';
+import { MAX_SLOP_RAD } from './constants';
 import { LEDGER_LOG, type ArmContext, type DamageState, type PartInfo, type RobotDamage } from './state';
 
 export interface Injury {
@@ -128,15 +128,23 @@ export function makeLimp(ctx: SimContext, robot: RobotRuntime, index: number, st
 }
 
 /** Applies damage points to an attached part: hp, hydraulic punctures (by work) and the gyro core. */
-export function applyPartDamage(rd: RobotDamage, info: PartInfo, points: number): void {
+export function applyPartDamage(rd: RobotDamage, info: PartInfo, points: number, strike = true): void {
   const { part, def } = info;
   if (!part.attached || !(points > 0)) return;
   part.damage += points;
   part.hp = Math.max(0, 1 - part.damage / def.hp);
   rd.ledger.partPoints += points;
-  // Hits on the part housing the gyro core wear the core itself: a battered fighter loses its balance aid.
+  // Hits on the part housing the gyro core wear the core itself: a fighter whose torso is wrecked
+  // loses its balance aid (the core's capacity is the torso shell's, durability.ts gyroCapacity).
   const gyro = rd.robot.gyro;
-  if (gyro && def.tags.includes('gyro')) gyro.health = Math.max(0, gyro.health - points / GYRO_HP_POINTS);
+  if (gyro && def.tags.includes('gyro')) {
+    const before = gyro.health;
+    gyro.health = Math.max(0, gyro.health - points / rd.profile.gyroHpPoints);
+    const L = rd.ledger.gyro;
+    if (strike) L.strikePoints += points;
+    else L.worldPoints += points;
+    L.healthLost += before - gyro.health;
+  }
 }
 
 /**

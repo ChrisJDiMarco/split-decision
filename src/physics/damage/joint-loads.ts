@@ -11,6 +11,8 @@
 //   bearing  the wrench through the joint (cfrc_int, one mj_rnePostConstraint per armed tick) about its
 //            anchor: the moment off its own axis, the radial and the axial force. Against the output
 //            bearing's ratings: a hook to the side of the elbow, a low kick to the side of the knee.
+//            A tick whose wrench breaks the joint's own torque balance about its axis (by more than
+//            DAMAGE_TUNING.wrenchCheckStall × stall) is not a load: the last sample is held.
 // When the arm window closes, the episode's filtered peaks decide, deterministically by channel and
 // gear type: wear between onset and break; at break a planetary jams (or strips), a QDD sheds a tooth
 // and slips, a cylinder seal blows, a stop gives way, a shaft bends and binds.
@@ -87,6 +89,8 @@ interface Views extends ModelViews {
   qfrcAct: Float64Array;
   qfrcSmooth: Float64Array;
   qfrcCon: Float64Array;
+  qfrcPassive: Float64Array;
+  qacc: Float64Array;
   M: Float64Array;
   cfrc: Float64Array;
   subtreeCom: Float64Array;
@@ -103,6 +107,7 @@ function views(ctx: SimContext, mv: ModelViews): Views {
     v = {
       ...mv,
       qfrcAct: data.qfrc_actuator, qfrcSmooth: data.qfrc_smooth, qfrcCon: data.qfrc_constraint,
+      qfrcPassive: data.qfrc_passive, qacc: data.qacc,
       M: data.M, cfrc: data.cfrc_int, subtreeCom: data.subtree_com, xanchor: data.xanchor, xaxis: data.xaxis,
     };
     dataViews.set(ctx.data, v);
@@ -150,7 +155,18 @@ function sample(V: Views, rd: RobotDamage, i: number, m: JointMech): void {
   const fa = f[0] * a[0] + f[1] * a[1] + f[2] * a[2];
   const fr = Math.hypot(f[0] - fa * a[0], f[1] - fa * a[1], f[2] - fa * a[2]);
   const mOff = Math.hypot(mperp[0], mperp[1], mperp[2]);
-  const bearing = Math.max(mOff / m.bearingMomentNm, fr / drive.bearingRadialN, Math.abs(fa) / drive.bearingAxialN) / k0;
+  // The wrench must agree with the joint's own balance about its axis: the moment along the axis is
+  // what the joint itself transmits (motor, passive, end stop, less what the rotor's armature takes).
+  // On a contact's first tick the post-constraint wrench can miss that by kilonewton-metres while the
+  // step's own dynamics (qacc, qfrc) stay sane: that reading is not a load the structure carried, so
+  // the previous sample is held for this tick (a 3-axis shoulder read 6.8 kN·m for 1 ms between
+  // ~0.2 kN·m neighbours and bent on it).
+  const resid = Math.abs(ma - (tauAct + V.qfrcPassive[d] + limitGen - V.armature[d] * V.qacc[d]));
+  const checkStall = DAMAGE_TUNING.wrenchCheckStall;
+  const trusted = !(checkStall > 0) || resid <= checkStall * drive.stallNm;
+  const prev = m.ringN > 0 ? m.ring[((m.ringN - 1) % FILTER_TAPS) * 3 + 2] : 0;
+  if (!trusted) rd.ledger.wrenchHeld++;
+  const bearing = trusted ? Math.max(mOff / m.bearingMomentNm, fr / drive.bearingRadialN, Math.abs(fa) / drive.bearingAxialN) / k0 : prev;
   const cap = DAMAGE_TUNING.maxLoadRatio;
   if (!(gear < cap && stop < cap && bearing < cap)) return; // NaN, or a solver crush: not a load
   // ---- filter (moving average over FILTER_TAPS armed ticks) and peaks
@@ -177,7 +193,7 @@ function sample(V: Views, rd: RobotDamage, i: number, m: JointMech): void {
   }
   if (br > m.peak[2]) {
     m.peak[2] = br;
-    m.bendAxisW = mOff > 1e-9 ? [mperp[0] / mOff, mperp[1] / mOff, mperp[2] / mOff] : null;
+    if (trusted) m.bendAxisW = mOff > 1e-9 ? [mperp[0] / mOff, mperp[1] / mOff, mperp[2] / mOff] : null;
   }
 }
 

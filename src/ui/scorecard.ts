@@ -3,12 +3,39 @@
 import type { RobotTelemetry, SimEvent } from '../core/protocol';
 import type { Corner } from '../core/types';
 
+/**
+ * A significant strike is a landed blow (not a push) that the damage model measured as a real hit:
+ * an impulse of at least SIGNIFICANT_IMPULSE_NS, about a solid human punch's momentum (a boxer's
+ * ~2-3 kg effective fist mass at 6-8 m/s), or absorbed work of at least SIGNIFICANT_WORK_J, enough
+ * to dent a 2.5 mm polycarbonate panel well past its ~4 J elastic limit. It used to be 60 J of
+ * presentation energy (½·m_eff·v² of the first contact), which a head-popping jab (29-35 N·s, 30-64 J
+ * of absorbed work, 15-40 J of presentation energy) never reached, so the card read "0 strikes, 0 J".
+ * In the dcm sparring baseline (32 fights × 90 s) the landed blows ran 12.7/25.6 N·s and 10.7/32.4 J
+ * at p50/p90.
+ */
+export const SIGNIFICANT_IMPULSE_NS = 15;
+export const SIGNIFICANT_WORK_J = 20;
+/** Recordings made before the damage overhaul carry no absorbed work: they keep the old rule. */
 export const SIGNIFICANT_STRIKE_J = 60;
+
+type ImpactEvent = Extract<SimEvent, { kind: 'impact' }>;
+
+/** The hit's size on the card: the damage model's absorbed work, or presentation energy for an old recording. */
+export function hitWorkJ(ev: ImpactEvent): number {
+  return ev.workJ ?? ev.energyJ;
+}
+
+/** A blow by one robot on the other that counts as a significant strike (see SIGNIFICANT_IMPULSE_NS). */
+export function isSignificantStrike(ev: SimEvent): ev is ImpactEvent {
+  if (ev.kind !== 'impact' || ev.striker === null || ev.victim === null || ev.striker === ev.victim || ev.push) return false;
+  if (ev.workJ === undefined) return ev.energyJ >= SIGNIFICANT_STRIKE_J;
+  return ev.impulseNs >= SIGNIFICANT_IMPULSE_NS || ev.workJ >= SIGNIFICANT_WORK_J;
+}
 
 export interface CornerStats {
   strikes: number; // significant strikes landed
-  strikeEnergyJ: number;
-  peakHitJ: number;
+  strikeEnergyJ: number; // absorbed work of those strikes (hitWorkJ)
+  peakHitJ: number; // the hardest significant strike's absorbed work
   knockdowns: number; // times this corner put the opponent down
   partsRemoved: number; // opponent parts this corner tore off
   damageDealt: number; // opponent damageTotal gained, 0..1
@@ -66,11 +93,12 @@ export class Scorecard {
   record(events: readonly SimEvent[], telemetry: readonly RobotTelemetry[] | null): void {
     const c = this.current.corners;
     for (const ev of events) {
-      if (ev.kind === 'impact' && ev.striker !== null && ev.victim !== null && ev.striker !== ev.victim && ev.energyJ >= SIGNIFICANT_STRIKE_J) {
-        const s = c[ev.striker];
+      if (isSignificantStrike(ev)) {
+        const s = c[ev.striker!];
+        const w = hitWorkJ(ev);
         s.strikes++;
-        s.strikeEnergyJ += ev.energyJ;
-        s.peakHitJ = Math.max(s.peakHitJ, ev.energyJ);
+        s.strikeEnergyJ += w;
+        s.peakHitJ = Math.max(s.peakHitJ, w);
       } else if (ev.kind === 'fall') {
         c[other(ev.corner)].knockdowns++;
       } else if (ev.kind === 'detach') {

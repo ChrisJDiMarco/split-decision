@@ -64,7 +64,9 @@ export const YAW_TUNING = {
   dcmLeadDouble: 0.15,
 };
 const NO_TORQUE: Vec3 = [0, 0, 0];
-const DOWN_BLEED_S = 0.3; // lying on the canvas, the gyro desaturates this fast (within its torque cap)
+const DOWN_BLEED_S = 0.3; // going down, the gyro desaturates this fast (within its torque cap)...
+const CANVAS_BLEED_S = 0.05; // ...and with the pelvis down on the canvas, at its full torque (bleedGyro)
+const CANVAS_PELVIS = 0.35; // × stance pelvis height: below it the body is down on the canvas
 const RISE_OFFSET_TAU_S = 0.04; // unfolding out of the crouch, the pelvis chases the moving COM this fast
 const RISE_SLOW_INSIDE_M = 0.02; // the rise slows once the capture point is this close to the soles' edge...
 const RISE_PAUSE_OUTSIDE_M = 0.03; // ...and all but stops this far outside them
@@ -481,8 +483,11 @@ export class HumanoidController {
     const kv = this.r.mem.dampScale as Float64Array | undefined;
     if (kv && this.getupSpeed.damp !== 1 && this.getUp.clip?.stage === 'play' && this.getUp.phase === 'clip') kv.fill(this.getupSpeed.damp);
     if (this.engine) this.engine.state.mode = 'down';
-    // The get-up's own targets are continuous; running them through keeps the inertializer
-    // current, so the switch to the standing posture is the one it smooths.
+    // The get-up's targets pass through untouched (its own phases blend, and a clip aligns from the measured pose,
+    // a jump the inertializer's arm and waist detector took for a switch and smoothed away: HAYMAKER handed over from
+    // 25 → 31 of 34 recorded fall endings on the balance engine without it); running them through keeps the
+    // inertializer current, so the switch to the standing posture is the one it smooths.
+    this.inertia.reset();
     this.inertia.apply(this.q, dt);
     this.r.targets.set(this.q);
     this.report();
@@ -491,10 +496,17 @@ export class HumanoidController {
   /**
    * On the canvas the gyro dumps the momentum it soaked up fighting the fall back into the body
    * (the canvas takes it). Otherwise it starts the rise saturated, and its desaturation torque
-   * shoves the rising body the way it just fell.
+   * shoves the rising body the way it just fell. Going down it bleeds gently (the landing is not
+   * thrown harder); once the pelvis is on the canvas it empties at its full torque, before the
+   * get-up moves: emptied over 0.3 s it was still pushing the trunk back down through the first
+   * second of the get-up, and SAVATE's sit-up off the back (140_08) fell back or stalled on 29 of 49
+   * recorded fall endings on the legacy path, 9 of 49 emptied first (handed over to balance at
+   * median 7.99 → 3.41 s); PYLON handed over 91 → 106 of 111. The torque is the core's own (capped
+   * at GyroSpec.maxTorqueNm × health, and it costs battery like any other output).
    */
   private bleedGyro(ctx: SimContext, s: Sense, dt: number): void {
-    this.gyro?.update(this.r, s.torsoRot, NO_TORQUE, dt, views(ctx).xfrc, this.ids.torso, true, DOWN_BLEED_S);
+    const onCanvas = s.pelvisPos[2] < CANVAS_PELVIS * this.stance.pelvisHeight;
+    this.gyro?.update(this.r, s.torsoRot, NO_TORQUE, dt, views(ctx).xfrc, this.ids.torso, true, onCanvas ? CANVAS_BLEED_S : DOWN_BLEED_S);
   }
 
   /**

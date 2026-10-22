@@ -30,7 +30,7 @@ import { MotionPlayer } from './player';
 const LAG_SLOW_M = 0.1; // pelvis this far below the clip's: slow down...
 const LAG_STOP_M = 0.25; // ...and wait for it at this
 const MIN_PACE = 0.12;
-const MAX_WAIT_S = 2.5; // total time spent waiting on a lagging body before giving up
+// (the total time spent waiting on a lagging body before giving up: GetupSpeed.stallS)
 const MAX_EXTRA_S = 5; // a clip may take this much longer than its own length
 const FELL_BACK_M = 0.3; // pelvis this far below the clip's after the clip has risen...
 const FELL_BACK_S = 0.6; // ...for this long: the attempt has failed
@@ -48,7 +48,7 @@ const STAND_UPRIGHT = -0.1; // torso up-axis z: not hanging head-down off the hi
 const STAND_MARGIN_M = 0.01;
 const STAND_MAX_SPEED = 0.3; // m/s of the COM: balance takes over a body that has settled
 const FLIGHT_HOLD_S = 0.12; // clip time: stop this short of an airborne moment (the actors hop up)
-const HOLD_MAX_S = 1.5; // wall time held there waiting for the COM to settle over the feet
+// (wall time held there waiting for the COM to settle over the feet: GetupSpeed.flightHoldS)
 const FEET = CONTACT.FOOT_L | CONTACT.FOOT_R;
 // Crouch: feet (and any hand still down) hold their spots while the pelvis carries the COM over
 // the soles and comes upright.
@@ -157,6 +157,10 @@ export class ClipGetUp {
   private held = 0;
   private feetLost = 0;
   private flightAt = Infinity;
+  /** Waiting in the first pose for a body this face down (begin's flatZ), or null. */
+  private flatZ: number | null = null;
+  /** The plan's variants with this mirror first (begin's preferMirror), or null: the plan's own order. */
+  private preferMirror: boolean | null = null;
   /** Variants (move|mirror|options) that failed during this knockdown. */
   private readonly failed = new Set<string>();
   private key = '';
@@ -203,6 +207,11 @@ export class ClipGetUp {
     return !!this.fromPlan('face_down') || !!this.choose('getup_face_down', 'l');
   }
 
+  /** The design gets up from searched clips (getup-plan.ts): the modern roster. */
+  get planned(): boolean {
+    return !!GETUP_PLAN[this.r.design.id];
+  }
+
   /** Both legs wrecked: this robot stays down. */
   cannotRise(): boolean {
     return legWrecked(this.r, 'l') && legWrecked(this.r, 'r');
@@ -211,8 +220,12 @@ export class ClipGetUp {
   /**
    * Pick a clip for the way the body lies; false when none is usable (every variant tried, or
    * the damage rules them all out). `qNow`: the measured joint angles (the align start).
+   * `flatZ`: just rolled onto the front, the clip waits in its first pose until the chest is down this far
+   * (torso forward-axis z below it), at most GetupSpeed.flatWaitS more: a push-up started on a body still
+   * turning off its side rolled it back over. `preferMirror`: the plan's variants with this mirror first.
    */
-  begin(s: Sense, qNow: Float64Array, as?: LyingOrientation): boolean {
+  begin(s: Sense, qNow: Float64Array, as?: LyingOrientation, flatZ?: number, preferMirror: boolean | null = null): boolean {
+    this.preferMirror = preferMirror;
     if (this.tries >= MAX_CLIP_TRIES || this.cannotRise()) return false;
     // Only designs whose variants were searched (getup-plan.ts) get up from clips: on the iron-age
     // bodies the unsearched clips fail more often than the scripted get-up (GOLIATH 0/8 against
@@ -247,13 +260,17 @@ export class ClipGetUp {
     this.peakClipZ = 0;
     this.held = 0;
     this.flightAt = firstFlight(pick.move);
+    this.flatZ = flatZ ?? null;
     for (const side of SIDES) this.weights[side].foot = this.weights[side].hand = 0;
     return true;
   }
 
   /** The design's searched variants for this orientation, best first, that are still usable. */
   private fromPlan(orient: LyingOrientation): { move: Move; mirror: boolean; opts: ClipOptions; key: string } | null {
-    for (const e of GETUP_PLAN[this.r.design.id]?.[orient] ?? []) {
+    const plan = GETUP_PLAN[this.r.design.id]?.[orient] ?? [];
+    // Just rolled onto the front: the variants mirrored as the roll was first (begin's preferMirror), then the rest.
+    const order = this.preferMirror === null ? plan : [...plan.filter((e) => e.mirror === this.preferMirror), ...plan.filter((e) => e.mirror !== this.preferMirror)];
+    for (const e of order) {
       const key = `${e.id}|${e.mirror}|${e.opts}`;
       if (this.failed.has(key) || (!BACK_CLIP_GETUPS && backClip(e.id))) continue;
       const move = this.set.lib.moves.find((m) => m.id === e.id);
@@ -314,9 +331,10 @@ export class ClipGetUp {
       return 'fail';
     };
     if (this.stage === 'align') {
-      const k = minJerk(this.t / this.speed.alignS);
+      const k = minJerk(Math.min(1, this.t / this.speed.alignS));
       for (let i = 0; i < q.length; i++) q[i] = this.from[i] + (p.q[i] - this.from[i]) * k;
-      if (this.t >= this.speed.alignS) {
+      const flat = this.flatZ === null || s.torsoRot[6] < this.flatZ || this.t >= this.speed.alignS + this.speed.flatWaitS;
+      if (this.t >= this.speed.alignS && flat) {
         this.stage = 'play';
         this.t = 0;
       }
@@ -331,7 +349,7 @@ export class ClipGetUp {
     const lag = clipZ - s.pelvisPos[2];
     let pace = lag <= LAG_SLOW_M ? 1 : clamp(1 - (lag - LAG_SLOW_M) / (LAG_STOP_M - LAG_SLOW_M), MIN_PACE, 1);
     if (pace < 1) this.waited += dt * (1 - pace);
-    const holding = p.tau >= this.flightAt - FLIGHT_HOLD_S && this.held < HOLD_MAX_S;
+    const holding = p.tau >= this.flightAt - FLIGHT_HOLD_S && this.held < this.speed.flightHoldS;
     if (holding) {
       pace = 0;
       this.held += dt;
@@ -349,7 +367,7 @@ export class ClipGetUp {
     this.projectContacts(s, q, dt);
     addVelocityFeedforward(this.r, q, p.qd);
     if (this.rolledOver(s)) return fail('rolled over');
-    if (this.waited > MAX_WAIT_S) return fail(`stalled (pelvis ${lag.toFixed(2)} m below the clip)`);
+    if (this.waited > this.speed.stallS) return fail(`stalled (pelvis ${lag.toFixed(2)} m below the clip)`);
     if (this.total > move.duration / this.speed.pace + MAX_EXTRA_S) return fail('timeout');
     // Fell back: the clip had the pelvis well up, the body is far below it.
     this.lowFor = this.peakClipZ > 0.5 * H && lag > FELL_BACK_M ? this.lowFor + dt : 0;

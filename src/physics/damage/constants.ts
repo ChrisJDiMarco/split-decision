@@ -71,8 +71,19 @@ export const DETACHED_BODY_MASS_KG = 0.05;
 
 /** Overload is only tracked on an impact's load path, from first touch until this long after the window. */
 export const OVERLOAD_ARM_TAIL_S = 0.03;
-/** Damage points the gyro core absorbs (via hits on its housing part) before it fails completely. */
-export const GYRO_HP_POINTS = 420;
+/**
+ * The gyro core (a CMG bolted inside the torso) wears with the damage points booked on its housing
+ * part and dies only when the shell around it is wrecked: its capacity is the points it takes to
+ * breach every panel of the torso shell once (src/physics/damage/durability.ts gyroCapacity), in the
+ * post-overhaul units (a point is a joule of plastic shell work, × crackPointsFactor when the panel
+ * cracks). A panel is breached when it is pushed in GYRO_BREACH_DEPTH_H shell walls deep, the depth
+ * at which polycarbonate cracks through (DAMAGE_TUNING.whitenCrackDepthH), or for carbon when its
+ * crack spans the whole panel. FIRECRACKER's 2.5 mm polycarbonate torso: 37.5 panels × 116 points
+ * ≈ 4,350 points (it was 420, in pre-overhaul points, which three or four cracking jabs used up).
+ */
+export const GYRO_BREACH_DEPTH_H = 4;
+/** Capacity for a torso whose shell is not a box (none today): this many panels of its armour. */
+export const GYRO_FALLBACK_PANELS = 40;
 /** Backlash at zero health, radians. */
 export const MAX_SLOP_RAD = 0.12;
 
@@ -195,6 +206,15 @@ export const DAMAGE_TUNING = {
    * The hardest kick in the audit (21 kN) puts ~3-4× the static rating through a knee.
    */
   maxLoadRatio: 20,
+  /**
+   * The bearing channel's wrench (cfrc_int) must agree with the joint's own torque balance about its
+   * axis (motor + passive + end stop − armature × q̈) to within this many × the drive's stall torque.
+   * Every armed tick but a contact's first agrees to within a few N·m (dry friction of a bound joint at
+   * most ~0.1 × stall); the first can miss by 5-60 × stall while the step's own dynamics stay sane,
+   * and that one 1 ms reading bent striker shoulders on routine jabs and hooks. Such a tick holds the
+   * last sample instead. 0 turns the check off (A/B).
+   */
+  wrenchCheckStall: 1,
   /**
    * Shell yield and housing hits read the contact force filtered over this many steps (as the joint
    * loads are): the solver's one-step spike at first touch is the stiff contact model, not the load

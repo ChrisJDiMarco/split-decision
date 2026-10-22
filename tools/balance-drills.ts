@@ -24,6 +24,9 @@
 //              touched the canvas first (canvas-contact.ts) and when, and the get-up after (first movement, stable)
 //   getups     (strike-power.md §4.6) laid face down, on its back and on each side, dropped three ways: standing
 //              within 5 s, first movement to stable standing against the per-design targets
+//   poses      get-ups from recorded fall endings (--getup-poses file.jsonl, tests/balance/capture-falls.ts: how
+//              fighters really lay in sparring fights when their get-up began): standing within 5 s and 10 s, the
+//              hand-over to balance within 10 s (the fights' get-up success), each clip variant tried, by orientation
 //   fight      (the fight-clean pass) fight conditions the other drills lack, every fall dissected by
 //              tests/balance/fall-anatomy.ts (what started it, catch steps, brace, gyro):
 //                exchange  two fighters 1.1 m apart in the drill world (no cage), both on the sparring
@@ -44,6 +47,8 @@
 //                                   [--balance legacy|dcm] [--jobs 2] [--quick] [--label name] [--situations stance] [--ladder-from 0.6]
 //   npx tsx tools/balance-drills.ts --drills hits,falls,getups [--impulses 20,40,73] [--hit-parts torso,head]
 //                                   [--hit-situations stance,walk] [--fall-dvs 2.2] [--getup-seeds 3] [--getup-orients face_down,back]
+//   npx tsx tools/balance-drills.ts --drills poses --getup-poses tests/balance/fixtures/fall-endings.jsonl [--getup-max 40]
+//                                   [--getup-path legacy|dcm|all]   recorded fall endings (of the drill's own path by default)
 //   npx tsx tools/balance-drills.ts --drills fight [--scenarios exchange,press] [--pairs savate:haymaker,...] [--seeds 1,2,...]
 //                                   [--fight-s 12]       fight conditions (replay: --scenarios replay --fight-s 90)
 //   npx tsx tools/balance-drills.ts --summary <saved.json>   re-print a saved run's summary
@@ -113,6 +118,8 @@ const BLOWUP_QVEL = 400;
 
 type Situation = 'stance' | 'walk' | 'arrive';
 export type Orient = 'face_down' | 'back' | 'side_l' | 'side_r';
+/** A recorded fall ending (tests/balance/capture-falls.ts): the root pose (x, y zeroed) and joint angles when the get-up began. */
+export interface FallPose { orient: Orient; root: number[]; joints: Record<string, number>; src?: string }
 export type Job =
   | { kind: 'approach'; design: string; dist: number; angle: number; seconds: number; seed: number }
   | { kind: 'push'; design: string; situation: Situation; dir: number; dv: number; seed: number }
@@ -120,7 +127,7 @@ export type Job =
   | { kind: 'strike'; design: string; skill: SkillId; trial: number; seed: number }
   | { kind: 'hit'; design: string; part: 'torso' | 'head'; impulse: number; dir: number; situation: Situation; seed: number }
   | { kind: 'fall'; design: string; dir: number; dv: number; seed: number }
-  | { kind: 'getup'; design: string; orient: Orient; seed: number }
+  | { kind: 'getup'; design: string; orient: Orient; seed: number; pose?: FallPose }
   | { kind: 'fight'; scenario: FightScenario; design: string; opp: string; seed: number; seconds: number };
 
 export type FightScenario = 'exchange' | 'press' | 'replay';
@@ -571,10 +578,23 @@ async function getupTrial(job: Extract<Job, { kind: 'getup' }>): Promise<GetupOu
   const r = ctx.robots[0];
   const c = controllerOf(r)!;
   const a = r.rootQadr;
-  const q = LAY[job.orient];
   const qpos = ctx.data.qpos as Float64Array;
-  qpos[a + 2] = 0.28 + 0.04 * ((job.seed - 1) % 3);
-  for (let i = 0; i < 4; i++) qpos[a + 3 + i] = q[i];
+  if (job.pose) {
+    // A recorded fall ending: the body as it lay, still, just clear of the canvas; the servos start where it lies.
+    for (let i = 0; i < 7; i++) qpos[a + i] = job.pose.root[i];
+    qpos[a + 2] += 0.01;
+    const qvel = ctx.data.qvel as Float64Array;
+    for (let i = 0; i < 6; i++) qvel[r.rootDadr + i] = 0;
+    r.joints.forEach((j, i) => {
+      if (job.pose!.joints[j.name] !== undefined) qpos[j.qadr] = job.pose!.joints[j.name];
+      qvel[j.dadr] = 0;
+      r.targets[i] = qpos[j.qadr];
+    });
+  } else {
+    const q = LAY[job.orient];
+    qpos[a + 2] = 0.28 + 0.04 * ((job.seed - 1) % 3);
+    for (let i = 0; i < 4; i++) qpos[a + 3 + i] = q[i];
+  }
   ctx.mj.mj_forward(ctx.model, ctx.data);
   ctx.events.length = 0;
   const t0 = ctx.time;
@@ -1280,6 +1300,31 @@ export function summarizeGetups(outs: GetupOut[], design: string): string[] {
   ];
 }
 
+/** Get-ups from recorded fall endings: standing, the hand-over to balance (the fights' measure), by orientation. */
+export function summarizePoses(outs: GetupOut[], design: string): string[] {
+  const gs = outs.filter((o) => o.job.design === design);
+  if (!gs.length) return [];
+  const n = gs.length;
+  const s5 = gs.filter((o) => o.times.stableAt <= GETUP_WITHIN_S).length;
+  const s10 = gs.filter((o) => o.times.stableAt <= 10).length;
+  const up10 = gs.filter((o) => o.times.upAt <= 10).length;
+  const by = (['face_down', 'back', 'side_l', 'side_r'] as const).map((or) => {
+    const l = gs.filter((o) => (o.job as Extract<Job, { kind: 'getup' }>).orient === or);
+    if (!l.length) return '';
+    return `${or} up ${l.filter((o) => o.times.upAt <= 10).length}/${l.length} (${f2(pctile(l.map((o) => o.times.upAt), 0.5))} s)`;
+  }).filter(Boolean);
+  const fails = new Map<string, number>();
+  for (const o of gs) for (const w of o.times.fails ?? []) {
+    const k = w.replace(/ at [0-9.]+\/[0-9.]+ s/, '').replace(/\(pelvis [0-9.]+ m below the clip\)/, '').trim();
+    fails.set(k, (fails.get(k) ?? 0) + 1);
+  }
+  return [
+    `  get-ups (recorded falls) ${n}: handed over to balance within 10 s ${up10}/${n} (${pct(up10 / n)}), median ${f2(pctile(gs.map((o) => o.times.upAt), 0.5))} s   target >= 95%   ${ok(up10 / n >= 0.95)}`,
+    `    standing (stable) within ${GETUP_WITHIN_S} s ${s5}/${n}, within 10 s ${s10}/${n}; fall to stable median ${f2(pctile(gs.map((o) => o.times.stableAt), 0.5))} s`,
+    `    by orientation: ${by.join(', ')}${fails.size ? `; failed attempts: ${[...fails].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ×${v}`).join(' | ')}` : ''}`,
+  ];
+}
+
 async function main(): Promise<void> {
   const ji = process.argv.indexOf('--job');
   if (ji >= 0) {
@@ -1336,6 +1381,16 @@ async function main(): Promise<void> {
       const orients = arg('getup-orients', 'face_down,back,side_l,side_r').split(',') as Orient[];
       for (const orient of orients) for (let k = 1; k <= n; k++) add({ kind: 'getup', design, orient, seed: k });
     }
+    if (drills.includes('poses')) {
+      const file = arg('getup-poses', '');
+      if (!file) throw new Error('--drills poses needs --getup-poses file.jsonl');
+      const max = Number(arg('getup-max', '999'));
+      // (A fixture may hold fall endings of both balance paths: the ones recorded on this drill's path, unless --getup-path all.)
+      const path = arg('getup-path', balance);
+      const poses = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as FallPose & { design: string; seed?: number; t?: number; opp?: string; path?: string })
+        .filter((p) => p.design === design && (path === 'all' || !p.path || p.path === path)).slice(0, max);
+      poses.forEach((p, k) => add({ kind: 'getup', design, orient: p.orient, seed: k + 1, pose: { orient: p.orient, root: p.root, joints: p.joints, src: `${p.opp ?? '?'} s${p.seed ?? '?'} ${p.t ?? '?'} s` } }));
+    }
     if (drills.includes('fight')) {
       // --pairs red:blue,... (default: this design against itself), --scenarios, --seeds, --fight-s.
       const pairs = arg('pairs', '').split(',').filter(Boolean).map((x) => x.split(':') as [string, string]).filter(([a]) => a === design);
@@ -1384,7 +1439,8 @@ async function main(): Promise<void> {
     const react = results.filter((o): o is ReactOut => o.kind === 'hit' || o.kind === 'fall');
     lines.push(...summarizeHits(react, design));
     lines.push(...summarizeFalls(react, design));
-    lines.push(...summarizeGetups(results.filter((o): o is GetupOut => o.kind === 'getup'), design));
+    lines.push(...summarizeGetups(results.filter((o): o is GetupOut => o.kind === 'getup' && !o.job.pose), design));
+    lines.push(...summarizePoses(results.filter((o): o is GetupOut => o.kind === 'getup' && !!o.job.pose), design));
   }
   if (drills.includes('fight')) {
     const fo = results.filter((o): o is FightOut => o.kind === 'fight');

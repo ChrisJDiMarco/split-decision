@@ -271,8 +271,8 @@ const shock = (id: string) => GEAR_SHOCK * MOTORS[id].stallTorqueNm;
 
 const DRIVE_TRAINS: Record<string, Partial<MotorSpec>> = {
   'qdd.rs04': {
-    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: shock('qdd.rs04'), ...bearing(110),
-    ratingsSource: 'ratio 9:1 and the 120×120 mm housing published (openelab.io RobStride04); rotor inertia assumed (CubeMars AKE90-8 class, 3.4e-4 kg·m²); gear and bearing ratings assumed',
+    gearType: 'qdd', gearRatio: 9, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: shock('qdd.rs04'), ...bearing(120),
+    ratingsSource: 'ratio 9:1 and the 120×120×56 mm housing published (openelab.io RobStride04 spec table; the RS03 entry uses its published 106×106×56 mm the same way); rotor inertia assumed (CubeMars AKE90-8 class, 3.4e-4 kg·m²); gear and bearing ratings assumed',
   },
   'qdd.rs04x3': {
     gearType: 'cycloidal', gearRatio: 27, rotorInertiaKgM2: 3.0e-4, gearPeakTorqueNm: shock('qdd.rs04x3'), ...bearing(130),

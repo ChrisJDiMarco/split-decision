@@ -173,6 +173,13 @@ export interface DamageLedger {
   overloads: Record<'gear' | 'stop' | 'bearing', { onset: number; broke: number; peak: number }>;
   dents: { count: number; cracks: number; byZone: Partial<Record<ZoneId, number>>; maxDepthM: number; plasticJ: number };
   partPoints: number;
+  /**
+   * Damage points booked on the part that houses the gyro core, split by source (a strike by the other
+   * robot, or a fall / the cage / debris at NON_STRIKE_DAMAGE_SCALE), and the core's health lost to them.
+   */
+  gyro: { strikePoints: number; worldPoints: number; healthLost: number };
+  /** Armed joint samples whose wrench broke the joint's own axis balance and were held (joint-loads.ts). */
+  wrenchHeld: number;
   /** Parts knocked off this fight, with the blow that did it. */
   detaches: DetachRecord[];
 }
@@ -359,6 +366,8 @@ export function emptyLedger(): DamageLedger {
     overloads: { gear: { onset: 0, broke: 0, peak: 0 }, stop: { onset: 0, broke: 0, peak: 0 }, bearing: { onset: 0, broke: 0, peak: 0 } },
     dents: { count: 0, cracks: 0, byZone: {}, maxDepthM: 0, plasticJ: 0 },
     partPoints: 0,
+    gyro: { strikePoints: 0, worldPoints: 0, healthLost: 0 },
+    wrenchHeld: 0,
     detaches: [],
   };
 }

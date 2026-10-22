@@ -5,7 +5,7 @@
 // yields at ~0.6 kN, PYLON looks untouched until a hard shot cracks its carbon.
 import type { GearType, GeomDef, MaterialId, MotorSpec, PartDef, RobotDesign, Vec3 } from '../../core/types';
 import { WALL_MM } from '../../robots/catalog';
-import { DAMAGE_TUNING } from './constants';
+import { DAMAGE_TUNING, GYRO_BREACH_DEPTH_H, GYRO_FALLBACK_PANELS } from './constants';
 import { shellSurface, solidSurface, type Surface } from './shell';
 
 export type ZoneId = 'torso_face' | 'torso_side' | 'head' | 'forearm' | 'shin' | 'frame' | 'fist' | 'foot' | 'other';
@@ -59,6 +59,8 @@ export interface DurabilityProfile {
   headMount: number;
   /** Shell surfaces by zone (shells of the design's armour; strikers and feet by their own geom). */
   zones: Record<Exclude<ZoneId, 'fist' | 'foot' | 'other'>, Surface>;
+  /** Damage points on the torso that kill the gyro core inside it (gyroCapacity). */
+  gyroHpPoints: number;
 }
 
 export interface ProfileInputs {
@@ -110,9 +112,45 @@ export function durabilityProfile(design: RobotDesign, inputs: ProfileInputs): D
       shin: shellSurface(build.armor, build.armorMm, span),
       frame: shellSurface(build.frame, build.frameMm, span),
     },
+    gyroHpPoints: Infinity,
   };
+  profile.gyroHpPoints = gyroCapacity(design, profile.zones.torso_face, profile.zones.torso_side);
   profiles.set(key, profile);
   return profile;
+}
+
+/**
+ * Damage points booked on a shell panel by the work that breaches it: pushed in GYRO_BREACH_DEPTH_H
+ * walls deep (polycarbonate cracks through there, so its points carry the crack factor; metal and
+ * UHMW just dent or gouge that deep), or for carbon the plastic work at which its crack spans the
+ * whole panel (4 × its elastic limit, dent.ts). The same formulas the dents use (shell.ts, dent.ts).
+ */
+export function panelBreachPoints(s: Surface): number {
+  const t = DAMAGE_TUNING;
+  if (s.mode === 'cushion' || !Number.isFinite(s.collapseN)) return Infinity;
+  if (s.mode === 'crack') return 4 * s.elasticJ * t.pointsPerPlasticJ * t.crackPointsFactor;
+  const d = GYRO_BREACH_DEPTH_H * s.thicknessM;
+  const plasticJ = s.collapseN * (d + (d * d * d) / (3 * s.thicknessM * s.thicknessM));
+  const cracks = s.mode === 'whiten' && GYRO_BREACH_DEPTH_H >= t.whitenCrackDepthH;
+  return plasticJ * t.pointsPerPlasticJ * (cracks ? t.crackPointsFactor : 1);
+}
+
+/**
+ * The gyro core's capacity in damage points: what breaching every panel of the torso shell around it
+ * once books (front and back faces in the face shell, sides and top in the side shell; the bottom is
+ * the waist, not shell). Panels are the model's clamped plates of span DAMAGE_TUNING.panelSpanM.
+ * FIRECRACKER (0.22 × 0.34 × 0.32 m of 2.5 mm polycarbonate): 37.5 panels × 116 ≈ 4,350 points;
+ * SAVATE ≈ 6,800, PYLON (carbon) ≈ 11,600, HAYMAKER (UHMW slabs) and the iron age ≈ 200,000+.
+ */
+export function gyroCapacity(design: RobotDesign, face: Surface, side: Surface): number {
+  const torso = design.parts.find((p) => p.tags.includes('gyro')) ?? design.parts.find((p) => p.tags.includes('torso') || p.tags.includes('chassis'));
+  const shell = torso?.geoms.find((g) => g.role === 'armor') ?? torso?.geoms[0];
+  const panelM2 = Math.PI * (DAMAGE_TUNING.panelSpanM / 2) ** 2;
+  if (!shell || shell.shape.type !== 'box') return GYRO_FALLBACK_PANELS * panelBreachPoints(side);
+  const [x, y, z] = shell.shape.halfSize.map((h) => 2 * h);
+  const faceM2 = 2 * y * z;
+  const sideM2 = 2 * x * z + x * y;
+  return (faceM2 / panelM2) * panelBreachPoints(face) + (sideM2 / panelM2) * panelBreachPoints(side);
 }
 
 /** Which zone of a part a contact landed on. `localNormal` is the contact normal in the part's frame. */

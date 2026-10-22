@@ -14,6 +14,7 @@
 import type { JointCause, JointFailure, JointRole, SimEvent } from '../src/core/protocol';
 import { damageState, type DamageLedger } from '../src/physics/damage';
 import type { SimContext } from '../src/physics/sim-context';
+import { hitWorkJ, isSignificantStrike, SIGNIFICANT_STRIKE_J } from '../src/ui/scorecard';
 
 export type Surface = 'fist' | 'foot' | 'shin' | 'other';
 
@@ -32,6 +33,10 @@ export interface FighterDamage {
   };
   ledger: DamageLedger;
   getUpS: number[];
+  /** The gyro core's health: at the end, when it first fell below half and when it died (s), null if never. */
+  gyro: { final: number; halfAt: number | null; deadAt: number | null } | null;
+  /** What the result card shows for this fighter (src/ui/scorecard.ts), and what the old 60 J presentation-energy rule showed. */
+  card: { strikes: number; peakJ: number; oldStrikes: number; oldPeakJ: number };
 }
 
 const pick = (xs: number[], q: number) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((xs.length - 1) * q))] : 0);
@@ -52,10 +57,34 @@ export class DamageRecorder {
   private pushes = [0, 0];
   private fellAt: Array<number | null> = [null, null];
   private getUps: [number[], number[]] = [[], []];
+  private card = [0, 1].map(() => ({ strikes: 0, peakJ: 0, oldStrikes: 0, oldPeakJ: 0 }));
+  private gyroHalfAt: Array<number | null> = [null, null];
+  private gyroDeadAt: Array<number | null> = [null, null];
 
   constructor(private readonly ctx: SimContext) {}
 
+  /** The gyro core only loses health to impacts, so checking it on every event catches each drop. */
+  private watchGyro(time: number): void {
+    for (const c of [0, 1] as const) {
+      const h = this.ctx.robots[c].gyro?.health;
+      if (h === undefined) continue;
+      if (h < 0.5 && this.gyroHalfAt[c] === null) this.gyroHalfAt[c] = time;
+      if (h <= 0 && this.gyroDeadAt[c] === null) this.gyroDeadAt[c] = time;
+    }
+  }
+
   onEvent(e: SimEvent, time: number): void {
+    this.watchGyro(time);
+    if (isSignificantStrike(e)) {
+      const k = this.card[e.striker!];
+      k.strikes++;
+      k.peakJ = Math.max(k.peakJ, hitWorkJ(e));
+    }
+    if (e.kind === 'impact' && e.striker !== null && e.victim !== null && e.striker !== e.victim && e.energyJ >= SIGNIFICANT_STRIKE_J) {
+      const k = this.card[e.striker];
+      k.oldStrikes++;
+      k.oldPeakJ = Math.max(k.oldPeakJ, e.energyJ);
+    }
     if (e.kind === 'impact' && e.striker !== null && e.victim !== null && e.striker !== e.victim) {
       if (e.push) {
         this.pushes[e.striker]++;
@@ -92,6 +121,8 @@ export class DamageRecorder {
       },
       ledger: structuredClone(damageState(this.ctx).robots[c].ledger),
       getUpS: [...this.getUps[c]],
+      card: { ...this.card[c] },
+      gyro: this.ctx.robots[c].gyro ? { final: this.ctx.robots[c].gyro!.health, halfAt: this.gyroHalfAt[c], deadAt: this.gyroDeadAt[c] } : null,
     };
   }
 }
@@ -162,6 +193,31 @@ export function damageSummary(fights: Array<{ length: number; fighters: Array<{ 
     const nn = qs.reduce((a, q) => a + q.n, 0);
     return nn ? `${f1(qs.reduce((a, q) => a + q.p50 * q.n, 0) / nn)}/${f1(qs.reduce((a, q) => a + q.p90 * q.n, 0) / nn)}` : '-';
   };
+  // Gyro core health by design: what the hits on its housing (the torso) left of it.
+  const gyroBy = new Map<string, { fin: number[]; half: number; dead: number[]; strikeP: number; worldP: number; n: number }>();
+  for (const { x, d } of fs) {
+    if (!d.gyro) continue;
+    const e = gyroBy.get(x.design) ?? { fin: [], half: 0, dead: [], strikeP: 0, worldP: 0, n: 0 };
+    e.fin.push(d.gyro.final);
+    if (d.gyro.halfAt !== null) e.half++;
+    if (d.gyro.deadAt !== null) e.dead.push(d.gyro.deadAt);
+    e.strikeP += d.ledger.gyro?.strikePoints ?? 0;
+    e.worldP += d.ledger.gyro?.worldPoints ?? 0;
+    e.n++;
+    gyroBy.set(x.design, e);
+  }
+  const gyroLines = [...gyroBy].map(([k, v]) => `    ${k}: final health p50 ${pick(v.fin, 0.5).toFixed(2)}, min ${Math.min(...v.fin).toFixed(2)}; below half in ${v.half}/${v.n}, dead in ${v.dead.length}/${v.n}${v.dead.length ? ` (at ${v.dead.map((t) => `${t.toFixed(0)} s`).join(', ')})` : ''}; housing points per fight ${f1(v.strikeP / v.n)} strikes + ${f1(v.worldP / v.n)} falls/cage`);
+  const cardQ = (sel: (k: FighterDamage['card']) => number) => {
+    const v = fs.filter(({ d }) => d.card).map(({ d }) => sel(d.card));
+    return v.length ? `${f1(pick(v, 0.5))}/${f1(pick(v, 0.9))}` : '-';
+  };
+  // The card of every fighter who knocked a head off: the pop must show as a strike.
+  const popCards = fights.flatMap((f) => f.fighters.filter((x) => x.damage?.card).flatMap((x) => {
+    const foe = f.fighters.find((y) => y !== x);
+    if (!foe?.damage?.ledger.detaches?.length) return [];
+    const k = x.damage!.card;
+    return [`    popped ${foe.design}'s head: card shows ${x.design} ${k.strikes} strikes, peak ${f1(k.peakJ)} J (old rule ${k.oldStrikes}, ${f1(k.oldPeakJ)} J)`];
+  }));
   return [
     'damage (docs/design/strike-power.md §4-5; head pops and injury rates calibrated 2026-10-20, ratings are labelled assumptions):',
     `  strike episodes landed ${landed}, clean ${landed ? ((100 * clean) / landed).toFixed(0) : 0}%, push episodes ${pushes}`,
@@ -177,6 +233,10 @@ export function damageSummary(fights: Array<{ length: number; fighters: Array<{ 
     `    first pop at ${firstPops.length ? firstPops.map((t) => `${f1(t)} s`).join(', ') : '-'}`,
     ...pops.map((p) => `    ${p.design} ${p.part} at ${f1(p.t)} s: ${p.cause} ${p.by ?? '?'}, impact ${f1(p.impactNs)} N·s (window ${f1(p.windowNs)}) at ${f1(p.speed)} m/s, needed ${f1(p.thresholdNs)} (mount ${p.mount.toFixed(2)})`),
     `  dents per fight by design: ${[...dentsBy].map(([k, v]) => `${k} ${f1(v.dents / v.n)}${v.cracks ? ` (${v.cracks} cracks)` : ''}`).join(', ')}`,
+    `  result card per fighter-fight: significant strikes p50/p90 ${cardQ((k) => k.strikes)}, peak hit p50/p90 ${cardQ((k) => k.peakJ)} J absorbed work; fighters with 0 shown ${fs.filter(({ d }) => d.card && d.card.strikes === 0).length}/${fs.length} (old 60 J presentation rule: ${cardQ((k) => k.oldStrikes)} strikes, 0 shown ${fs.filter(({ d }) => d.card && d.card.oldStrikes === 0).length}/${fs.length})`,
+    ...popCards,
+    '  gyro core (dies from damage points on its torso housing, durability.ts gyroCapacity):',
+    ...gyroLines,
     `  get-up seconds median/p90 ${getups.length ? `${f1(pick(getups, 0.5))}/${f1(pick(getups, 0.9))} (${getups.length})` : '-'}`,
   ];
 }

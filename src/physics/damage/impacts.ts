@@ -618,7 +618,7 @@ function finalize(ctx: SimContext, st: DamageState, g: HitGroup): void {
     const rd = st.robots[t.info.robot.corner];
     const strike = isStrike(t.geom, t.other);
     const res = results.get(t) ?? null;
-    applyPartDamage(rd, t.info, (res?.points ?? 0) * (strike ? 1 : NON_STRIKE_DAMAGE_SCALE));
+    applyPartDamage(rd, t.info, (res?.points ?? 0) * (strike ? 1 : NON_STRIKE_DAMAGE_SCALE), strike);
     if (res) recordDent(ctx, rd, t, res);
     if (t.info.circuits.length && t.work >= tune.punctureWorkJ) t.info.punctured = true;
     if (strike && g.kind !== 'push' && !t.striking) housingHits(ctx, st, rd, t, armContext(ctx, 'victim', t.other));

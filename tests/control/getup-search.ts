@@ -2,9 +2,13 @@
 // mocap get-up variant (clip × mirror × playback options), knock the robot down that way and time a
 // single attempt. The ranking it prints is what src/physics/control/mocap/getup-plan.ts stores.
 //   npx tsx tests/control/getup-search.ts [designs] [seeds]
+//   SD_ORIENTS=back,side_r   only these lying orientations
+//   SD_OPTS=plain            only these playback option sets
+//   SD_GU='{"crouch":1}'     get-up speed table values (getup-speed.ts; a design's own override of the key is dropped)
 import { controllerOf } from '../../src/physics/control';
 import { ClipGetUp } from '../../src/physics/control/mocap/getup';
 import { mocapSet } from '../../src/physics/control/mocap/library';
+import { GETUP_DESIGN, GETUP_SPEED } from '../../src/physics/control/getup-speed';
 import { makeSim, pelvisPos, torsoUp } from './helpers';
 
 const ORIENTS: Record<string, [number, number, number, number]> = {
@@ -18,6 +22,13 @@ const OPTS = {
   hands: { projectFeet: false, projectHands: true, footWait: false, handGate: true },
 };
 const ATTEMPT_S = 14;
+const ONLY_OPTS = process.env.SD_OPTS?.split(',');
+const ONLY_ORIENTS = process.env.SD_ORIENTS?.split(',');
+if (process.env.SD_GU) {
+  const o = JSON.parse(process.env.SD_GU) as Record<string, number>;
+  Object.assign(GETUP_SPEED, o);
+  for (const d of Object.values(GETUP_DESIGN)) for (const k of Object.keys(o)) delete (d as Record<string, unknown>)[k];
+}
 
 interface Trial { ok: boolean; s: number; why: string }
 
@@ -73,12 +84,13 @@ for (const design of designs) {
   probe.dispose();
   out[design] = {};
   for (const orient of Object.keys(ORIENTS)) {
+    if (ONLY_ORIENTS && !ONLY_ORIENTS.includes(orient)) continue;
     const labels = orient === 'face_down' ? ['getup_face_down'] : orient === 'back' ? ['getup_back', 'getup_side'] : ['getup_side', 'getup_back'];
     const rows: Array<{ id: string; mirror: boolean; opts: string; ok: number; s: number }> = [];
     for (const label of labels) {
       for (const move of set.byLabel.get(label as never) ?? []) {
         for (const mirror of [false, true]) {
-          for (const opts of Object.keys(OPTS) as Array<keyof typeof OPTS>) {
+          for (const opts of (Object.keys(OPTS) as Array<keyof typeof OPTS>).filter((o) => !ONLY_OPTS || ONLY_OPTS.includes(o))) {
             const res: Trial[] = [];
             for (let seed = 1; seed <= seeds; seed++) res.push(await trial(design, orient, move.id, mirror, opts, seed));
             const ok = res.filter((x) => x.ok).length;

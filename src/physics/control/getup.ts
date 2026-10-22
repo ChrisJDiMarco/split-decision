@@ -14,6 +14,7 @@
 // through the limb IK solved from the measured pelvis and torso, so the sequence adapts to
 // however the robot landed. Joint targets blend from where each phase started. A sequence that
 // rolls the body back over, or stalls, lies still and starts again.
+import { APOTHEM } from '../../core/arena-spec';
 import type { Vec3 } from '../../core/types';
 import type { SimContext } from '../sim-context';
 import { SIDES, type HumanoidGeometry, type Side } from './geometry';
@@ -147,6 +148,20 @@ interface Phase {
 
 /** Landed folded (kneeling, knees tucked): stretch the legs out first so the body lies flat. */
 const LEGS_OUT: Phase[] = [{ name: 'legs', dur: 0.6, hold: 0.4, keep: ['arms'], set: (g) => { g.legsStraight(); g.waist(0); } }];
+/**
+ * Sitting up on the canvas (a braced fall often ends there): lie back before rolling. The roll keys curl the trunk
+ * to start, and from sitting that only sat the body up straighter (HAYMAKER after a shove on the balance engine,
+ * five rolls in a row).
+ */
+const LIE_BACK: Phase[] = [{
+  name: 'legs', dur: 0.4, hold: 0.5, keep: [], until: (_g, s) => s.upright < LIE_BACK_UPRIGHT, lenient: true,
+  // lieBack 2: the arms swept out along the canvas too (they keep where the fall left them otherwise).
+  set: (g) => { g.legsStraight(); g.waist(-0.35); if (g.speed.lieBack >= 2) g.armsOut(); else g.holdArms(); },
+}];
+const SITTING_UPRIGHT = 0.45; // torso up-axis z above which a body on the canvas is sitting up (rollFirst designs lie back)
+const LIE_BACK_UPRIGHT = 0.25; // ...and below which it is lying again
+const ON_SIDE = 38 * DEG; // rolled this far from flat on the back onto a side (roll-keys.ts: where the first key is skipped)
+const FENCE_NEAR_M = 1.6; // a body this close to the fence (arena centre at the origin) rolls toward the centre
 const FOLDED_HEIGHT = 0.36; // pelvis above this × stance height while lying: legs folded under
 
 const PRONE: Phase[] = [
@@ -183,13 +198,18 @@ const RISE_MIN_UPRIGHT = -0.6; // torso up-axis z: a body hanging head-down off 
 const SIT_UPRIGHT = -0.3; // sitting back, the chest comes up at least to this torso up-axis z
 const RISE_FOOT_FLAT = 0.9; // sole up-axis z
 const RISE_FOOT_HEIGHT_M = 0.03;
+const STOOP_HEIGHT = 0.6; // pelvis above this × stance height, on both flat soles: still standing, only bent over
 
-/** Face up or on a side: roll onto the front, over the lower side (keys in roll-keys.ts). */
+/**
+ * Face up or on a side: roll onto the front, over the lower side (keys in roll-keys.ts). The last key ends the roll
+ * once the chest faces the canvas (GetupSpeed.rollDone); a key with `until` must first have rolled the body that far.
+ */
 function rollPhases(keys: readonly RollKey[]): Phase[] {
   return keys.map((k, i) => ({
     name: 'roll' as const, dur: k.dur, hold: k.hold, keep: [],
     set: (g: GetUp) => g.rollPose(i),
-    until: i === keys.length - 1 ? (_g: GetUp, s: Sense) => torsoFwdZ(s) < PRONE_FWD_Z : undefined,
+    until: i === keys.length - 1 ? (g: GetUp, s: Sense) => torsoFwdZ(s) < g.speed.rollDone
+      : k.until !== undefined ? (g: GetUp, s: Sense) => g.rollAngle(s) > k.until! * DEG : undefined,
   }));
 }
 const MIRRORED = new Set(['hip_roll', 'hip_yaw', 'shoulder_roll', 'shoulder_yaw', 'ankle_roll', 'waist_yaw']);
@@ -227,6 +247,8 @@ export class GetUp {
   private waistYaw = 0;
   private rollSide: Side = 'r';
   private resteps = 0;
+  /** This attempt already lay back from sitting (LIE_BACK runs once per attempt). */
+  private layBack = false;
   private sit: { pelvis: Vec3; rot: Mat3; torsoRot: Mat3; torsoPos: Vec3; hands: Record<Side, Vec3>; shift: Vec3 } | null = null;
 
   constructor(
@@ -295,7 +317,16 @@ export class GetUp {
       if (this.t < this.tun.brace) q.set(this.catchPose ?? this.brace);
       else q.set(qNow);
       this.still = quiet(s) ? this.still + dt : 0;
-      if ((this.t > this.tun.settleMin && this.still > this.speed.stillS) || this.t > SETTLE_MAX_S) this.begin(s, qNow);
+      if ((this.t > this.tun.settleMin && this.still > this.speed.stillS) || this.t > SETTLE_MAX_S) {
+        // Still on its feet, only doubled over (the trunk pitched past the fall line right after a rise): balance stands
+        // it straight from here; a lying get-up started on a standing body only threw it down (SAVATE, three face-down
+        // clips that "rolled over" at once, then a real fall).
+        if (this.clip?.planned && this.onItsFeet(s)) {
+          this.phase = 'up';
+          return true;
+        }
+        this.begin(s, qNow);
+      }
       return false;
     }
     if (this.phase === 'clip' && this.clip) {
@@ -312,22 +343,29 @@ export class GetUp {
       }
       return false;
     }
-    if (this.total > MAX_ATTEMPT_S || (this.seq !== this.roll && this.seq !== LEGS_OUT && torsoFwdZ(s) > FLIPPED_FWD_Z)) {
+    if (this.total > MAX_ATTEMPT_S || (this.seq !== this.roll && this.seq !== LEGS_OUT && this.seq !== LIE_BACK && torsoFwdZ(s) > FLIPPED_FWD_Z)) {
       this.resettle(); // stalled, or rolled back over: lie still and start again
       return false;
     }
+    // Rolling onto the front for the face-down clip: face down at any point of the roll, the clip takes it from there
+    // (its hands catch the body; waiting out the key let a body that rolled through roll on, or back).
+    if (this.seq === this.roll && this.speed.rollFirst > 0 && torsoFwdZ(s) < this.speed.rollDone) return this.afterRoll(s, q);
     const ph = this.seq[this.index];
     const [dur, hold] = this.timesOf(ph);
     ph.set(this, s);
     solveBody(this.cmd, this.geo, this.jm, this.qik, { pos: s.pelvisPos, rot: s.pelvisRot, shin: { l: s.feet.l.shinRot, r: s.feet.r.shinRot } });
     this.blend(ph, q, dur);
-    if (ph.until && this.t >= dur && ph.until(this, s)) return this.seq === this.roll ? this.afterRoll(s, q) : this.next(q);
-    if (this.seq === LEGS_OUT && this.t >= ph.dur + ph.hold) return this.choose(s, q);
+    // Lying out flat (LEGS_OUT) or back from sitting (LIE_BACK): then the push-up from the front, or the roll.
+    if ((this.seq === LEGS_OUT && this.t >= ph.dur + ph.hold) || (this.seq === LIE_BACK && this.t >= ph.dur && (this.t >= ph.dur + ph.hold || ph.until!(this, s)))) return this.choose(s, q);
+    if (ph.until && this.t >= dur && ph.until(this, s)) return this.seq === this.roll && this.index === this.seq.length - 1 ? this.afterRoll(s, q) : this.next(q);
     if (this.t < dur + hold) return false;
     if (ph.restep && !this.tun.strictRise) return this.next(q);
     if (ph.restep && this.resteps < MAX_RESTEPS && s.upright > RISE_MIN_UPRIGHT) return this.restep(s, q);
     if (ph.until && !ph.lenient) {
-      this.resettle(); // stuck: lie still, try again (the other way next time)
+      // Stuck: lie still, try again (the other way next time). A stuck roll lies in the brace again first: left in its
+      // key's shape (legs drawn up, arms overhead, trunk twisted) the next roll from there got nowhere (PYLON flat on its
+      // back on the balance engine, 31 rolls in a row until the count ran out); from the brace it starts as searched.
+      this.resettle(this.seq === this.roll);
       return false;
     }
     return this.next(q);
@@ -335,7 +373,10 @@ export class GetUp {
 
   /** Rolled onto the front: the face-down clip if there is one left (no settle: straight on), else the scripted push-up. */
   private afterRoll(s: Sense, q: Float64Array): false {
-    if (this.speed.rollFirst > 0 && this.clip?.begin(s, q, 'face_down')) {
+    // The clips start from one side's knee and hand: after a roll to the left the plain clip, to the right the mirrored one
+    // (rollMirror; PYLON after its roll, 50 recorded falls: the unmirrored 140_02 caught 21/21 left rolls, the mirrored 17/21).
+    const mirror = this.speed.rollMirror > 0 ? this.rollSide === 'r' : null;
+    if (this.speed.rollFirst > 0 && this.clip?.begin(s, q, 'face_down', this.speed.flatWaitS > 0 ? this.speed.rollFlat : undefined, mirror)) {
       this.enter('clip');
       return false;
     }
@@ -355,7 +396,7 @@ export class GetUp {
   /** Phase duration and hold for this design. */
   private timesOf(ph: Phase): [number, number] {
     if (ph.name === 'sit') return [this.tun.sitDur, this.tun.sitHold];
-    const k = this.seq === this.roll ? this.tun.rollSpeed * this.speed.roll : this.seq === LEGS_OUT ? 1 : this.tun.speed;
+    const k = this.seq === this.roll ? this.tun.rollSpeed * this.speed.roll : this.seq === LEGS_OUT || this.seq === LIE_BACK ? 1 : this.tun.speed;
     return [ph.dur * k, ph.hold * k];
   }
 
@@ -395,14 +436,16 @@ export class GetUp {
   private begin(s: Sense, qNow: Float64Array): void {
     this.attempts++;
     this.catchPose = null;
-    // On the back or a side: roll onto the front first (then the face-down clip), if asked and one is left.
-    const roll = this.speed.rollFirst > 0 && torsoFwdZ(s) >= PRONE_FWD_Z && !!this.clip?.canFaceDown();
+    // On the back or a side: roll onto the front first (then the face-down clip), if asked and one is left; with
+    // rollAfter, only once that many clip attempts of this knockdown have failed (the pop-up off the back is tried first).
+    const roll = this.speed.rollFirst > 0 && torsoFwdZ(s) >= PRONE_FWD_Z && !!this.clip?.canFaceDown() && (this.clip?.tries ?? 0) >= this.speed.rollAfter;
     if (!roll && this.clip?.begin(s, qNow)) {
       this.enter('clip');
       return;
     }
     this.total = 0;
     this.resteps = 0;
+    this.layBack = false;
     this.frame = null;
     this.sit = null;
     this.comAt.l = this.comAt.r = null;
@@ -412,17 +455,35 @@ export class GetUp {
 
   private choose(s: Sense, q: Float64Array): false {
     if (torsoFwdZ(s) < PRONE_FWD_Z) return this.startSequence(PRONE, q);
-    // Roll toward the lower side; alternate if the last roll that way got stuck.
+    const forFaceDown = this.speed.rollFirst > 0;
+    if (forFaceDown && this.speed.lieBack > 0 && s.upright > SITTING_UPRIGHT && !this.layBack) {
+      this.layBack = true;
+      return this.startSequence(LIE_BACK, q);
+    }
+    // Roll toward the lower side; alternate if the last roll that way got stuck, unless the body already lies well over
+    // on that side (past ON_SIDE): the other way round is over the back, and a stuck roll that left PYLON on its side
+    // then rolled it back the wrong way every other attempt (sparring, legacy path: 20-33 rolls until the count ran out).
     this.rollSide = s.torsoRot[7] > 0 ? 'r' : 'l';
-    if (this.attempts % 2 === 0) this.rollSide = this.rollSide === 'l' ? 'r' : 'l';
-    return this.startSequence(this.roll, q);
+    const onSide = Math.abs(Math.atan2(s.torsoRot[7], torsoFwdZ(s))) > ON_SIDE;
+    if (this.attempts % 2 === 0 && !onSide) this.rollSide = this.rollSide === 'l' ? 'r' : 'l';
+    // Near the fence, roll away from it (a roll carries the body a torso's width toward the side it goes over, and the
+    // face-down clip then pushes back from the hands): in sparring fights PYLON lying a metre from the cage rolled into
+    // it attempt after attempt. A roll over the left side moves the body along its left axis.
+    if (forFaceDown && Math.hypot(s.com[0], s.com[1]) > APOTHEM - FENCE_NEAR_M) {
+      this.rollSide = -(s.torsoRot[1] * s.com[0] + s.torsoRot[4] * s.com[1]) > 0 ? 'l' : 'r';
+    }
+    this.startSequence(this.roll, q);
+    // A body already on its side starts the roll further on (keys with `skip`).
+    const at = this.rollAngle(s);
+    while (this.index < this.rollKeys.length - 1 && this.rollKeys[this.index].skip !== undefined && at > this.rollKeys[this.index].skip! * DEG) this.index++;
+    return false;
   }
 
   /** A failed attempt: lie still again, without the stiff stance hold of the fall itself (snapped to the standing
-   *  pose from a squat or a sprawl, the legs fling the body up and over). */
-  private resettle(): void {
+   *  pose from a squat or a sprawl, the legs fling the body up and over). `brace`: with it (a stuck roll, below). */
+  private resettle(brace = false): void {
     this.enter('settle');
-    this.t = this.tun.brace;
+    this.t = brace ? 0 : this.tun.brace;
   }
 
   private enter(phase: GetUpPhase): void {
@@ -508,6 +569,19 @@ export class GetUp {
       arm.angles.roll = (side === 'l' ? 1 : -1) * 1.2;
       arm.angles.yaw = 0;
       arm.angles.elbow = -0.4;
+    }
+  }
+
+  /** Arms held where the phase found them. */
+  holdArms(): void {
+    for (const side of SIDES) {
+      const arm = this.cmd.arms[side];
+      const m = this.jm.arm[side];
+      arm.mode = 'joints';
+      arm.angles.pitch = this.start[m.pitch];
+      arm.angles.roll = this.start[m.roll];
+      arm.angles.yaw = this.start[m.yaw];
+      arm.angles.elbow = this.start[m.elbow];
     }
   }
 
@@ -615,11 +689,25 @@ export class GetUp {
     return s.upright > RISE_MIN_UPRIGHT && this.overFeet(s);
   }
 
+  /** Both soles flat on the canvas, the pelvis well up and the COM over the feet: a stoop, not a fall. */
+  onItsFeet(s: Sense): boolean {
+    for (const side of SIDES) {
+      const f = s.feet[side];
+      if (f.flat < RISE_FOOT_FLAT || f.height > RISE_FOOT_HEIGHT_M) return false;
+    }
+    return s.pelvisPos[2] > STOOP_HEIGHT * this.stance.pelvisHeight && this.overFeet(s);
+  }
+
   /** The COM, and where it is heading (the capture point), are inside the soles with a margin. */
   overFeet(s: Sense): boolean {
     const soles = convexHull([...footCorners(this.geo, 'l', solePlace(s, 'l')), ...footCorners(this.geo, 'r', solePlace(s, 'r'))]);
     const inside = (p: P2) => polygonDistance(soles, p).d <= -SIT_MARGIN_M;
     return inside([s.com[0], s.com[1]]) && inside([s.capture[0], s.capture[1]]);
+  }
+
+  /** How far the body has rolled toward the front over the side it rolls over: 0 face up, π/2 on that side, ±π face down. */
+  rollAngle(s: Sense): number {
+    return Math.atan2(this.rollSide === 'r' ? s.torsoRot[7] : -s.torsoRot[7], torsoFwdZ(s));
   }
 
   /** Joint targets for roll key `i` (accumulated over the earlier keys), mirrored for a roll to the left. */
